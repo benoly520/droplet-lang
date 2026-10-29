@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"droplet/internal/ast"
+	"droplet/internal/host"
 	"droplet/internal/token"
 )
 
@@ -316,6 +317,13 @@ func (c *checker) fillTypes() {
 					continue
 				}
 				vv := &Variant{Name: v.Name, Pos: v.Pos, FieldsByName: map[string]*Field{}}
+				if len(v.Fields) > 0 {
+					// 运行时的错误只保留 tag，字段无处安放；gen 以前也会拒。
+					// 在 checker 拦下来，「check ok」才能等于「能构建」。
+					c.errorf(v.Pos, "E1",
+						"D0 不支持带字段的变体 %s.%s：错误只按 tag 映射到状态码", t.Name, v.Name)
+					continue
+				}
 				for _, f := range v.Fields {
 					if _, dup := vv.FieldsByName[f.Name]; dup {
 						c.errorf(f.Pos, "E1", "字段 %s 在变体 %s 中重复", f.Name, v.Name)
@@ -369,8 +377,25 @@ func (c *checker) declareFns() {
 					continue
 				}
 				h.Methods[fn.Name] = sig
+				c.checkHostCap(n.Name, fn)
 			}
 		}
+	}
+}
+
+// checkHostCap 确认声明的能力运行时真的提供、且参数个数对得上。
+//
+// 能力表是 check 与 gen 共用的（internal/host）：只有 checker 也查一次，
+// `droplet check` 的 ok 才等于「能构建」（以前只能到 gen 才报 E-GEN）。
+func (c *checker) checkHostCap(group string, fn *ast.FnDecl) {
+	key := group + "." + fn.Name
+	cap, ok := host.Lookup(key)
+	if !ok {
+		c.errorf(fn.Pos, "E2", "运行时不提供能力 %s；D0 能力表见 internal/host/host.go", key)
+		return
+	}
+	if len(fn.Params) != cap.Arity {
+		c.errorf(fn.Pos, "E2", "能力 %s 需要 %d 个参数，声明了 %d", key, cap.Arity, len(fn.Params))
 	}
 }
 

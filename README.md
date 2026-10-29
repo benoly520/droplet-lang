@@ -8,7 +8,27 @@ More precisely: **the enabling layer for a generate-and-verify paradigm** — wh
 
 Droplet optimizes for one thing above all: **making AI mistakes impossible to keep silent, and making verification cheap enough that an agent will actually run it.** Not "a safer, more abstract, more elegant language" — a language where errors cannot stay hidden, checks finish in milliseconds, and the runtime is light enough to fit on the smallest production instance.
 
-> Status: **design draft v0.4, not implemented.** See [docs/SPEC.md](docs/SPEC.md) for the full proposal (Chinese).
+> Status: **D0 implemented, D1 not started.** A 91-line example service (contract + handler) compiles to a C11 binary that boots in under 2 MB RSS and speaks HTTP/1.1; 47 Go tests cover lexer, parser, checker, generator, host-capability table and contract export. The implemented language is a deliberate subset of the design — every gap carries a reason and a fill-in milestone in [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md). Full proposal: [docs/SPEC.md](docs/SPEC.md) (Chinese).
+
+## Quick start
+
+```sh
+mkdir -p .build
+(cd code/lang && go build -o ../../.build/droplet ./cmd/droplet)
+
+# smallest closed loop: source → C → binary → stdout
+.build/droplet build code/lang/examples/hello.dlt -o .build/hello && .build/hello   # world
+
+# the example service: contract + handler → binary → HTTP
+.build/droplet contract code/webapi/src/contract.dlt code/webapi/src/main.dlt      # JSON contract + variant tags
+.build/droplet build    code/webapi/src/contract.dlt code/webapi/src/main.dlt -o .build/blobd
+mkdir -p .build/data    # DP_ROOT must already exist, else the server exits at startup
+DP_ROOT=.build/data DP_TOKEN=t .build/blobd &
+curl -s -X PUT -H 'Authorization: Bearer t' --data 'hello' localhost:8787/v1/blob/demo
+curl -s        -H 'Authorization: Bearer t' localhost:8787/v1/blob/demo              # hello
+```
+
+`sh code/webapi/deploy/accept.sh` runs the 12 boundary checks (412 / 405 / 413 / 501 / ETag …); `sh code/webapi/deploy/soak.sh` is the long-running leak observation.
 
 ## Core idea
 
@@ -16,7 +36,7 @@ LLMs fail on server code mostly because correctness hides in places the model ca
 
 Droplet's answer is to make those facts **visible in the signature and checkable at compile time** — so an agent can find and fix its own mistakes instead of relying on a human reviewer to catch them.
 
-## Five hard constraints
+## Hard constraints
 
 | # | Constraint | Target |
 | --- | --- | --- |

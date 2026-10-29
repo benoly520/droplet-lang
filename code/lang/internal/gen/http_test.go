@@ -421,3 +421,23 @@ func waitCommit(t *testing.T, git, root string) {
 	}
 	t.Fatal("等了 10s 还是没有提交：防抖器或子进程没跑起来")
 }
+
+// TestMissingRootFailsFast 数据目录不存在时必须当场退出。
+// 否则服务能起来、每个写请求都 500，那是「启动成功、运行全废」的静默降级。
+func TestMissingRootFailsFast(t *testing.T) {
+	bin := build(t,
+		source{"contract.dlt", genSource(t, "../../../webapi/src/contract.dlt")},
+		source{"main.dlt", genSource(t, "../../../webapi/src/main.dlt")},
+	)
+
+	missing := filepath.Join(t.TempDir(), "nope")
+	cmd := exec.Command(bin)
+	cmd.Env = append(os.Environ(), "DP_PORT=18795", "DP_ROOT="+missing)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("数据目录缺失时不应启动成功，输出：%s", out)
+	}
+	if !strings.Contains(string(out), "数据目录不可用") {
+		t.Fatalf("退出原因应指明数据目录，得到：%s", out)
+	}
+}

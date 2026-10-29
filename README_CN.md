@@ -6,7 +6,27 @@
 
 Droplet 只优化一件事：**让 AI 的错误无法保持沉默，让验证便宜到代理真的会去跑。** 不是"造一门更安全、更抽象、更优雅的语言"，而是造一门错误藏不住、检查以毫秒计、运行时轻到能塞进最小生产实例的语言。
 
-> **状态：设计草案 v0.4，未实现。** 完整提案见 [docs/SPEC.md](docs/SPEC.md)（§0 范式定位、§5.9 设计模式与 OOP 取舍、§5.10 意图一等公民、§7.8 收敛判据、§9 生产资源预算、附录 C 设计包袱自审）。英文版见 [README.md](README.md)。
+> **状态：D0 已实现，D1 未开始。** 一个 91 行的示例服务（契约 + 入口）能编成 C11 二进制，以不到 2 MB 常驻内存启动并讲 HTTP/1.1；47 个 Go 测试覆盖 lexer、parser、checker、生成器、host 能力表与契约导出。已实现的语言是设计的**有偏子集**，每一处缺口都带原因与补齐里程碑，见 [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md)。完整提案见 [docs/SPEC.md](docs/SPEC.md)（§0 范式定位、§5.9 设计模式与 OOP 取舍、§5.10 意图一等公民、§7.8 收敛判据、§9 生产资源预算、附录 C 设计包袱自审）。英文版见 [README.md](README.md)。
+
+## 快速开始
+
+```sh
+mkdir -p .build
+(cd code/lang && go build -o ../../.build/droplet ./cmd/droplet)
+
+# 最小闭环：源码 → C → 二进制 → 标准输出
+.build/droplet build code/lang/examples/hello.dlt -o .build/hello && .build/hello   # world
+
+# 示例服务：契约 + 入口 → 二进制 → HTTP
+.build/droplet contract code/webapi/src/contract.dlt code/webapi/src/main.dlt      # JSON 契约 + 变体编号
+.build/droplet build    code/webapi/src/contract.dlt code/webapi/src/main.dlt -o .build/blobd
+mkdir -p .build/data    # DP_ROOT 必须先存在，否则服务启动即退出
+DP_ROOT=.build/data DP_TOKEN=t .build/blobd &
+curl -s -X PUT -H 'Authorization: Bearer t' --data 'hello' localhost:8787/v1/blob/demo
+curl -s        -H 'Authorization: Bearer t' localhost:8787/v1/blob/demo              # hello
+```
+
+`sh code/webapi/deploy/accept.sh` 跑 12 项边界验收（412 / 405 / 413 / 501 / ETag …）；`sh code/webapi/deploy/soak.sh` 是长时间泄漏观测。
 
 ## 核心想法
 
@@ -14,7 +34,7 @@ LLM 写服务端代码之所以出错，多数不是因为"写不出来"，而�
 
 Droplet 的对策是把这些事实变成**签名上可见、编译期可检查**的东西 —— 让代理能自己发现并修好错误，而不是依赖人来兜。
 
-## 五条硬约束
+## 硬约束
 
 | # | 约束 | 目标值 |
 | --- | --- | --- |

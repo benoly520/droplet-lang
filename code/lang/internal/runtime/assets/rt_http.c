@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -535,6 +536,22 @@ int dp_serve(dp_handler h, const dp_cfg* cfg) {
   signal(SIGPIPE, SIG_IGN);
   /* commit 子进程只 fork 不 wait，忽略 SIGCHLD 让内核自动收割，不留僵尸 */
   signal(SIGCHLD, SIG_IGN);
+
+  /* 数据目录不存在就别开机：否则服务能起来、每个写请求都 500，
+   * 那就是「启动成功、运行全废」的静默降级。宁可当场失败。 */
+  char rootbuf[4096];
+  if (cfg->root.n == 0u || cfg->root.n >= sizeof rootbuf) {
+    fprintf(stderr, "droplet: DP_ROOT 长度 %zu 不在 1..%zu\n",
+            (size_t)cfg->root.n, sizeof rootbuf - 1u);
+    return 1;
+  }
+  memcpy(rootbuf, cfg->root.p, cfg->root.n);
+  rootbuf[cfg->root.n] = '\0';
+  struct stat st;
+  if (stat(rootbuf, &st) != 0 || !S_ISDIR(st.st_mode)) {
+    fprintf(stderr, "droplet: 数据目录不可用：%s（先 mkdir -p）\n", rootbuf);
+    return 1;
+  }
 
   int s = socket(AF_INET, SOCK_STREAM, 0);
   if (s < 0) {

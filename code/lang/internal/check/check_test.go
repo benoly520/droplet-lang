@@ -80,10 +80,10 @@ func TestErrorVariantTags(t *testing.T) {
 // ---------- 反向：每类错误各命中一次，且不级联 ----------
 
 const errPrelude = `
-host Fs {
-  fn read(k: str) -> bytes | Bad
-}
 type Bad = Nope
+host BlobFs {
+  fn read(root: str, key: str) -> bytes | Bad
+}
 `
 
 func TestUndefinedType(t *testing.T) {
@@ -150,10 +150,10 @@ entry E {
 func TestPropagateWithoutUnionReturn(t *testing.T) {
 	res := checkSrc(t, errPrelude+`
 entry E {
-  fn f(fs: Fs) -> bytes
+  fn f(fs: BlobFs) -> bytes
     invariant "无"
   {
-    let b = fs.read("k")!
+    let b = fs.read("r", "k")!
     return b
   }
 }`)
@@ -165,10 +165,10 @@ func TestPropagateWithMissingError(t *testing.T) {
 type Other = Oops
 
 entry E {
-  fn f(fs: Fs) -> bytes | Other
+  fn f(fs: BlobFs) -> bytes | Other
     invariant "无"
   {
-    let b = fs.read("k")!
+    let b = fs.read("r", "k")!
     return b
   }
 }`)
@@ -178,10 +178,10 @@ entry E {
 func TestDroppedError(t *testing.T) {
 	res := checkSrc(t, errPrelude+`
 entry E {
-  fn f(fs: Fs) -> Unit
+  fn f(fs: BlobFs) -> Unit
     invariant "无"
   {
-    fs.read("k")
+    fs.read("r", "k")
     return Unit
   }
 }`)
@@ -198,13 +198,56 @@ func TestEntryWithoutIntent(t *testing.T) {
 }
 
 func TestBoundaryUnserializable(t *testing.T) {
-	res := checkSrc(t, `host H { fn x() -> Unit }
+	// 用真实能力（Sys.log）做参数，免得跟 E2「运行时不提供能力」撞在一起。
+	res := checkSrc(t, `host Sys { fn log(msg: str) -> Unit }
 
 boundary B @v1 {
-  m() -> H
+  m() -> Sys
     invariant "返回 host 不能跨边界"
 }`)
 	expectOne(t, res, "E3", "不可跨边界序列化")
+}
+
+func TestHostCapabilityNotInRuntime(t *testing.T) {
+	res := checkSrc(t, `host Sys { fn nope(x: u64) -> Unit }
+
+entry E {
+  fn f(sys: Sys) -> Unit
+    invariant "无"
+  {
+    sys.nope(1)
+    return Unit
+  }
+}`)
+	expectOne(t, res, "E2", "运行时不提供能力 Sys.nope")
+}
+
+func TestHostCapabilityArity(t *testing.T) {
+	// 能力名对、参数个数不对：声明了 2 个，运行时原型是 1 个。
+	res := checkSrc(t, `host Sys { fn log(a: str, b: str) -> Unit }
+
+entry E {
+  fn f(sys: Sys) -> Unit
+    invariant "无"
+  {
+    sys.log("a", "b")
+    return Unit
+  }
+}`)
+	expectOne(t, res, "E2", "需要 1 个参数，声明了 2")
+}
+
+func TestVariantWithFieldsRejected(t *testing.T) {
+	res := checkSrc(t, `type Bad = Err { code: u64 }
+
+entry E {
+  fn f() -> u64 | Bad
+    invariant "无"
+  {
+    return 1
+  }
+}`)
+	expectOne(t, res, "E1", "不支持带字段的变体 Bad.Err")
 }
 
 func TestNoCascade(t *testing.T) {

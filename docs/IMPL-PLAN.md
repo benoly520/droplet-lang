@@ -20,8 +20,8 @@ code/webapi    用 .dlt 写的示例服务（boundary / entry / 路由）
 
 ```
 ./droplet build code/webapi/src/contract.dlt code/webapi/src/main.dlt -o blobd
-AUTH_TOKEN=dev DATA_DIR=/tmp/blobd ./blobd
-curl -H 'Authorization: Bearer dev' 'localhost:8788/v1/blob/demo'
+DP_TOKEN=dev DP_ROOT=/tmp/blobd ./blobd
+curl -H 'Authorization: Bearer dev' 'localhost:8787/v1/blob/demo'
 ```
 
 ### 1.2 明确不做（D0 范围外）
@@ -36,7 +36,8 @@ curl -H 'Authorization: Bearer dev' 'localhost:8788/v1/blob/demo'
 | `boundary` 生成路由 | 第一版路由手写，boundary 只导出契约 JSON | M3 |
 | V1/V2 对照实验（状态机 / AST diff） | SPEC 附录 C 的待验项，与实现解耦 | 独立立项 |
 
-> 这份「不做」清单是对 SPEC 的**显式偏差登记**，不是遗漏。
+> 这份「不做」清单是对 SPEC 的**显式偏差登记**，不是遗漏。更完整的偏差（含运行时、
+> 工具链的缺口、原因、补齐时机与可执行复核命令）在 [`docs/D0-DEVIATIONS.md`](D0-DEVIATIONS.md)。
 
 ## 2. 验收契约：哑存储 Web API
 
@@ -53,7 +54,7 @@ curl -H 'Authorization: Bearer dev' 'localhost:8788/v1/blob/demo'
 
 约束：
 
-- 所有 `/v1/*` 需 `Authorization: Bearer <AUTH_TOKEN>`；`/health` 不校验，供探活用；
+- 所有 `/v1/*` 需 `Authorization: Bearer <DP_TOKEN>`；`/health` 不校验，供探活用；
 - `key` 只允许 `[a-z0-9_-]{1,32}`，其余 400（**这是安全边界**：防目录穿越，
   `../evil`、空串、超长、含 `/` 全部拒绝）；
 - 路由解析规则：`path` 为去掉 query 的路径。`/v1/<group>/<key>` 按**第三个斜杠**拆，
@@ -406,15 +407,16 @@ int main(void) {
 
 ### 5.4 语言子集与生成期的已知限制
 
-这些限制都**显式报错**（带行列号），不允许静默降级：
+这些限制都**显式报错**（带行列号），不允许静默降级。报错时机统一在 `check`
+阶段：`droplet check` 说 ok 就等价于能构建（能力表见 `internal/host`，与 gen 共用）。
 
 | 限制 | 现状 | 补齐时机 |
 | --- | --- | --- |
-| `env` 声明 | 语法能解析，checker 报 `E1`「不在 D0 子集」；配置现走环境变量（§6），`contract` 里的 env 段恒为空 | D1 按 SPEC §5.7 实现 |
+| `env` 声明 | 语法能解析，checker 报 `E1`「不在 D0 子集」；配置现走环境变量（§6），`contract` 也不导出 env 分组（字段已删） | D1 按 SPEC §5.7 实现 |
 | `match` 匹配不到有意义的变体 | 语法与 codegen 都对（分支之间必须有逗号），但 D0 没有构造 sum 值的途径：裸变体名被 `E1` 拒、`{...}` 只收 record，因此只能匹配到零值 | D1 补变体构造语法 |
-| 带字段的错误变体 | 报 `E-GEN`；错误只保留 tag | 确有需要时再扩 |
+| 带字段的错误变体 | 报 `E1`；错误只保留 tag（运行时按 tag 映射状态码，字段无处安放） | 确有需要时再扩 |
 | record 字段按值嵌入 | 被引用类型必须在源文件里先出现；循环引用不支持 | D1 再考虑指针化 |
-| host 能力白名单 | `Sys` / `BlobFs` / `Versioning` 共 10 个能力已全部接通；表外的能力逐个报 `E-GEN` 并列出位置 | 无（新增能力时扩表） |
+| host 能力白名单 | `Sys` / `BlobFs` / `Versioning` 共 10 个能力已全部接通；表外能力与参数个数不符在 `check` 就报 `E2`（表在 `internal/host`，与 gen 共用） | 无（新增能力时扩表 + `rt.h` 加原型） |
 | 无 `entry` 的程序 | 生成立即返回 0 的 `main`，并引用全部函数避免 `-Wunused-function` | 无需补 |
 | `If-Match` / 412 归运行时 | checker 不接受裸变体名（`return Conflict` 报 `E1`），handler 表达不了“条件失败”，412 由运行时在进 handler 前判定 | 语言能表达条件失败时，换成错误变体参与 |
 | 提交是 leading-edge 防抖 | 窗口内的后续写不单独提交，要等下一次写才带上；若进程之后再无写入，最后一次写只落盘、不进历史 | 要“每次写都进历史”就把 `DP_COMMIT_DEBOUNCE` 设 0 |
@@ -519,6 +521,8 @@ void dp_ver_commit_soon(dp_str root, dp_str key);
 6. **配置全部走环境变量**：`DP_BIND`（默认 `0.0.0.0`）/ `DP_PORT`（8787）/ `DP_ROOT`
    （`./data`）/ `DP_TOKEN`（空 = 不校验）/ `DP_MAX_BODY`（8 MiB）/ `DP_COMMIT_CMD`
    （空 = 不提交）/ `DP_COMMIT_DEBOUNCE`（60）/ `DP_SNAPSHOT_KEEP`（8）。
+   `DP_ROOT` 必须是**已存在**的目录：启动时 `stat` 一次，不满足就打印原因并退出——
+   不能起一个每个写请求都 500 的服务（`TestMissingRootFailsFast` 固定这一点）。
 7. **RSS 基线**（本机，`cc -std=c11 -O2`，产物 35 KB、其中 text+data 19.7 KB）：空转 1.83 MB；
    200 轮小 `PUT`+`GET` 峰值 1.91 MB；8 MB `PUT` 峰值 9.98 MB、8 MB `GET` 峰值 10.10 MB
    （arena 按 body 上限预留，请求结束即释放给 allocator，不一定归还 OS）。
@@ -591,6 +595,7 @@ droplet-lang/code/lang/
   internal/ast/ast.go
   internal/parse/parse.go
   internal/check/check.go        # 两遍式检查，导出类型/Tag/Sigs 供 codegen 复用
+  internal/host/host.go          # host 能力表：名字 + 参数个数 + 生成 C 调用的方式
   internal/dump/dump.go          # AST → JSON（M0 的验收出口）
   internal/gen/c.go              # AST → C11
   internal/gen/http_test.go      # 端到端：编出服务、拉进程、发真请求
@@ -602,6 +607,8 @@ droplet-lang/code/lang/
 droplet-lang/code/webapi/
   src/{contract.dlt,main.dlt}
   deploy/{blobd.service,blobd.env.example,accept.sh,soak.sh}
+droplet-lang/docs/
+  SPEC.md  IMPL-PLAN.md  D0-DEVIATIONS.md   # 设计 / 实现计划 / 已实现与设计的偏差登记
 ```
 
 构建：`go build ./cmd/droplet`。运行时由 `go:embed` 收进编译器，`droplet build` 把它释放到
@@ -630,6 +637,8 @@ sudo systemctl daemon-reload && sudo systemctl enable --now blobd
 要点：
 
 - 对外只暴露反代：`DP_BIND=127.0.0.1`，行级访问控制交给 nginx / caddy；
+- 数据目录必须**先存在**（`install -d` 那一步）：服务启动时 `stat` 一次，缺目录直接退出，
+  不会起一个每个写请求都 500 的进程；
 - `DP_TOKEN` 必填，否则 `/v1/*` 对所有人开放（`/health` 不需要）；
 - 升级二进制：`systemctl stop blobd` → 拷新二进制 → `systemctl start blobd`；
   数据目录（含 `.snapshots`）不需迁移；
@@ -645,7 +654,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now blobd
 | M1 | checker（E0/E1/E3/E11）+ `check` | 三个样例 0 错误；11 个反例各自命中预期 E 码且不级联 | 4–6 天 | **已完成** 2026-10-30（14 个 check 测试绿，错误按行列排序输出） |
 | M2 | codegen + `hello.dlt` 跑通 | `droplet build examples/hello.dlt && ./hello` 打印 `world` | 5–8 天 | **已完成** 2026-10-30（4 个 gen 测试绿，含 `-Werror` 端到端；30 个测试全过） |
 | M3 | `rt.c`（HTTP + blob + hash + spawn）+ `main.dlt` 编译 | `curl` 五个接口全通；412 / 404 / 400 / 413 各自命中；RSS 有基线数字 | 1.5–2 周 | **已完成** 2026-10-30（11 个 HTTP 端到端子测试绿，412/404/400/413/405 均命中；RSS 空转 1.83 MB、8 MB `PUT` 峰值 9.98 MB；`droplet contract` 可导出契约 JSON） |
-| M4 | 示例服务部署 + 契约验收 | 五接口 + 412 + 快照 + 一次版本化提交全通；连续运行 3 天无异常 | 2–3 天 | **进行中** 2026-10-30（12 项实况验收全通；长稳脚本 `soak.sh` 就位，45 s 高频替代跑 602 轮 0 失败；快照已改轮转 + 带 `seq`；§8.1 审计完成；**连续 3 天长稳未跑**） |
+| M4 | 示例服务部署 + 契约验收 | 五接口 + 412 + 快照 + 一次版本化提交全通；连续运行 3 天无异常 | 2–3 天 | **进行中** 2026-10-30（12 项实况验收全通；长稳脚本 `soak.sh` 就位，45 s 高频替代跑 602 轮 0 失败；快照已改轮转 + 带 `seq`；§8.1 审计完成，`check` 与 `build` 已对齐（`E2`/`E1`）；**连续 3 天长稳未跑**） |
 
 M3 的内部拆分（按风险排序，实际按此执行）：
 
@@ -657,7 +666,8 @@ M3 的内部拆分（按风险排序，实际按此执行）：
 
 M3 除了运行时，还交了两件不在原判据里但契约先行需要的东西：
 
-- `droplet contract` 动词：把 boundary / env / 函数签名 / tag 表导成 JSON，供消费方生成客户端；
+- `droplet contract` 动词：把 boundary / 函数签名 / tag 表导成 JSON，供消费方生成客户端
+  （`env` 不导出：checker 已禁止 env 声明，见 `docs/D0-DEVIATIONS.md`）；
 - `internal/gen/http_test.go`：把手工 `curl` 验证固化成能重跑的端到端测试（编译 → 拉进程 →
   发真请求 → 断言状态码与 body）。
 
@@ -692,6 +702,9 @@ M4 剩下的只有长稳观测，跑法：每 30 s 一次 `PUT`+`GET`，每小�
 0 失败，RSS 1976 → 1984 KB（斜率 0.6 KB/h），全程 1 线程无残留子进程。**这只是 45 s
 的高频替代，不等于 3 天**：真需在常开环境上跑默认口径（30 s × 72 h = 8640 轮）。
 
+快照轮转也在同一口径下验过：390 轮（8 key 各 48 次写）后 `.snapshots/` 恰好 64 个文件
+（8 key × keep 8），不再线性增长；文件名带 `seq`，同秒多次写不互相覆盖。
+
 ### 8.1 M4 收尾审计（附录判据的执行结果）
 
 附录那条「仍从未被 `.dlt` 用到的特性说明它该删」在 M4 末尾逐个跑了一遍：
@@ -703,8 +716,26 @@ M4 剩下的只有长稳观测，跑法：每 30 s 一次 `PUT`+`GET`，每小�
 | `Sys.getenv` | 能力表 / `rt.h` / `rt_core.c` / `contract.dlt` 四处齐全，**零调用点** | **已删**：`dp_sys_getenv` 23 行 + 能力项 + 契约声明 + `EnvError` |
 | `Sys.now_unix` | `.dlt` 无人调用，但 `rt_blob.c` 的快照名在用 | 保留；`rt.h` 注释改为「仓内唯一调用点是快照文件名的时间戳」 |
 | `true`/`false`、`!=` `<` `<=` `>` `>=` `&&` `||` `+` `-` `*` `/` `%` | 均可达，三个 `.dlt` 都没用到 | 属例子覆盖不足，不是死代码；不为它们硬凑样例 |
+| 契约 JSON 的 `envs` 分组 | checker 拒绝 env 后 `contract` 走不到导出那一步，字段永远为空 | **已删** `Doc.Envs` / `Env` / `envOf` 与对应断言 |
 
 删完后的能力表是 10 个（`Sys` 4 + `BlobFs` 5 + `Versioning` 1）。
+
+审计还撞出一条跨阶段的系统性问题：**`check` 说 ok 而 `build` 报 `E-GEN`**。表外能力
+（`sys.nope`）、带字段变体（`Err { code: u64 }`）都是这个形状，根因只有一个——能力表
+`hostCaps` 长在 `internal/gen/c.go` 里，checker 看不见它。
+
+**已修（2026-10-30）**：能力表搬到 `internal/host/host.go`（名字 + 参数个数 + 生成 C 调用的
+方式），check 与 gen 共用一份：
+
+- 表外能力、参数个数不符 → `check` 报 `E2`（"运行时不提供能力 Sys.nope"）；
+- 带字段的变体 → `check` 报 `E1`（"错误只按 tag 映射到状态码"）；
+- `internal/host/host_test.go` 锁住「能力表每一项都能在 rt.h 找到原型」与「恰好 10 项」。
+
+于是 `droplet check` 的 `ok` 现在等价于「能构建」。gen 里的同名检查降为防御性兜底（gen 也可
+被测试直接调用）。
+
+全部偏差（含原因与补齐里程碑）集中在 [`docs/D0-DEVIATIONS.md`](D0-DEVIATIONS.md)，
+每一条都附了可执行的复核命令。
 
 ## 9. 风险与回退
 
@@ -715,7 +746,8 @@ M4 剩下的只有长稳观测，跑法：每 30 s 一次 `PUT`+`GET`，每小�
 | `!` 的 tag 对齐复杂化 | codegen 出现映射表而非复制 | 简化：禁止跨函数传播，`!` 只在 entry 内使用 |
 | RSS 远超 3 MB | M3 基线 > 8 MB | 记录实际值，按 SPEC §9 回砍（先砍 keep-alive 缓冲与日志） |
 | 快照无限累积 | 按 `soak.sh` 默认口径跑 72 h，`.snapshots/` 会累积约 8640 个文件（每 30 s 一次写） | 已采纳：每 key 只留最近 `DP_SNAPSHOT_KEEP`（默认 8）；要全量历史就设 0 |
-| 语言子集被需求拉动膨胀 | 出现「再加一个语法就能写」的请求 | 记入 `docs/D0-DEVIATIONS.md`，M4 之后再议 |
+| 语言子集被需求拉动膨胀 | 出现「再加一个语法就能写」的请求 | 记入 `docs/D0-DEVIATIONS.md`（2026-10-30 已建立），M4 之后再议 |
+| `check` 放行而 `build` 报 `E-GEN` | 代理把 `droplet check` 当作唯一 gate，把不可构建的候选当成通过 | **已修**：能力表搬到 `internal/host`，`check` 报 `E2`/`E1`；gen 只留兜底 |
 | C 后端迟迟跑不通 | M2 超过 2 周 | 暂停语言进度，先用既有实现顶着（可用性优先） |
 
 M3 实测的 RSS：空服务（无请求）1.83 MB，符合 SPEC §9 的 H4（≤ 3 MB）；8 MB body 的 `PUT`
@@ -725,7 +757,7 @@ M3 实测的 RSS：空服务（无请求）1.83 MB，符合 SPEC §9 的 H4（�
 ## 10. 与消费方的接入约定
 
 1. **服务只暴露 HTTP 契约**，消费方不需要知道 Droplet 存在，也不需要装任何 Droplet 工具；
-2. 消费方只配置两项：`base URL` 与 `AUTH_TOKEN`；
+2. 消费方只配置两项：`base URL` 与服务端侧的 `DP_TOKEN`（消费方自己的配置名无所谓）；
 3. 服务端二进制独立部署，是否放进消费方仓库由部署方式决定（Docker / systemd / 直接跑均可）；
 4. 替换判据：契约测试全通 + 连续运行 3 天无异常，才允许下线旧实现；
 5. 旧实现可保留为对照，便于在 412 / 413 / 超时等边界行为上逐项比对。

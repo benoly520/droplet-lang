@@ -10,6 +10,7 @@ import (
 
 	"droplet/internal/ast"
 	"droplet/internal/check"
+	"droplet/internal/host"
 	"droplet/internal/token"
 )
 
@@ -469,12 +470,6 @@ func (g *gen) call(n *ast.Call) string {
 	return tmp
 }
 
-// hostCap 描述一个能力如何落到运行时调用。errv 非空时把错误码写入该变量。
-type hostCap struct {
-	arity int
-	gen   func(argv []string, errv string) string
-}
-
 // hostWraps 把运行时返回值转成语言层面的类型（如 u64 → ETag）。
 var hostWraps = map[string]func(expr string, okType *check.Type) string{
 	"BlobFs.write": wrapETag,
@@ -486,31 +481,6 @@ func wrapETag(expr string, okType *check.Type) string {
 		return "((dp_T_ETag){ .m_hash = " + expr + " })"
 	}
 	return expr
-}
-
-var hostCaps = map[string]hostCap{
-	"Sys.log":      {1, func(a []string, _ string) string { return "dp_sys_log(" + a[0] + ")" }},
-	"Sys.hash64":   {1, func(a []string, _ string) string { return "dp_sys_hash64(" + a[0] + ")" }},
-	"Sys.u64_str":  {1, func(a []string, _ string) string { return "dp_sys_u64_str(a, " + a[0] + ")" }},
-	"Sys.now_unix": {0, func(a []string, _ string) string { return "dp_sys_now_unix()" }},
-	"BlobFs.read": {2, func(a []string, e string) string {
-		return "dp_blob_read(a, " + a[0] + ", " + a[1] + ", &" + e + ")"
-	}},
-	"BlobFs.write": {3, func(a []string, e string) string {
-		return "dp_blob_write(a, " + a[0] + ", " + a[1] + ", " + a[2] + ", &" + e + ")"
-	}},
-	"BlobFs.backup": {2, func(a []string, _ string) string {
-		return "dp_blob_backup(a, " + a[0] + ", " + a[1] + ")"
-	}},
-	"BlobFs.create": {2, func(a []string, e string) string {
-		return "dp_blob_create(a, " + a[0] + ", " + a[1] + ", &" + e + ")"
-	}},
-	"BlobFs.list_json": {1, func(a []string, e string) string {
-		return "dp_blob_list(a, " + a[0] + ", &" + e + ")"
-	}},
-	"Versioning.commit_soon": {2, func(a []string, _ string) string {
-		return "dp_ver_commit_soon(" + a[0] + ", " + a[1] + ")"
-	}},
 }
 
 // hostCall 把能力调用内联成运行时函数，参数顺序按运行时原型调整。
@@ -525,13 +495,15 @@ func (g *gen) hostCall(sel *ast.Select, args []ast.Expr) string {
 	}
 	key := ht.Name + "." + sel.Field
 
-	hc, ok := hostCaps[key]
+	// 能力表与 check 共用一处（internal/host）：这里拿不到表项，说明
+	// checker 放行了运行时并不提供的能力——防御性兜底，正常路径下 check 已拦下。
+	hc, ok := host.Lookup(key)
 	if !ok {
 		g.failf(sel.Pos, "运行时不提供能力 %s", key)
 		return "0"
 	}
-	if len(args) != hc.arity {
-		g.failf(sel.Pos, "能力 %s 需要 %d 个参数，得到 %d", key, hc.arity, len(args))
+	if len(args) != hc.Arity {
+		g.failf(sel.Pos, "能力 %s 需要 %d 个参数，得到 %d", key, hc.Arity, len(args))
 		return "0"
 	}
 
@@ -542,13 +514,13 @@ func (g *gen) hostCall(sel *ast.Select, args []ast.Expr) string {
 
 	sig := ht.Methods[sel.Field]
 	if sig == nil || sig.Ret == nil || sig.Ret.Kind != check.KUnion {
-		return hc.gen(argv, "")
+		return hc.Emit(argv, "")
 	}
 
 	okType := sig.Ret.Items[0]
 	errTmp := g.newTmp()
 	tmp := g.newTmp()
-	value := hc.gen(argv, errTmp)
+	value := hc.Emit(argv, errTmp)
 	if wrap, ok := hostWraps[key]; ok {
 		value = wrap(value, okType)
 	}
