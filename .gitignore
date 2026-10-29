@@ -1,0 +1,16 @@
+# 编译产物
+/code/lang/droplet
+/code/lang/blobd
+a.out
+
+# 本地构建临时目录（沙盒里 /tmp 不可写，TMPDIR 指向这里）
+/.build/
+
+# 生成的 C 中间文件
+/code/lang/gen/
+*.c.generated
+
+# Go 测试与覆盖率
+*.test
+*.out
+/code/lang/coverage.html

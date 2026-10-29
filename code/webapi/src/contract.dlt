@@ -1,0 +1,50 @@
+// 通用哑存储 Web API 契约：服务端只做字节读写，不解构 payload。
+type ETag {
+  hash: u64
+}
+
+type ApiError = NotFound | BadRequest | IoError | Conflict
+
+type Request {
+  method: str,
+  path: str,
+  key: str,
+  body: bytes,
+  if_match: str
+}
+
+type Response {
+  status: u64,
+  body: bytes,
+  etag: str
+}
+
+host BlobFs {
+  fn read(root: str, key: str) -> bytes | ApiError
+  fn write(root: str, key: str, body: bytes) -> ETag | ApiError
+  fn backup(root: str, key: str) -> Unit
+  fn create(root: str, key: str) -> bool | ApiError
+  fn list_json(root: str) -> bytes | ApiError
+}
+
+host Versioning {
+  fn commit_soon(root: str, key: str) -> Unit
+}
+
+host Sys {
+  fn now_unix() -> i64
+  fn hash64(data: bytes) -> u64
+  fn u64_str(x: u64) -> str
+  fn log(msg: str) -> Unit
+}
+
+boundary BlobApi @v1 {
+  get(key: str) -> bytes with idempotency
+    invariant "同一 key 的 GET 字节等于最近一次成功 PUT 的字节"
+
+  put(key: str, body: bytes) -> ETag with idempotency
+    invariant "PUT 前必须存在上一版本快照"
+
+  list() -> bytes with idempotency
+    invariant "清单来自目录，不来自任何注册表文件"
+}

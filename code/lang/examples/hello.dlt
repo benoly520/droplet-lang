@@ -1,0 +1,14 @@
+// 最小闭环：验证 lexer + parser + checker + codegen + cc 五层都能跑通。
+// 判据：droplet build examples/hello.dlt && ./hello 打印 world。
+host Sys {
+  fn log(msg: str) -> Unit
+}
+
+entry Demo {
+  fn greet(sys: Sys) -> Unit
+    invariant "greet 向标准输出写一行 world"
+  {
+    sys.log("world")
+    return Unit
+  }
+}

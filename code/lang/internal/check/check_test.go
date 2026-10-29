@@ -1,0 +1,263 @@
+package check
+
+import (
+	"os"
+	"strings"
+	"testing"
+
+	"droplet/internal/ast"
+	"droplet/internal/parse"
+)
+
+func checkSrc(t *testing.T, src string) *Result {
+	t.Helper()
+	prog, err := parse.File("t.dlt", src)
+	if err != nil {
+		t.Fatalf("解析失败：%v", err)
+	}
+	return Program(prog)
+}
+
+func checkFiles(t *testing.T, files ...string) *Result {
+	t.Helper()
+	prog := &ast.Program{File: "<unit>"}
+	for _, f := range files {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("读取 %s 失败：%v", f, err)
+		}
+		p, err := parse.File(f, string(src))
+		if err != nil {
+			t.Fatalf("解析 %s 失败：%v", f, err)
+		}
+		prog.Items = append(prog.Items, p.Items...)
+	}
+	return Program(prog)
+}
+
+// ---------- 正向：三个样例必须零错误 ----------
+
+func TestHelloPasses(t *testing.T) {
+	res := checkFiles(t, "../../examples/hello.dlt")
+	if len(res.Errors) != 0 {
+		t.Fatalf("hello.dlt 应有 0 个错误，实际：%v", res.Errors)
+	}
+	if res.EntryPoint != "greet" {
+		t.Errorf("入口为 %q，期望 greet", res.EntryPoint)
+	}
+}
+
+func TestWebapiPasses(t *testing.T) {
+	res := checkFiles(t,
+		"../../../webapi/src/contract.dlt",
+		"../../../webapi/src/main.dlt")
+	if len(res.Errors) != 0 {
+		t.Fatalf("示例服务应有 0 个错误，实际：%v", res.Errors)
+	}
+	if res.EntryPoint != "handle" {
+		t.Errorf("入口为 %q，期望 handle", res.EntryPoint)
+	}
+}
+
+// ---------- tag 编号 ----------
+
+func TestErrorVariantTags(t *testing.T) {
+	res := checkFiles(t,
+		"../../../webapi/src/contract.dlt",
+		"../../../webapi/src/main.dlt")
+	if res.Tags["<ok>"] != 0 {
+		t.Errorf("成功 tag 应为 0，得到 %d", res.Tags["<ok>"])
+	}
+	// ApiError 的四个变体进入过 `!` 传播，应从 100 起顺序编号。
+	want := map[string]int{"NotFound": 100, "BadRequest": 101, "IoError": 102, "Conflict": 103}
+	for name, tag := range want {
+		if res.Tags[name] != tag {
+			t.Errorf("%s 的 tag 为 %d，期望 %d", name, res.Tags[name], tag)
+		}
+	}
+}
+
+// ---------- 反向：每类错误各命中一次，且不级联 ----------
+
+const errPrelude = `
+host Fs {
+  fn read(k: str) -> bytes | Bad
+}
+type Bad = Nope
+`
+
+func TestUndefinedType(t *testing.T) {
+	res := checkSrc(t, `type A { x: Nope }`)
+	expectOne(t, res, "E1", "未定义类型")
+}
+
+func TestUndefinedFunction(t *testing.T) {
+	res := checkSrc(t, `entry E {
+  fn f() -> Unit
+    invariant "无"
+  {
+    nope()
+    return Unit
+  }
+}`)
+	expectOne(t, res, "E1", "未定义函数")
+}
+
+func TestWrongArgCount(t *testing.T) {
+	res := checkSrc(t, `fn g(a: u64) -> Unit { return Unit }
+
+entry E {
+  fn f() -> Unit
+    invariant "无"
+  {
+    g()
+    return Unit
+  }
+}`)
+	expectOne(t, res, "E1", "需要 1 个参数")
+}
+
+func TestMissingField(t *testing.T) {
+	res := checkSrc(t, `type R { a: u64, b: u64 }
+
+entry E {
+  fn f() -> Unit
+    invariant "无"
+  {
+    let r = R{a: 1}
+    return Unit
+  }
+}`)
+	expectOne(t, res, "E1", "缺少字段 b")
+}
+
+func TestMatchNotExhaustive(t *testing.T) {
+	res := checkSrc(t, `type S = A | B
+
+entry E {
+  fn f(x: S) -> Unit
+    invariant "无"
+  {
+    match x {
+      A => Unit
+    }
+    return Unit
+  }
+}`)
+	expectOne(t, res, "E1", "未穷尽")
+}
+
+func TestPropagateWithoutUnionReturn(t *testing.T) {
+	res := checkSrc(t, errPrelude+`
+entry E {
+  fn f(fs: Fs) -> bytes
+    invariant "无"
+  {
+    let b = fs.read("k")!
+    return b
+  }
+}`)
+	expectOne(t, res, "E1", "不是联合")
+}
+
+func TestPropagateWithMissingError(t *testing.T) {
+	res := checkSrc(t, errPrelude+`
+type Other = Oops
+
+entry E {
+  fn f(fs: Fs) -> bytes | Other
+    invariant "无"
+  {
+    let b = fs.read("k")!
+    return b
+  }
+}`)
+	expectOne(t, res, "E1", "缺少错误")
+}
+
+func TestDroppedError(t *testing.T) {
+	res := checkSrc(t, errPrelude+`
+entry E {
+  fn f(fs: Fs) -> Unit
+    invariant "无"
+  {
+    fs.read("k")
+    return Unit
+  }
+}`)
+	expectOne(t, res, "E1", "被静默丢弃")
+}
+
+func TestEntryWithoutIntent(t *testing.T) {
+	res := checkSrc(t, `entry E {
+  fn f() -> Unit {
+    return Unit
+  }
+}`)
+	expectOne(t, res, "E11", "缺少 example 或 invariant")
+}
+
+func TestBoundaryUnserializable(t *testing.T) {
+	res := checkSrc(t, `host H { fn x() -> Unit }
+
+boundary B @v1 {
+  m() -> H
+    invariant "返回 host 不能跨边界"
+}`)
+	expectOne(t, res, "E3", "不可跨边界序列化")
+}
+
+func TestNoCascade(t *testing.T) {
+	// 两个独立错误应报 2 条，而不是因级联膨胀。
+	res := checkSrc(t, `type R { a: u64, b: u64 }
+
+entry E {
+  fn f() -> Unit
+    invariant "无"
+  {
+    let r = R{a: 1}
+    let s = R{a: "文本"}
+    return Unit
+  }
+}`)
+	if len(res.Errors) < 2 {
+		t.Fatalf("应至少报 2 条错误，实际 %d 条：%v", len(res.Errors), res.Errors)
+	}
+	if len(res.Errors) > 4 {
+		t.Fatalf("错误数 %d 过多，疑似级联：%v", len(res.Errors), res.Errors)
+	}
+}
+
+func TestEnvDeclRejected(t *testing.T) {
+	// SPEC §5.7 把 env 列为关键字，但 D0 不实现；不报错就是静默丢配置。
+	res := checkSrc(t, `env App {
+  port: u64
+}
+
+entry E {
+  fn f() -> Unit
+    invariant "无"
+  {
+    return Unit
+  }
+}`)
+	expectOne(t, res, "E1", "不在 D0 子集")
+}
+
+// expectOne 断言恰好有一条指定错误码的错误，且消息包含关键字。
+func expectOne(t *testing.T, res *Result, code, contains string) {
+	t.Helper()
+	if len(res.Errors) != 1 {
+		t.Fatalf("期望恰好 1 条错误，实际 %d 条：%v", len(res.Errors), res.Errors)
+	}
+	e := res.Errors[0]
+	if e.Code != code {
+		t.Errorf("错误码为 %s，期望 %s（消息：%s）", e.Code, code, e.Msg)
+	}
+	if !strings.Contains(e.Msg, contains) {
+		t.Errorf("消息 %q 不含 %q", e.Msg, contains)
+	}
+	if e.Pos.Line == 0 {
+		t.Error("错误缺少行号")
+	}
+}

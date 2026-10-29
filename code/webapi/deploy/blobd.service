@@ -1,0 +1,24 @@
+[Unit]
+Description=blobd（Droplet 示例哑存储服务）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=blobd
+Group=blobd
+WorkingDirectory=/var/lib/blobd
+ExecStart=/usr/local/bin/blobd
+EnvironmentFile=-/etc/blobd/blobd.env
+Restart=on-failure
+RestartSec=2
+
+# 服务只需要读二进制、写自己的数据目录；提交子进程要能跑 /bin/sh 与 git。
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/blobd
+
+[Install]
+WantedBy=multi-user.target
