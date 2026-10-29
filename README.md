@@ -8,7 +8,7 @@ More precisely: **the enabling layer for a generate-and-verify paradigm** — wh
 
 Droplet optimizes for one thing above all: **making AI mistakes impossible to keep silent, and making verification cheap enough that an agent will actually run it.** Not "a safer, more abstract, more elegant language" — a language where errors cannot stay hidden, checks finish in milliseconds, and the runtime is light enough to fit on the smallest production instance.
 
-> Status: **design draft, not implemented.** See [docs/SPEC.md](docs/SPEC.md) for the full proposal (Chinese).
+> Status: **design draft v0.4, not implemented.** See [docs/SPEC.md](docs/SPEC.md) for the full proposal (Chinese).
 
 ## Core idea
 
@@ -42,6 +42,10 @@ intent (properties + contracts + boundary + examples)
 
 Three non-negotiables: the **runtime stays deterministic** (probabilistic semantics would destroy substitutability, the foundation of five decades of programming), the **deliverable stays human-readable**, and **verification stays sub-second**. New composition rule under investigation: property-union + effect-subset + additive resource budget — this, not syntax, is where any originality would live.
 
+In one sentence: **old paradigms were designed to save human brain; the new one is designed for verifiability; and the new one cannot run *unless* a language makes intent a first-class construct, makes verification millisecond-cheap, and makes the runtime small enough for the smallest instance. Droplet is that "unless."**
+
+**Convergence rule (decided, SPEC §7.8.3):** if the surviving candidates differ in externally observable behaviour, the build **fails** (`E12`) and a human adds a constraint. The language deliberately provides **no** way to auto-pick a candidate — no `strategy: minimal`, no default, no last-known-good fallback — because automatic convergence would turn required intent into optional documentation, and the whole enabling layer with it. Exploration is served by `droplet explore`, whose output is explicitly not a releasable artifact. The honest cost of this choice — under-specification becomes *the human's* new bottleneck — is measured, not argued away (`E12` frequency and average time-to-constrain are §11.3 metrics, and a falsification path for claim P-D).
+
 **Honest caveat (SPEC appendix C):** the draft audited itself for inherited assumptions and found three structural ones it had never questioned — *programs are text*, *functions are the unit of thought*, *deployment is not a language concern*. Two of them are open experiments (V1 state-machine-first, V2 AST-identity diffs) that must run before the core is frozen.
 
 ## Design pillars
@@ -53,6 +57,7 @@ Three non-negotiables: the **runtime stays deterministic** (probabilistic semant
 - **Typed configuration and opaque secrets** — a missing key in an environment fails the build, not the pager. Secrets cannot be printed or logged.
 - **Resource budgets are types** — per-request memory caps and cache sizes are checkable facts, which kills unbounded queries and unbounded caches at compile time.
 - **Errors are values that cannot be dropped** — propagate, handle, or record an explicit `ignore(reason)`.
+- **Intent is the input surface, not a comment** — `requires` / `effects` / `cap` / `idempotent` / `invariant` / `example` are checked, mutated against, and used to converge (SPEC §5.10). An `entry` or `boundary` method with no verifiable intent does not compile (`E11`); an intent that catches no mutation is a hard error (`E10`).
 - **Single static binary, no interpreter, no VM, no JIT, no daemon.**
 
 ## Roadmap
