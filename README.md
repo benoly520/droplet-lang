@@ -23,8 +23,9 @@ Droplet's answer is to make those facts **visible in the signature and checkable
 | H3 | Core primitives | ≤ 24 |
 | H4 | Idle-service RSS in production | ≤ 3 MB |
 | H5 | Idle CPU / per-request overhead | ≤ 0.5% of one core / ≤ 2 µs |
+| H6 | **Marginal** memory cost per added route / task | reported by `droplet mem`, budgeted in CI |
 
-H1 and H4/H5 squeeze the language from both sides (see SPEC §9 for the full mechanism-level reduction list and CI gates): one limits **how much you must teach the model**, the other limits **how much you may hide in the runtime**. Both disciplines point the same way — an invisible mechanism is invisible precisely because it decides something for you at runtime, and every decision costs memory. **What AI cannot verify is usually also what costs the most.**
+H1 and H4–H6 squeeze the language from both sides (see SPEC §9 for the full mechanism-level reduction list and CI gates): one limits **how much you must teach the model**, the others limit **how much you may hide in the runtime — and how much each new feature adds to it**. A 3 MB idle service that balloons to 80 MB after 20 routes has not met the budget; the real bill is `routes × marginal bytes × instances`. Both disciplines point the same way — an invisible mechanism is invisible precisely because it decides something for you at runtime, and every decision costs memory. **What AI cannot verify is usually also what costs the most.**
 
 ## Design pillars
 
