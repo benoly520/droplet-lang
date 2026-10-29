@@ -4,6 +4,8 @@
 
 A server-side programming language **designed for AI-generated, human-maintained services**.
 
+More precisely: **the enabling layer for a generate-and-verify paradigm** — where a program is not written but *selected* as the proven solution among many candidates, and the human's job shifts from writing implementations to stating intent.
+
 Droplet optimizes for one thing above all: **making AI mistakes impossible to keep silent, and making verification cheap enough that an agent will actually run it.** Not "a safer, more abstract, more elegant language" — a language where errors cannot stay hidden, checks finish in milliseconds, and the runtime is light enough to fit on the smallest production instance.
 
 > Status: **design draft, not implemented.** See [docs/SPEC.md](docs/SPEC.md) for the full proposal (Chinese).
@@ -26,6 +28,21 @@ Droplet's answer is to make those facts **visible in the signature and checkable
 | H6 | **Marginal** memory cost per added route / task | reported by `droplet mem`, budgeted in CI |
 
 H1 and H4–H6 squeeze the language from both sides (see SPEC §9 for the full mechanism-level reduction list and CI gates): one limits **how much you must teach the model**, the others limit **how much you may hide in the runtime — and how much each new feature adds to it**. A 3 MB idle service that balloons to 80 MB after 20 routes has not met the budget; the real bill is `routes × marginal bytes × instances`. Both disciplines point the same way — an invisible mechanism is invisible precisely because it decides something for you at runtime, and every decision costs memory. **What AI cannot verify is usually also what costs the most.**
+
+## Paradigm (SPEC §0)
+
+Past paradigms all optimise one scarce resource: **human comprehension bandwidth**. Abstraction, encapsulation, design patterns, type systems — all of them are "save human brain" designs. The cost structure has flipped: **candidate code is nearly free, verification is the bottleneck.** Droplet's role is to make the new loop affordable:
+
+```
+intent (properties + contracts + boundary + examples)
+   → candidates (AI, many, random)        ← randomness lives ONLY here
+   → verifier (types / effects / resources / properties / replay / mutation)
+   → survivor(s) → deterministic, human-readable, diffable source code
+```
+
+Three non-negotiables: the **runtime stays deterministic** (probabilistic semantics would destroy substitutability, the foundation of five decades of programming), the **deliverable stays human-readable**, and **verification stays sub-second**. New composition rule under investigation: property-union + effect-subset + additive resource budget — this, not syntax, is where any originality would live.
+
+**Honest caveat (SPEC appendix C):** the draft audited itself for inherited assumptions and found three structural ones it had never questioned — *programs are text*, *functions are the unit of thought*, *deployment is not a language concern*. Two of them are open experiments (V1 state-machine-first, V2 AST-identity diffs) that must run before the core is frozen.
 
 ## Design pillars
 
