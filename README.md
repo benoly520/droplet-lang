@@ -1,2 +1,52 @@
-# droplet-lang
-Droplet is a server-side language designed for AI-generated, human-maintained services.
+# Droplet
+
+A server-side programming language **designed for AI-generated, human-maintained services**.
+
+Droplet optimizes for one thing above all: **making AI mistakes impossible to keep silent, and making verification cheap enough that an agent will actually run it.** Not "a safer, more abstract, more elegant language" — a language where errors cannot stay hidden, checks finish in milliseconds, and the runtime is light enough to fit on the smallest production instance.
+
+> Status: **design draft, not implemented.** See [docs/SPEC.md](docs/SPEC.md) for the full proposal (Chinese).
+
+## Core idea
+
+LLMs fail on server code mostly because correctness hides in places the model cannot see: effect-free-looking functions that touch the database, contracts encoded in string tags, errors that may be dropped, state that outlives a request, configuration that only fails at deploy time.
+
+Droplet's answer is to make those facts **visible in the signature and checkable at compile time** — so an agent can find and fix its own mistakes instead of relying on a human reviewer to catch them.
+
+## Five hard constraints
+
+| # | Constraint | Target |
+| --- | --- | --- |
+| H1 | Teaching surface (spec + all rules + core API, machine-readable) | ≤ 2000 tokens — **so the language needs no retraining** |
+| H2 | Core keywords | ≤ 14 |
+| H3 | Core primitives | ≤ 24 |
+| H4 | Idle-service RSS in production | ≤ 3 MB |
+| H5 | Idle CPU / per-request overhead | ≤ 0.5% of one core / ≤ 2 µs |
+
+H1 and H4/H5 squeeze the language from both sides: one limits **how much you must teach the model**, the other limits **how much you may hide in the runtime**. Both disciplines point the same way — an invisible mechanism is invisible precisely because it decides something for you at runtime, and every decision costs memory. **What AI cannot verify is usually also what costs the most.**
+
+## Design pillars
+
+- **No escape hatches** — no `any`/`as`/`unsafe`/`#[allow]` equivalents. An agent optimizing for "make the build pass" will systematically abuse any exit that exists.
+- **Effects in the signature** — what a function can touch (which database, which external host, the clock) is a type-level fact; no ambient authority, no global `fetch`, no implicit environment reads.
+- **Affine types + explicit regions** — resource leaks and transactions that span network calls become compile errors; the same model gives static memory bounds for bare-metal targets.
+- **Boundaries are declared, not assumed** — RPC/queue/HTTP payloads, versions, and idempotency requirements live in one `boundary` construct that generates stubs, handlers, serializers and machine-readable contracts.
+- **Typed configuration and opaque secrets** — a missing key in an environment fails the build, not the pager. Secrets cannot be printed or logged.
+- **Resource budgets are types** — per-request memory caps and cache sizes are checkable facts, which kills unbounded queries and unbounded caches at compile time.
+- **Errors are values that cannot be dropped** — propagate, handle, or record an explicit `ignore(reason)`.
+- **Single static binary, no interpreter, no VM, no JIT, no daemon.**
+
+## Roadmap
+
+| Stage | Deliverable | Gate |
+| --- | --- | --- |
+| S0 | Spec freeze | hard constraints satisfied on paper |
+| S1 | **Semantics validation without a compiler** (checker prototype in a host language + ablation experiments) | first-pass rate beats baseline; false positives < 5% |
+| S2 | Bootstrap: real syntax + C backend + `droplet check`/`mem`/`bench` | real service runs; idle RSS ≤ 3 MB measured |
+| S3 | Minimum usable server stack | non-author users running in production |
+| S4 | Bare-metal backend | "one language from MCU to server" validated |
+
+**S1 is the point of no return**: it tests the central claim — that a small enough language lets AI write correct code without being retrained — before we spend years on a compiler.
+
+## License
+
+MIT © benoly520
