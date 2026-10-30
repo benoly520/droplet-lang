@@ -323,17 +323,109 @@ entry E {
 	expectOne(t, res, "E2", "BlobFs.read 的第 1 个参数不能是 ETag")
 }
 
-func TestVariantWithFieldsRejected(t *testing.T) {
+// 错误变体也能带载荷（以前 checker 直接拒）。
+func TestVariantWithPayloadAccepted(t *testing.T) {
 	res := checkSrc(t, `type Bad = Err { code: u64 }
 
 entry E {
   fn f() -> u64 | Bad
     invariant "无"
   {
-    return 1
+    return Bad.Err { code: 1 }
   }
 }`)
-	expectOne(t, res, "E1", "不支持带字段的变体 Bad.Err")
+	if len(res.Errors) != 0 {
+		t.Fatalf("错误变体带字段构造应当通过，得到 %v", res.Errors)
+	}
+}
+
+// 变体构造：`T.V` 零字段、`T.V { … }` 带载荷，都要通过。
+func TestVariantConstructAccepted(t *testing.T) {
+	res := checkSrc(t, `type Shape = Circle | Square { side: u64 }
+
+entry E {
+  fn f(n: u64) -> Shape
+    invariant "宽为 0 时回退成圆"
+  {
+    if n == 0 {
+      return Shape.Circle
+    }
+    return Shape.Square { side: n }
+  }
+}`)
+	if len(res.Errors) != 0 {
+		t.Fatalf("变体构造应当通过，得到 %v", res.Errors)
+	}
+}
+
+func TestVariantWithoutPayload(t *testing.T) {
+	// 带字段的变体裸写：告诉你怎么写，而不是只说类型不对。
+	res := checkSrc(t, `type Shape = Circle | Square { side: u64 }
+
+entry E {
+  fn f() -> Shape
+    invariant "无"
+  {
+    return Shape.Square
+  }
+}`)
+	expectOne(t, res, "E1", "要写成 `Shape.Square { … }`")
+}
+
+func TestVariantUnknown(t *testing.T) {
+	res := checkSrc(t, `type Shape = Circle
+
+entry E {
+  fn f() -> Shape
+    invariant "无"
+  {
+    return Shape.Triangle
+  }
+}`)
+	expectOne(t, res, "E1", "Shape 没有变体 Triangle")
+}
+
+func TestVariantPayloadType(t *testing.T) {
+	res := checkSrc(t, `type Shape = Circle | Square { side: u64 }
+
+entry E {
+  fn f() -> Shape
+    invariant "无"
+  {
+    return Shape.Square { side: "x" }
+  }
+}`)
+	expectOne(t, res, "E1", "Shape.Square.side 应为 u64")
+}
+
+// tag 按变体名全局分配，同名变体跨 sum 会让 tag 撞车。
+func TestVariantNameGloballyUnique(t *testing.T) {
+	res := checkSrc(t, `type A = X | XOnly { a: u64 }
+type B = X | BOnly { b: u64 }
+
+entry E {
+  fn f() -> A
+    invariant "无"
+  {
+    return A.X
+  }
+}`)
+	expectOne(t, res, "E1", "变体名 X 已被 A.X 使用")
+}
+
+// sum 值取不出字段：要用 match 绑定。
+func TestSumFieldAccessRejected(t *testing.T) {
+	res := checkSrc(t, `type Shape = Circle | Square { side: u64 }
+
+entry E {
+  fn f() -> u64
+    invariant "无"
+  {
+    let s = Shape.Circle
+    return s.side
+  }
+}`)
+	expectOne(t, res, "E1", "用 match 绑定变体字段")
 }
 
 func TestNoCascade(t *testing.T) {

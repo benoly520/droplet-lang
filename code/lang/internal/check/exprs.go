@@ -47,6 +47,12 @@ func (c *checker) checkExprNode(e ast.Expr) *Type {
 		return tInval
 
 	case *ast.Select:
+		// `T.V`：sum 的零字段变体构造。有字段的变体写 `T.V { … }`（走 checkConstruct）。
+		if id, ok := n.Target.(*ast.Ident); ok {
+			if st := c.types[id.Name]; st != nil && st.Kind == KSum {
+				return c.checkVariant(st, n.Field, nil, n.Pos)
+			}
+		}
 		tt := c.checkExpr(n.Target)
 		switch tt.Kind {
 		case KRecord:
@@ -56,6 +62,9 @@ func (c *checker) checkExprNode(e ast.Expr) *Type {
 				return tInval
 			}
 			return f.Type
+		case KSum:
+			c.errorf(n.Pos, "E1", "%s 是 sum，取不出 .%s：用 match 绑定变体字段", tt.Name, n.Field)
+			return tInval
 		case KHost:
 			sig, ok := tt.Methods[n.Field]
 			if !ok {
@@ -86,46 +95,7 @@ func (c *checker) checkExprNode(e ast.Expr) *Type {
 	return tInval
 }
 
-// ---------- 构造、传播与运算 ----------
-func (c *checker) checkConstruct(n *ast.Construct) *Type {
-	t := c.resolveNamed(n.TypeName, n.Pos)
-	if t.Kind == KInvalid {
-		for _, f := range n.Fields {
-			c.checkExpr(f.Value)
-		}
-		return tInval
-	}
-	if t.Kind != KRecord {
-		c.errorf(n.Pos, "E1", "%s 不是 record，不能用字面量构造", t.Name)
-		for _, f := range n.Fields {
-			c.checkExpr(f.Value)
-		}
-		return tInval
-	}
-
-	seen := map[string]bool{}
-	for _, f := range n.Fields {
-		vt := c.checkExpr(f.Value)
-		fd, ok := t.FieldsByName[f.Name]
-		if !ok {
-			c.errorf(f.Pos, "E1", "%s 没有字段 %s", t.Name, f.Name)
-			continue
-		}
-		if seen[f.Name] {
-			c.errorf(f.Pos, "E1", "字段 %s 重复赋值", f.Name)
-		}
-		seen[f.Name] = true
-		if !assignable(vt, fd.Type) {
-			c.errorf(f.Pos, "E1", "%s.%s 应为 %s，得到 %s", t.Name, f.Name, fd.Type, vt)
-		}
-	}
-	for _, fd := range t.Fields {
-		if !seen[fd.Name] {
-			c.errorf(n.Pos, "E1", "构造 %s 缺少字段 %s", t.Name, fd.Name)
-		}
-	}
-	return t
-}
+// ---------- 传播与运算 ----------
 
 // checkPropagate 实现 C1：`!` 只能用于联合返回，且错误必须已被声明。
 func (c *checker) checkPropagate(n *ast.Propagate) *Type {

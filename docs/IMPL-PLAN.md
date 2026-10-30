@@ -148,9 +148,10 @@ expr         := unary ( binop unary )*
 unary        := primary '!'*
 primary      := INT | STRING | BYTES | 'true' | 'false' | 'Unit'
               | IDENT
-              | IDENT '{' (IDENT ':' expr) (',' IDENT ':' expr)* '}'   // 构造
-              | IDENT '(' (expr (',' expr)*)? ')'                      // 调用
-              | primary '.' IDENT                                      // 字段
+              | IDENT '{' (IDENT ':' expr) (',' IDENT ':' expr)* '}'                      // record 构造
+              | IDENT '.' IDENT                                                          // 字段访问，或零字段变体 `T.V`
+              | IDENT '.' IDENT '{' (IDENT ':' expr) (',' IDENT ':' expr)* '}'            // 变体构造 `T.V { … }`
+              | IDENT '(' (expr (',' expr)*)? ')'                                         // 调用
               | '(' expr ')'
 binop        := '==' | '!=' | '<' | '<=' | '>' | '>=' | '&&' | '||'
               | '+' | '-' | '*' | '/' | '%'
@@ -194,8 +195,10 @@ type         := 'str' | 'bytes' | 'u64' | 'i64' | 'bool' | 'Unit'
 ```
 
 规则：**同一个变体名在所有联合里共享同一 tag**。因此 `!` 只需复制 tag，不做映射表。
+反过来这也是一条硬规则：**变体名跨整个程序必须唯一** —— 同名会让两个 sum 拿到同一个 tag，
+`match` 就分不开它们，所以 `check` 在声明处就报 `E1: 变体名 X 已被 A.X 使用`（D1 起）。
 
-## 4. 三个样例（必须全绿）
+## 4. 样例（必须全绿）
 
 ### 4.1 `code/lang/examples/hello.dlt`
 
@@ -308,6 +311,39 @@ entry Serve {
 > `handle` 的 `!` 把 `ApiError` 抛给运行时；运行时不认识业务语义，只按 tag 映射
 > 404 / 400 / 409 / 500。**这是「错误是值」在边界处的唯一转换点。**
 
+### 4.4 `code/lang/examples/shape.dlt`（D1 追加）
+
+```droplet
+host Sys {
+  fn log(str) -> Unit
+}
+
+type Shape = Circle | Square { side: u64 }
+
+entry Demo {
+  fn greet(sys: Sys) -> Unit
+    invariant "构造 Square 后 match 绑定 side，宽为 7 时打印 wide"
+  {
+    let s = Shape.Square { side: 7 }
+    match s {
+      Circle => {
+        sys.log("round")
+      },
+      Square { side } => {
+        if side == 7 {
+          sys.log("wide")
+        }
+      }
+    }
+  }
+}
+```
+
+判据：`droplet build examples/shape.dlt -o .build/shape && .build/shape` 打印 `wide`。
+它存在的唯一理由是把变体构造钉成一个**可跑的**样例：`hello.dlt` 与 webapi 都不构造 sum 值，
+所以 D1 之前那条语法缺口没有任何端到端护栏（`gen` 的两个 shape 测试是后补的）。
+
+
 ## 5. 编译管线
 
 ```
@@ -413,12 +449,10 @@ int main(void) {
 | 限制 | 现状 | 补齐时机 |
 | --- | --- | --- |
 | `env` 声明 | 语法能解析，checker 报 `E1`「不在 D0 子集」；配置现走环境变量（§6），`contract` 也不导出 env 分组（字段已删） | D1 按 SPEC §5.7 实现 |
-| `match` 匹配不到有意义的变体 | 语法与 codegen 都对（分支之间必须有逗号），但 D0 没有构造 sum 值的途径：裸变体名被 `E1` 拒、`{...}` 只收 record，因此只能匹配到零值 | D1 补变体构造语法 |
-| 带字段的错误变体 | 报 `E1`；错误只保留 tag（运行时按 tag 映射状态码，字段无处安放） | 确有需要时再扩 |
 | record 字段按值嵌入 | 被引用类型必须在源文件里先出现；循环引用不支持 | D1 再考虑指针化 |
 | host 能力白名单 | `Sys` / `BlobFs` / `Versioning` 共 10 个能力已全部接通；表外能力、参数个数、参数与返回类型不符都在 `check` 就报 `E2`（表在 `internal/host`，含运行时 ABI 类型与返回值包装，与 gen 共用） | 无（新增能力时扩表 + `rt.h` 加原型） |
 | 无 `entry` 的程序 | 生成立即返回 0 的 `main`，并引用全部函数避免 `-Wunused-function` | 无需补 |
-| `If-Match` / 412 归运行时 | checker 不接受裸变体名（`return Conflict` 报 `E1`），handler 表达不了“条件失败”，412 由运行时在进 handler 前判定 | 语言能表达条件失败时，换成错误变体参与 |
+| `If-Match` / 412 归运行时 | 412 由运行时在进 handler 之前判定。以前是因为构造不出错误值（裸变体名被 `E1` 拒），handler 表达不了“条件失败”；D1 变体落地后这个理由消失了 | 改成 handler 返回 `ApiError.Conflict`，同时删掉 runtime 自带的 If-Match 比对（下一项） |
 | 提交是 leading-edge 防抖 | 窗口内的后续写不单独提交，要等下一次写才带上；若进程之后再无写入，最后一次写只落盘、不进历史 | 要“每次写都进历史”就把 `DP_COMMIT_DEBOUNCE` 设 0 |
 | `contract` 导出的意图 | 只导出文字（`invariant` / `cap` / `idempotent`）与 `effects` 的标识符；`requires` / `example` 的表达式不导出（没有表达式打印器） | 需要时补一个 `droplet fmt` 的前置能力 |
 
@@ -594,17 +628,19 @@ droplet-lang/code/lang/
   internal/lex/lex.go
   internal/ast/ast.go
   internal/parse/parse.go
-  internal/check/               # 两遍式检查，导出类型/Tag/Sigs 供 codegen 复用（8 个文件，同包）
-    check.go  types.go  decls.go  hostcap.go  boundary.go  stmts.go  exprs.go  calls.go
+  internal/check/               # 两遍式检查，导出类型/Tag/Sigs 供 codegen 复用（9 个文件，同包）
+    check.go  types.go  decls.go  hostcap.go  boundary.go  stmts.go  exprs.go  calls.go  construct.go
   internal/host/host.go          # host 能力表：名字 + 参数/返回的 ABI 类型 + 生成 C 调用的方式
   internal/dump/dump.go          # AST → JSON（M0 的验收出口）
-  internal/gen/c.go              # AST → C11
+  internal/gen/                  # AST → C11（4 个文件，同包）
+    c.go  stmts.go  exprs.go  main.go
   internal/gen/http_test.go      # 端到端：编出服务、拉进程、发真请求
   internal/contract/doc.go       # AST + 检查结果 → 契约 JSON
   internal/runtime/embed.go      # go:embed 打包运行时
   internal/runtime/assets/       # rt.h + 四个 .c（包目录里不能放 .c，所以放子目录）
     rt.h  rt_core.c  rt_http.c  rt_blob.c  rt_ver.c
   examples/hello.dlt
+  examples/shape.dlt         # D1：变体构造 + match 绑字段
 droplet-lang/code/webapi/
   src/{contract.dlt,main.dlt}
   deploy/{blobd.service,blobd.env.example,accept.sh,soak.sh}
@@ -782,21 +818,21 @@ H8 是 SPEC §2.2 里最新补的一条（单文件 ≤ 800 行、编译器 + �
 
 | 位置 | 行数 | 对照 H8 |
 | --- | --- | --- |
-| `internal/gen/c.go` | 798 | 卡线 |
-| `internal/check/`（8 个文件，最大 `types.go` 225） | 1275 | ok |
-| `internal/parse/parse.go` | 627 | ok |
-| `internal/ast` | 377 | ok |
+| `internal/gen/`（4 个文件，最大 `c.go` 338） | 860 | ok |
+| `internal/check/`（9 个文件，最大 `types.go` 225） | 1338 | ok |
+| `internal/parse/parse.go` | 646 | ok |
+| `internal/ast` | 379 | ok |
 | `internal/lex` | 311 | ok |
 | `internal/dump` | 262 | ok |
 | 其余（cmd / contract / host / token / runtime） | 774 | ok |
-| Go 非测试合计 | 4424 | — |
+| Go 非测试合计 | 4570 | — |
 | 内嵌运行时 C（4 个 `.c` + `rt.h`） | 1462（最大 `rt_http.c` 615） | ok |
-| **合计** | **5886** | 占 8000 的 74% |
+| **合计** | **6032** | 占 8000 的 75% |
 
 另一个不打算消灭、只打算标价的数字：**新增一个 AST 节点要改 5 处** —— `ast`（结构体）→ `parse`（解析）→
 `check`（类型与签名）→ `gen`（生成 C）→ `dump`（`parse` 的输出）。这是管道结构的必然，不是缺陷；
 登记它只是为了在“加个语法”的决策时看得见价钱。目前只有 `dump` 有专用护栏（`Unknown*` 两条测试），
-`check` 与 `gen` 靠 63 个用例。
+`check` 与 `gen` 靠 72 个用例。
 
 处置（已完成 2026-10-30）：`check.go` 原 1188 行**同包拆 8 个文件**（不拆包）——
 `check.go`（编排与 `Result`，161）、`types.go`（类型 / 作用域 / 类型判定，225）、
@@ -815,7 +851,18 @@ H8 是 SPEC §2.2 里最新补的一条（单文件 ≤ 800 行、编译器 + �
 3. **诊断级**：7 个反例（E1 未定义类型 / E11 缺意图 / E2 能力参数谎报 / E3 不可序列化 /
    env 拒收 / match 未穷尽 / 变体带字段）的错误输出逐字相同，含行列号与消息。
 
-兜底是 63 个用例 + `accept.sh` 12 项 + `go vet`。
+兜底是 72 个用例 + `accept.sh` 12 项 + `go vet`。
+
+D1 追加（2026-10-30）：变体构造落地时 `gen/c.go` 从 798 涨到 826，**卡线变成破线**，
+按同一条处置拆成 4 个文件（`c.go` 338 顶层拼接与函数、`stmts.go` 122 语句、`exprs.go` 221 表达式、
+`main.go` 179 两种入口产物）。`check/` 同步多出 `construct.go`（91 行，record 与变体共用
+`checkFields`），把 `exprs.go` 压回 184 行，守住「每个非测试文件 ≤ 250 行」。
+`check.go` 从 161 涨到 163：checker 多了一张 `variantOwner`（变体名 → 首个声明它的 sum）。
+证据同上一条：拆分前后 `droplet build -print-c`（`hello.dlt` 与 `webapi`）与 `droplet contract`
+的输出逐字相同 —— 变体构造是新语法，两个既有样例都没用它。
+上面那 7 个诊断级反例里只有「变体带字段」翻面（`E1` → `ok`），其余 6 条的报错文本、行列号一字未改；
+翻面后新增两条反例（带载荷变体裸写 `T.V` 要提示补 `{ … }`、同名变体跨 sum 要报 tag 冲突），
+命令与期望输出登记在 D0-DEVIATIONS §6。
 
 ## 9. 风险与回退
 

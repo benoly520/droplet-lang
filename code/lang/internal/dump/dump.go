@@ -234,7 +234,7 @@ func expr(e ast.Expr) any {
 		for _, f := range n.Fields {
 			fs = append(fs, obj("NamedExpr", f.Pos, "name", f.Name, "value", expr(f.Value)))
 		}
-		return obj("Construct", n.Pos, "type", n.TypeName, "fields", fs)
+		return obj("Construct", n.Pos, "type", n.TypeName, "variant", n.Variant, "fields", fs)
 	case *ast.Select:
 		return obj("Select", n.Pos, "target", expr(n.Target), "field", n.Field)
 	case *ast.Binary:

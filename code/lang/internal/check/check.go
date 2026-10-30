@@ -60,9 +60,10 @@ type checker struct {
 	scope *scope
 	curFn *FnSig
 
-	variantOrder []string        // 变体声明顺序，保证 tag 分配稳定
-	errorVariant map[string]bool // 进入过 `!` 传播的错误变体
-	seenPos      map[string]bool // 去重：同一位置的同一错误只报一次
+	variantOrder []string          // 变体声明顺序，保证 tag 分配稳定
+	variantOwner map[string]string // 变体名 → 首次声明它的 sum，保证 tag 全局唯一
+	errorVariant map[string]bool   // 进入过 `!` 传播的错误变体
+	seenPos      map[string]bool   // 去重：同一位置的同一错误只报一次
 
 	exprTypes map[ast.Expr]*Type
 	letTypes  map[*ast.Let]*Type
@@ -76,6 +77,7 @@ func Program(p *ast.Program) *Result {
 		types:        map[string]*Type{},
 		hosts:        map[string]*Type{},
 		fns:          map[string]*FnSig{},
+		variantOwner: map[string]string{},
 		errorVariant: map[string]bool{},
 		seenPos:      map[string]bool{},
 		exprTypes:    map[ast.Expr]*Type{},

@@ -88,13 +88,13 @@ func (c *checker) fillTypes() {
 					continue
 				}
 				vv := &Variant{Name: v.Name, Pos: v.Pos, FieldsByName: map[string]*Field{}}
-				if len(v.Fields) > 0 {
-					// 运行时的错误只保留 tag，字段无处安放；gen 以前也会拒。
-					// 在 checker 拦下来，「check ok」才能等于「能构建」。
-					c.errorf(v.Pos, "E1",
-						"D0 不支持带字段的变体 %s.%s：错误只按 tag 映射到状态码", t.Name, v.Name)
+				// tag 按变体名全局分配（match 与契约 JSON 都只认名字），
+				// 同名变体出现在两个 sum 里会让 tag 撞车，在声明处就拦下。
+				if owner, dup := c.variantOwner[v.Name]; dup {
+					c.errorf(v.Pos, "E1", "变体名 %s 已被 %s 使用：tag 全局唯一，换个名字", v.Name, owner)
 					continue
 				}
+				c.variantOwner[v.Name] = t.Name + "." + v.Name
 				for _, f := range v.Fields {
 					if _, dup := vv.FieldsByName[f.Name]; dup {
 						c.errorf(f.Pos, "E1", "字段 %s 在变体 %s 中重复", f.Name, v.Name)

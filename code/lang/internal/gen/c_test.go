@@ -156,6 +156,67 @@ fn twice(x: u64) -> u64 | Boom
 	}
 }
 
+// shapeSrc 是一个带载荷的变体：构造 + match 绑定字段。
+const shapeSrc = `host Sys {
+  fn log(str) -> Unit
+}
+
+type Shape = Circle | Square { side: u64 }
+
+entry Demo {
+  fn greet(sys: Sys) -> Unit
+    invariant "构造 Square 后 match 绑定 side，宽为 7 时打印 wide"
+  {
+    let s = Shape.Square { side: 7 }
+    match s {
+      Circle => {
+        sys.log("round")
+      },
+      Square { side } => {
+        if side == 7 {
+          sys.log("wide")
+        }
+      }
+    }
+  }
+}
+`
+
+// TestVariantConstructShape 验证变体在 C 里的形状：union 成员带真字段，构造写 tag + 载荷。
+func TestVariantConstructShape(t *testing.T) {
+	prog := parseAll(t, source{"shape.dlt", shapeSrc})
+	res := check.Program(prog)
+	if len(res.Errors) > 0 {
+		t.Fatalf("检查未通过：%v", res.Errors)
+	}
+	out, err := C(prog, res)
+	if err != nil {
+		t.Fatalf("生成失败：%v", err)
+	}
+	for _, want := range []string{
+		"struct { uint64_t m_side; } Square;",
+		"struct { uint8_t _pad; } Circle;",
+		".u.Square = { .m_side = 7ull }",
+		".u.Square.m_side;",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("生成的 C 缺少 %q\n%s", want, out)
+		}
+	}
+}
+
+// TestVariantConstructRuns 跑完整链路：.dlt → C → cc → 二进制 → stdout。
+func TestVariantConstructRuns(t *testing.T) {
+	bin := build(t, source{"shape.dlt", shapeSrc})
+	out, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatalf("运行失败：%v", err)
+	}
+	if got := string(out); got != "wide\n" {
+		t.Fatalf("输出 %q，期望 %q", got, "wide\n")
+	}
+}
+
 func parseAll(t *testing.T, srcs ...source) *ast.Program {
 	t.Helper()
 	prog := &ast.Program{}

@@ -175,6 +175,39 @@ func TestIfBlockNotParsedAsConstruct(t *testing.T) {
 	}
 }
 
+func TestVariantConstructParsed(t *testing.T) {
+	// 两种变体构造：`T.V { … }` 带载荷，`T.V` 不带（后者留在 Select 里由 checker 认）。
+	src := `type Shape = Circle | Square { side: u64 }
+
+entry E {
+  fn f() -> Shape {
+    let a = Shape.Circle
+    let b = Shape.Square { side: 7 }
+    return b
+  }
+}`
+	prog, err := File("t.dlt", src)
+	if err != nil {
+		t.Fatalf("解析失败：%v", err)
+	}
+	stmts := prog.Items[1].(*ast.EntryDecl).Fns[0].Body.Stmts
+
+	// 零字段变体：`Shape.Circle` 是 Select，而不报错（checker 再认）。
+	if sel, ok := stmts[0].(*ast.Let).Value.(*ast.Select); !ok {
+		t.Errorf("零字段变体应是 Select，得到 %T", stmts[0].(*ast.Let).Value)
+	} else if sel.Field != "Circle" {
+		t.Errorf("变体名 %q，期望 Circle", sel.Field)
+	}
+
+	con, ok := stmts[1].(*ast.Let).Value.(*ast.Construct)
+	if !ok {
+		t.Fatalf("带载荷变体应是 Construct，得到 %T", stmts[1].(*ast.Let).Value)
+	}
+	if con.TypeName != "Shape" || con.Variant != "Square" || len(con.Fields) != 1 {
+		t.Errorf("构造头不对：%+v", con)
+	}
+}
+
 func TestPropagationBinding(t *testing.T) {
 	src := `entry E {
   fn f(sys: Sys) -> u64 {

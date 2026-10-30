@@ -246,10 +246,12 @@ type Call struct {
 	Args   []Expr
 }
 
-// Construct 是 `Name { f: v }` 构造。
+// Construct 是构造：record 写 `Name { f: v }`，sum 变体写 `T.V { f: v }`。
+// Variant 为空表示 record 构造；非空表示 sum 的变体构造。
 type Construct struct {
 	Pos      token.Pos
 	TypeName string
+	Variant  string
 	Fields   []NamedExpr
 }
 

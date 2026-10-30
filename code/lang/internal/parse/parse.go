@@ -561,10 +561,13 @@ func (p *Parser) parsePostfix(e ast.Expr) ast.Expr {
 			e = &ast.Call{Pos: pos, Callee: e, Args: args}
 
 		case token.LBrace:
-			// 仅当形如 `Name { field: ... }` 时才当作构造，
+			// 仅当形如 `Name { field: ... }` / `T.V { field: ... }` 时才当作构造，
 			// 避免把 `if x {` 的 block 误判为构造。
-			id, ok := e.(*ast.Ident)
-			if !ok || !p.looksLikeFields() {
+			if !p.looksLikeFields() {
+				return e
+			}
+			typeName, variant, pos, ok := constructHead(e)
+			if !ok {
 				return e
 			}
 			p.advance() // {
@@ -581,7 +584,7 @@ func (p *Parser) parsePostfix(e ast.Expr) ast.Expr {
 				break
 			}
 			p.expect(token.RBrace, "}")
-			e = &ast.Construct{Pos: id.Pos, TypeName: id.Name, Fields: fields}
+			e = &ast.Construct{Pos: pos, TypeName: typeName, Variant: variant, Fields: fields}
 
 		default:
 			return e
@@ -592,6 +595,22 @@ func (p *Parser) parsePostfix(e ast.Expr) ast.Expr {
 // looksLikeFields 在当前位置为 `{` 时，判断其后是否形如 `Ident :`。
 func (p *Parser) looksLikeFields() bool {
 	return p.peekKind(1) == token.Ident && p.peekKind(2) == token.Colon
+}
+
+// constructHead 从 `Name` 或 `T.V` 里取出构造头。
+//
+// 构造形状只有两种：record 写 `Name { … }`，sum 变体写 `T.V { … }`；
+// 零字段变体不写花括号（`T.V`），由 checker 识别，这里不涉及。
+func constructHead(e ast.Expr) (typeName, variant string, pos token.Pos, ok bool) {
+	switch x := e.(type) {
+	case *ast.Ident:
+		return x.Name, "", x.Pos, true
+	case *ast.Select:
+		if id, isID := x.Target.(*ast.Ident); isID {
+			return id.Name, x.Field, id.Pos, true
+		}
+	}
+	return "", "", token.Pos{}, false
 }
 
 func binOpOf(k token.Kind) (string, bool) {

@@ -14,7 +14,6 @@
 | 项 | SPEC | D0 实际 | 原因 | 补齐 |
 | --- | --- | --- | --- | --- |
 | `env` 声明 | §5.7 一等特性；缺键即编译失败 | 能解析；checker 报 `E1`「不在 D0 子集」，`check`/`build`/`contract` 三个动词一律不复 | 配置由运行时 `dp_cfg_from_env` 读环境变量，`.dlt` 侧没有消费方 | D1 |
-| sum 值构造 | 判别联合 + 穷尽 `match`（§5.2） | 能声明、能 `match`；**无法构造值**：裸变体名报 `E1: 未定义标识符 NotFound`，`{...}` 只收 record | 唯一需要 sum 的地方是错误联合，而错误走 `!` 直接抛给运行时，不进 `match` | D1 补变体构造 |
 | 关键字 | 14 个（§14.2） | 10 个；缺 `move` `end` `task` `for` | 无区域、无任务、无循环；handler 只有 `if` 链 | 随区域/任务模型 |
 | `else` | 不在 14 个关键字里 | 上下文关键字，`if/else` 可编译可运行 | 比 `match bool` 好读，且实测不占关键字预算 | D1 复评 |
 | intent 校验 | §5.10：`E10` 抓不到 mutation 即硬错；`E11` 无 intent 不编译 | 只做 `E11`。`requires`/`example`/`effects`/`cap` 能解析并导出，**不校验**；表达式不导出（`exprOf` 只认字面量） | mutation testing 要独立验证器；也没有表达式打印器 | D1（先补 `fmt`） |
@@ -24,12 +23,11 @@
 
 | 项 | SPEC | D0 实际 | 原因 | 补齐 |
 | --- | --- | --- | --- | --- |
-| 412 条件失败 | 错误是值（C1） | 运行时在**进 handler 之前**判定 | checker 不接受裸变体名，handler 表达不了「条件失败」 | 语言能构造 sum 值后改回错误变体 |
+| 412 条件失败 | 错误是值（C1） | 运行时在**进 handler 之前**判定 | 以前 handler 表达不了（构造不出错误值）；D1 变体构造落地后，语言侧障碍已消失 | 现在可做：handler 返回 `ApiError.Conflict`，runtime 去掉自带的 If-Match 比对 |
 | keep-alive | 未限定 | 不做；每请求一连接，`Connection: close` | 手写 HTTP 最容易在这里响应错位；也省内存 | 不做 |
 | chunked | 未限定 | 拒绝，回 501 | 防请求走私；body 上限 8 MiB 够用 | 不做 |
 | 并发 | 未限定 | 单线程；读写各 30 s 超时（只靠 `SO_RCVTIMEO`/`SO_SNDTIMEO`），超时回 408 | H4 内存预算；超时防一条连接钉死服务 | 需要时多进程 + `SO_REUSEPORT` |
 | host 能力 | 开放 effect 系统 | 写死 10 个（`Sys` 4 / `BlobFs` 5 / `Versioning` 1）；表外能力、参数个数、参数与返回类型不符在 `check` 就报 `E2`，表在 `internal/host`（check 与 gen 共用，含 ABI 类型与 `u64 → ETag` 的包装） | 只实现示例服务真正用到的 | 新增能力时扩表 + `rt.h` 加原型 |
-| 带字段的变体 | 支持 | 语法是 `Err { code: u64 }`，`check` 报 `E1`（错误只按 tag 映射，字段无处安放） | 运行时只按 tag 映射状态码 | 确有需要时 |
 | boundary codegen | §7.4 生成 stub / handler / serializer | 只导出 JSON 契约（`droplet contract`） | 消费方手写客户端就够（§10） | D1 |
 | 存储 | schema 驱动查询 | 扁平文件 + `.snapshots/`；`DP_ROOT` 必须是已存在的目录，否则启动时直接退出 | 哑存储是刻意的最小面；缺目录不能让服务「起得来、写全 500」 | D2 |
 | 快照 | 未限定 | `<key>.<unix>.<seq>`，每 key 只留最近 `DP_SNAPSHOT_KEEP` 份（默认 8，0 = 不轮转） | 不带 `seq` 时同秒两次写会互相覆盖；不轮转 72 h 堆约 8640 个文件 | 已完成 |
@@ -54,7 +52,7 @@
 | --- | --- | --- | --- |
 | `sys.nope(1)`（表外能力） | ok | `E-GEN: 运行时不提供能力 Sys.nope` | `check` 报 `E2` |
 | `host Sys { fn log(u64) }` + `sys.log(1)` | ok | cc 报 `incompatible type for argument 1 of 'dp_sys_log'`（无 E 码、无行号） | `check` 报 `E2` |
-| `type Bad = Err { code: u64 }` | ok | `E-GEN: M2 不支持带字段的…变体` | `check` 报 `E1` |
+| `type Bad = Err { code: u64 }` | ok | `E-GEN: M2 不支持带字段的…变体` | `check` 报 `E1`（D1 起已支持，该行保留作历史；见 §5） |
 | `env App { port: u64 }` | ok | ok，配置被**静默丢弃** | `check` 报 `E1` |
 
 原因只有一个：能力表以前长在 `internal/gen/c.go`，checker 看不见它；而表里也只记了参数
@@ -65,7 +63,7 @@
 
 - 表外能力、参数个数不符、参数或返回类型与运行时原型不符 → `E2`（效果与能力，SPEC §14 的
   码意义）；参数写成 record 也是 `E2`（record 传不进 C 原型）；
-- 带字段的变体 → `E1`（类型与匹配）；
+- 带字段的变体 → 曾经 `E1`（类型与匹配），D1 变体构造落地后不再是偏差；
 - `internal/host/host_test.go` 锁住两件事：能力表恰好 10 项；每一项生成的 `dp_*` 调用都能在
   `rt.h` 找到原型。
 
@@ -82,6 +80,13 @@
 
 ## 5. 已不算偏差
 
+- **sum 值构造**（D1 落地）：变体用限定名构造 —— 零字段写 `T.V`，带载荷写 `T.V { f: v }`；
+  `match` 能绑定字段（`Square { side } => …`）。裸变体名仍然报 `E1: 未定义标识符`，
+  这是刻意的：构造点必须看得见类型，不靠「期望类型反推」。
+  配套硬规则：**变体名跨整个程序必须唯一**（tag 按名字全局分配，同名会让两个 sum 撞 tag），
+  在声明处报 `E1: 变体名 X 已被 A.X 使用`。
+- **带字段的变体**（D1 落地）：`type Bad = Err { code: u64 }` 能声明、能构造、能 `match`；
+  运行时错误映射仍只看 tag，字段留在语言侧（要按字段映射状态码时再动 `rt_http.c`）。
 - **编译器用 Go 写**：SPEC 不规定实现语言；选型与理由在 IMPL-PLAN §7.1。
 - **产物是 C11 二进制**：SPEC 允许；`-print-c` 打印全文，`-keep-c` 保留 `<out>.c` 便于对照。
 
@@ -103,9 +108,17 @@ $B check .build/b.dlt
 printf 'host Sys {\n  fn nope(u64) -> Unit\n}\n\nentry E {\n  fn f(sys: Sys) -> Unit\n  invariant "x"\n  {\n    sys.nope(1)\n  }\n}\n' > .build/c.dlt
 $B check .build/c.dlt
 
-# 带字段的变体：同样在 check 报 E1
-printf 'type Bad = Err { code: u64 }\n\nentry E {\n  fn f() -> u64 | Bad\n  invariant "x"\n  {\n    return 1\n  }\n}\n' > .build/f.dlt
+# 带字段的变体：D1 起是合法构造，期望 ok
+printf 'type Bad = Err { code: u64 }\n\nentry E {\n  fn f() -> u64 | Bad\n  invariant "x"\n  {\n    return Bad.Err { code: 1 }\n  }\n}\n' > .build/f.dlt
 $B check .build/f.dlt
+
+# 带载荷的变体裸写：期望 E1「要写成 `Bad.Err { … }`」
+printf 'type Bad = Err { code: u64 }\n\nentry E {\n  fn f() -> Bad\n  invariant "x"\n  {\n    return Bad.Err\n  }\n}\n' > .build/g.dlt
+$B check .build/g.dlt
+
+# 同名变体跨 sum：期望 E1「变体名 X 已被 A.X 使用」
+printf 'type A = X\ntype B = X\n\nentry E {\n  fn f() -> A\n  invariant "x"\n  {\n    return A.X\n  }\n}\n' > .build/h.dlt
+$B check .build/h.dlt
 
 # 声明谎报参数类型：check 直接报 E2（以前要到 cc 才炸，无 E 码无行号）
 printf 'host Sys {\n  fn log(u64) -> Unit\n}\n\nentry E {\n  fn f(sys: Sys) -> Unit\n  invariant "x"\n  {\n    sys.log(1)\n  }\n}\n' > .build/l.dlt
