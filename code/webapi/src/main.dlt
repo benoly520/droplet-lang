@@ -1,38 +1,36 @@
 // 示例服务入口：把 HTTP 请求映射到哑存储能力。
-entry Serve {
-  fn handle(req: Request, fs: BlobFs, ver: Versioning, sys: Sys, root: str)
-      -> Response | ApiError
-    invariant "非 GET/PUT 的请求一律 405"
-  {
-    if req.path == "/health" {
-      return Response{status: 200, body: b"{\"ok\":true}", etag: ""}
-    }
-
-    if req.path == "/v1/keys" {
-      if req.method == "GET" {
-        let body = fs.list_json(root)!
-        return Response{status: 200, body: body, etag: ""}
-      }
-      if req.method == "POST" {
-        fs.create(root, req.key)!
-        return Response{status: 200, body: b"", etag: ""}
-      }
-    }
-
-    if req.path == "/v1/blob" {
-      if req.method == "GET" {
-        let body = fs.read(root, req.key)!
-        let tag = sys.u64_str(sys.hash64(body))
-        return Response{status: 200, body: body, etag: tag}
-      }
-      if req.method == "PUT" {
-        fs.backup(root, req.key)
-        let etag = fs.write(root, req.key, req.body)!
-        ver.commit_soon(root, req.key)
-        return Response{status: 200, body: b"", etag: sys.u64_str(etag.hash)}
-      }
-    }
-
-    return Response{status: 405, body: b"", etag: ""}
+entry handle(req: Request, fs: BlobFs, ver: Versioning, sys: Sys, root: str)
+    -> Response | ApiError
+  invariant "非 GET/PUT 的请求一律 405"
+{
+  if req.path == "/health" {
+    return Response{status: 200, body: b"{\"ok\":true}", etag: ""}
   }
+
+  if req.path == "/v1/keys" {
+    if req.method == "GET" {
+      let body = fs.list_json(root)!
+      return Response{status: 200, body: body, etag: ""}
+    }
+    if req.method == "POST" {
+      fs.create(root, req.key)!
+      return Response{status: 200, body: b"", etag: ""}
+    }
+  }
+
+  if req.path == "/v1/blob" {
+    if req.method == "GET" {
+      let body = fs.read(root, req.key)!
+      let tag = sys.u64_str(sys.hash64(body))
+      return Response{status: 200, body: body, etag: tag}
+    }
+    if req.method == "PUT" {
+      fs.backup(root, req.key)
+      let etag = fs.write(root, req.key, req.body)!
+      ver.commit_soon(root, req.key)
+      return Response{status: 200, body: b"", etag: sys.u64_str(etag.hash)}
+    }
+  }
+
+  return Response{status: 405, body: b"", etag: ""}
 }

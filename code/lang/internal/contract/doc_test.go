@@ -103,12 +103,10 @@ func TestTagNumbers(t *testing.T) {
 func TestTagNumbersNotPropagated(t *testing.T) {
 	src := `type Plain = Alpha | Beta
 
-entry E {
-  fn f() -> Unit
-    invariant "无"
-  {
+entry f() -> Unit
+  invariant "无"
+{
 
-  }
 }`
 	prog, err := parse.File("t.dlt", src)
 	if err != nil {

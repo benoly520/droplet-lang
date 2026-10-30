@@ -92,13 +92,11 @@ func TestUndefinedType(t *testing.T) {
 }
 
 func TestUndefinedFunction(t *testing.T) {
-	res := checkSrc(t, `entry E {
-  fn f() -> Unit
-    invariant "无"
-  {
-    nope()
+	res := checkSrc(t, `entry f() -> Unit
+  invariant "无"
+{
+  nope()
 
-  }
 }`)
 	expectOne(t, res, "E1", "未定义函数")
 }
@@ -106,13 +104,11 @@ func TestUndefinedFunction(t *testing.T) {
 func TestWrongArgCount(t *testing.T) {
 	res := checkSrc(t, `fn g(a: u64) -> Unit {}
 
-entry E {
-  fn f() -> Unit
-    invariant "无"
-  {
-    g()
+entry f() -> Unit
+  invariant "无"
+{
+  g()
 
-  }
 }`)
 	expectOne(t, res, "E1", "需要 1 个参数")
 }
@@ -120,13 +116,11 @@ entry E {
 func TestMissingField(t *testing.T) {
 	res := checkSrc(t, `type R { a: u64, b: u64 }
 
-entry E {
-  fn f() -> Unit
-    invariant "无"
-  {
-    let r = R{a: 1}
+entry f() -> Unit
+  invariant "无"
+{
+  let r = R{a: 1}
 
-  }
 }`)
 	expectOne(t, res, "E1", "缺少字段 b")
 }
@@ -134,28 +128,24 @@ entry E {
 func TestMatchNotExhaustive(t *testing.T) {
 	res := checkSrc(t, `type S = A | B
 
-entry E {
-  fn f(x: S) -> Unit
-    invariant "无"
-  {
-    match x {
-      A => Unit
-    }
-
+entry f(x: S) -> Unit
+  invariant "无"
+{
+  match x {
+    A => Unit
   }
+
 }`)
 	expectOne(t, res, "E1", "未穷尽")
 }
 
 func TestPropagateWithoutUnionReturn(t *testing.T) {
 	res := checkSrc(t, errPrelude+`
-entry E {
-  fn f(fs: BlobFs) -> bytes
-    invariant "无"
-  {
-    let b = fs.read("r", "k")!
-    return b
-  }
+entry f(fs: BlobFs) -> bytes
+  invariant "无"
+{
+  let b = fs.read("r", "k")!
+  return b
 }`)
 	expectOne(t, res, "E1", "不是联合")
 }
@@ -164,58 +154,48 @@ func TestPropagateWithMissingError(t *testing.T) {
 	res := checkSrc(t, errPrelude+`
 type Other = Oops
 
-entry E {
-  fn f(fs: BlobFs) -> bytes | Other
-    invariant "无"
-  {
-    let b = fs.read("r", "k")!
-    return b
-  }
+entry f(fs: BlobFs) -> bytes | Other
+  invariant "无"
+{
+  let b = fs.read("r", "k")!
+  return b
 }`)
 	expectOne(t, res, "E1", "缺少错误")
 }
 
 func TestDroppedError(t *testing.T) {
 	res := checkSrc(t, errPrelude+`
-entry E {
-  fn f(fs: BlobFs) -> Unit
-    invariant "无"
-  {
-    fs.read("r", "k")
+entry f(fs: BlobFs) -> Unit
+  invariant "无"
+{
+  fs.read("r", "k")
 
-  }
 }`)
 	expectOne(t, res, "E1", "被静默丢弃")
 }
 
 func TestEntryWithoutIntent(t *testing.T) {
-	res := checkSrc(t, `entry E {
-  fn f() -> Unit {
+	res := checkSrc(t, `entry f() -> Unit {
 
-  }
 }`)
 	expectOne(t, res, "E11", "缺少 example 或 invariant")
 }
 
 // 返回 Unit 的函数不写 return：`return Unit` 是零信息的重复书写。
 func TestReturnUnitRejected(t *testing.T) {
-	res := checkSrc(t, `entry E {
-  fn f() -> Unit
-    invariant "无"
-  {
-    return Unit
-  }
+	res := checkSrc(t, `entry f() -> Unit
+  invariant "无"
+{
+  return Unit
 }`)
 	expectOne(t, res, "E1", "`return Unit` 是多余的")
 }
 
 // Unit 函数不写 return 是合法的（hello.dlt 就是这么写的）。
 func TestUnitWithoutReturnAccepted(t *testing.T) {
-	res := checkSrc(t, `entry E {
-  fn f() -> Unit
-    invariant "无"
-  {
-  }
+	res := checkSrc(t, `entry f() -> Unit
+  invariant "无"
+{
 }`)
 	if len(res.Errors) != 0 {
 		t.Fatalf("Unit 函数不写 return 应当通过，得到 %v", res.Errors)
@@ -224,12 +204,10 @@ func TestUnitWithoutReturnAccepted(t *testing.T) {
 
 // 非 Unit 函数里写 `return Unit` 仍然是类型错误，不是"多余"。
 func TestReturnUnitInNonUnitFunction(t *testing.T) {
-	res := checkSrc(t, `entry E {
-  fn f() -> u64
-    invariant "无"
-  {
-    return Unit
-  }
+	res := checkSrc(t, `entry f() -> u64
+  invariant "无"
+{
+  return Unit
 }`)
 	expectOne(t, res, "E1", "返回 Unit")
 }
@@ -248,13 +226,11 @@ boundary B @v1 {
 func TestHostCapabilityNotInRuntime(t *testing.T) {
 	res := checkSrc(t, `host Sys { fn nope(u64) -> Unit }
 
-entry E {
-  fn f(sys: Sys) -> Unit
-    invariant "无"
-  {
-    sys.nope(1)
+entry f(sys: Sys) -> Unit
+  invariant "无"
+{
+  sys.nope(1)
 
-  }
 }`)
 	expectOne(t, res, "E2", "运行时不提供能力 Sys.nope")
 }
@@ -263,13 +239,11 @@ func TestHostCapabilityArity(t *testing.T) {
 	// 能力名对、参数个数不对：声明了 2 个，运行时原型是 1 个。
 	res := checkSrc(t, `host Sys { fn log(str, str) -> Unit }
 
-entry E {
-  fn f(sys: Sys) -> Unit
-    invariant "无"
-  {
-    sys.log("a", "b")
+entry f(sys: Sys) -> Unit
+  invariant "无"
+{
+  sys.log("a", "b")
 
-  }
 }`)
 	expectOne(t, res, "E2", "需要 1 个参数，声明了 2")
 }
@@ -278,13 +252,11 @@ func TestHostCapabilityParamType(t *testing.T) {
 	// 声明谎报参数类型：以前 check 返回 ok，要等 cc 报 incompatible type。
 	res := checkSrc(t, `host Sys { fn log(u64) -> Unit }
 
-entry E {
-  fn f(sys: Sys) -> Unit
-    invariant "无"
-  {
-    sys.log(1)
+entry f(sys: Sys) -> Unit
+  invariant "无"
+{
+  sys.log(1)
 
-  }
 }`)
 	expectOne(t, res, "E2", "Sys.log 的第 1 个参数运行时是 str，声明为 u64")
 }
@@ -292,13 +264,11 @@ entry E {
 func TestHostCapabilityRetType(t *testing.T) {
 	res := checkSrc(t, `host Sys { fn now_unix() -> str }
 
-entry E {
-  fn f(sys: Sys) -> Unit
-    invariant "无"
-  {
-    let t = sys.now_unix()
+entry f(sys: Sys) -> Unit
+  invariant "无"
+{
+  let t = sys.now_unix()
 
-  }
 }`)
 	expectOne(t, res, "E2", "Sys.now_unix 运行时返回 i64，声明为 str")
 }
@@ -313,12 +283,10 @@ host BlobFs {
   fn read(ETag, str) -> bytes
 }
 
-entry E {
-  fn f(fs: BlobFs) -> Unit
-    invariant "无"
-  {
+entry f(fs: BlobFs) -> Unit
+  invariant "无"
+{
 
-  }
 }`)
 	expectOne(t, res, "E2", "BlobFs.read 的第 1 个参数不能是 ETag")
 }
@@ -327,12 +295,10 @@ entry E {
 func TestVariantWithPayloadAccepted(t *testing.T) {
 	res := checkSrc(t, `type Bad = Err { code: u64 }
 
-entry E {
-  fn f() -> u64 | Bad
-    invariant "无"
-  {
-    return Bad.Err { code: 1 }
-  }
+entry f() -> u64 | Bad
+  invariant "无"
+{
+  return Bad.Err { code: 1 }
 }`)
 	if len(res.Errors) != 0 {
 		t.Fatalf("错误变体带字段构造应当通过，得到 %v", res.Errors)
@@ -343,15 +309,13 @@ entry E {
 func TestVariantConstructAccepted(t *testing.T) {
 	res := checkSrc(t, `type Shape = Circle | Square { side: u64 }
 
-entry E {
-  fn f(n: u64) -> Shape
-    invariant "宽为 0 时回退成圆"
-  {
-    if n == 0 {
-      return Shape.Circle
-    }
-    return Shape.Square { side: n }
+entry f(n: u64) -> Shape
+  invariant "宽为 0 时回退成圆"
+{
+  if n == 0 {
+    return Shape.Circle
   }
+  return Shape.Square { side: n }
 }`)
 	if len(res.Errors) != 0 {
 		t.Fatalf("变体构造应当通过，得到 %v", res.Errors)
@@ -362,12 +326,10 @@ func TestVariantWithoutPayload(t *testing.T) {
 	// 带字段的变体裸写：告诉你怎么写，而不是只说类型不对。
 	res := checkSrc(t, `type Shape = Circle | Square { side: u64 }
 
-entry E {
-  fn f() -> Shape
-    invariant "无"
-  {
-    return Shape.Square
-  }
+entry f() -> Shape
+  invariant "无"
+{
+  return Shape.Square
 }`)
 	expectOne(t, res, "E1", "要写成 `Shape.Square { … }`")
 }
@@ -375,12 +337,10 @@ entry E {
 func TestVariantUnknown(t *testing.T) {
 	res := checkSrc(t, `type Shape = Circle
 
-entry E {
-  fn f() -> Shape
-    invariant "无"
-  {
-    return Shape.Triangle
-  }
+entry f() -> Shape
+  invariant "无"
+{
+  return Shape.Triangle
 }`)
 	expectOne(t, res, "E1", "Shape 没有变体 Triangle")
 }
@@ -388,12 +348,10 @@ entry E {
 func TestVariantPayloadType(t *testing.T) {
 	res := checkSrc(t, `type Shape = Circle | Square { side: u64 }
 
-entry E {
-  fn f() -> Shape
-    invariant "无"
-  {
-    return Shape.Square { side: "x" }
-  }
+entry f() -> Shape
+  invariant "无"
+{
+  return Shape.Square { side: "x" }
 }`)
 	expectOne(t, res, "E1", "Shape.Square.side 应为 u64")
 }
@@ -403,12 +361,10 @@ func TestVariantNameGloballyUnique(t *testing.T) {
 	res := checkSrc(t, `type A = X | XOnly { a: u64 }
 type B = X | BOnly { b: u64 }
 
-entry E {
-  fn f() -> A
-    invariant "无"
-  {
-    return A.X
-  }
+entry f() -> A
+  invariant "无"
+{
+  return A.X
 }`)
 	expectOne(t, res, "E1", "变体名 X 已被 A.X 使用")
 }
@@ -417,13 +373,11 @@ entry E {
 func TestSumFieldAccessRejected(t *testing.T) {
 	res := checkSrc(t, `type Shape = Circle | Square { side: u64 }
 
-entry E {
-  fn f() -> u64
-    invariant "无"
-  {
-    let s = Shape.Circle
-    return s.side
-  }
+entry f() -> u64
+  invariant "无"
+{
+  let s = Shape.Circle
+  return s.side
 }`)
 	expectOne(t, res, "E1", "用 match 绑定变体字段")
 }
@@ -432,14 +386,12 @@ func TestNoCascade(t *testing.T) {
 	// 两个独立错误应报 2 条，而不是因级联膨胀。
 	res := checkSrc(t, `type R { a: u64, b: u64 }
 
-entry E {
-  fn f() -> Unit
-    invariant "无"
-  {
-    let r = R{a: 1}
-    let s = R{a: "文本"}
+entry f() -> Unit
+  invariant "无"
+{
+  let r = R{a: 1}
+  let s = R{a: "文本"}
 
-  }
 }`)
 	if len(res.Errors) < 2 {
 		t.Fatalf("应至少报 2 条错误，实际 %d 条：%v", len(res.Errors), res.Errors)
@@ -455,12 +407,10 @@ func TestEnvDeclRejected(t *testing.T) {
   port: u64
 }
 
-entry E {
-  fn f() -> Unit
-    invariant "无"
-  {
+entry f() -> Unit
+  invariant "无"
+{
 
-  }
 }`)
 	expectOne(t, res, "E1", "不在 D0 子集")
 }
@@ -481,4 +431,21 @@ func expectOne(t *testing.T, res *Result, code, contains string) {
 	if e.Pos.Line == 0 {
 		t.Error("错误缺少行号")
 	}
+}
+
+// TestTwoEntriesRejected 一个程序只能有一个入口。
+//
+// 以前多入口会静默取 map 迭代顺序里的任意一个当 EntryPoint —— 生成哪个 main
+// 由随机数决定。拆平之后入口是普通函数，多写一个 entry 当场硬错。
+func TestTwoEntriesRejected(t *testing.T) {
+	res := checkSrc(t, `entry a() -> Unit
+  invariant "x"
+{
+}
+
+entry b() -> Unit
+  invariant "y"
+{
+}`)
+	expectOne(t, res, "E1", "入口只能有一个：a 与 b 都标了 entry")
 }

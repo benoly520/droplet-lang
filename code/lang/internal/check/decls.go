@@ -130,12 +130,7 @@ func (c *checker) declareFns() {
 	for _, it := range c.prog.Items {
 		switch n := it.(type) {
 		case *ast.FnDecl:
-			c.registerFn(n, "", false)
-
-		case *ast.EntryDecl:
-			for _, fn := range n.Fns {
-				c.registerFn(fn, "", true)
-			}
+			c.registerFn(n, "", n.Entry)
 
 		case *ast.HostDecl:
 			h := c.hosts[n.Name]

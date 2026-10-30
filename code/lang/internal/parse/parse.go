@@ -173,6 +173,15 @@ func (p *Parser) parseVariant() ast.Variant {
 // hostSig 为真表示这是 host 能力签名：参数只写类型，不写名字。
 func (p *Parser) parseFn(allowBody, hostSig bool) *ast.FnDecl {
 	start := p.advance().Pos // fn
+	fn := p.parseFnHead(start, hostSig)
+	if allowBody && p.at(token.LBrace) {
+		fn.Body = p.parseBlock()
+	}
+	return fn
+}
+
+// parseFnHead 解析名字 + 参数 + 返回 + 意图（不含函数体）。
+func (p *Parser) parseFnHead(start token.Pos, hostSig bool) *ast.FnDecl {
 	fn := &ast.FnDecl{Pos: start, Name: p.expectIdent("函数名").Text}
 	p.expect(token.LParen, "(")
 	fn.Params = p.parseParams(hostSig)
@@ -180,9 +189,6 @@ func (p *Parser) parseFn(allowBody, hostSig bool) *ast.FnDecl {
 	p.expect(token.Arrow, "->")
 	fn.Ret = p.parseType()
 	fn.Intents = p.parseIntents()
-	if allowBody && p.at(token.LBrace) {
-		fn.Body = p.parseBlock()
-	}
 	return fn
 }
 
@@ -264,15 +270,24 @@ func (p *Parser) parseIntents() []ast.Intent {
 	}
 }
 
+// parseEntry 解析入口：`entry name(params) -> Ret` + 意图 + 函数体。
+//
+// 以前它写成 `entry Name { fn … }`：外层那个名字从不承载内容（不能鉴权、不带超时
+// 预算，一个程序也只能有一个入口），所以直接把签名挂在 entry 上（H7）。
 func (p *Parser) parseEntry() ast.Item {
-	start := p.advance().Pos
-	e := &ast.EntryDecl{Pos: start, Name: p.expectIdent("entry 名").Text}
-	p.expect(token.LBrace, "{")
-	for p.at(token.KwFn) {
-		e.Fns = append(e.Fns, p.parseFn(true, false))
+	start := p.advance().Pos // entry
+	if p.at(token.Ident) && p.peekKind(1) == token.LBrace {
+		p.fail(start, "E0006: entry 直接写签名，不套 `{ fn … }`：把 `entry %s { fn f(…) }` 改成 `entry f(…)`",
+			p.cur().Text)
 	}
-	p.expect(token.RBrace, "}")
-	return e
+	fn := p.parseFnHead(start, false)
+	fn.Entry = true
+	if p.at(token.LBrace) {
+		fn.Body = p.parseBlock()
+	} else {
+		p.fail(fn.Pos, "E0006: entry %s 必须有函数体", fn.Name)
+	}
+	return fn
 }
 
 func (p *Parser) parseHost() ast.Item {

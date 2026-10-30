@@ -8,18 +8,12 @@ import (
 )
 
 // ---------- 第二遍：检查函数体 ----------
-// ---------- 第二遍：检查函数体 ----------
 
 func (c *checker) checkBodies() {
 	for _, it := range c.prog.Items {
 		switch n := it.(type) {
 		case *ast.FnDecl:
 			c.checkFn(n)
-
-		case *ast.EntryDecl:
-			for _, fn := range n.Fns {
-				c.checkFn(fn)
-			}
 
 		case *ast.HostDecl:
 			for _, fn := range n.Fns {

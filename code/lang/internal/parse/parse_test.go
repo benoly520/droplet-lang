@@ -35,13 +35,12 @@ func TestParseHello(t *testing.T) {
 		t.Error("host 函数不应有函数体")
 	}
 
-	entry, ok := prog.Items[1].(*ast.EntryDecl)
-	if !ok || entry.Name != "Demo" || len(entry.Fns) != 1 {
-		t.Fatalf("第二个声明不是 entry Demo：%#v", prog.Items[1])
+	// 拆平之后入口就是一个带 Entry 标记的 FnDecl，不再有 EntryDecl 这层壳。
+	fn, ok := prog.Items[1].(*ast.FnDecl)
+	if !ok || fn.Name != "greet" || !fn.Entry {
+		t.Fatalf("第二个声明不是 entry greet：%#v", prog.Items[1])
 	}
-
-	fn := entry.Fns[0]
-	if fn.Name != "greet" || len(fn.Params) != 1 || len(fn.Intents) != 1 {
+	if len(fn.Params) != 1 || len(fn.Intents) != 1 {
 		t.Fatalf("greet 签名不对：%+v", fn)
 	}
 	if fn.Intents[0].Kind != "invariant" {
@@ -80,13 +79,11 @@ func TestParseWebapiContract(t *testing.T) {
 func TestParseWebapiMain(t *testing.T) {
 	prog := mustFile(t, "../../../webapi/src/main.dlt")
 
-	entry, ok := prog.Items[0].(*ast.EntryDecl)
-	if !ok || entry.Name != "Serve" {
-		t.Fatalf("首个声明不是 entry Serve：%#v", prog.Items[0])
+	fn, ok := prog.Items[0].(*ast.FnDecl)
+	if !ok || fn.Name != "handle" || !fn.Entry {
+		t.Fatalf("首个声明不是 entry handle：%#v", prog.Items[0])
 	}
-
-	fn := entry.Fns[0]
-	if fn.Name != "handle" || len(fn.Params) != 5 {
+	if len(fn.Params) != 5 {
 		t.Fatalf("handle 签名不对：%+v", fn)
 	}
 	if fn.Ret == nil {
@@ -153,20 +150,18 @@ func TestHostParamAnonAccepted(t *testing.T) {
 }
 
 func TestIfBlockNotParsedAsConstruct(t *testing.T) {
-	src := `entry E {
-  fn f(x: bool) -> Unit {
-    if x {
-
-    }
+	src := `entry f(x: bool) -> Unit {
+  if x {
 
   }
+
 }`
 	prog, err := File("t.dlt", src)
 	if err != nil {
 		t.Fatalf("解析失败：%v", err)
 	}
-	entry := prog.Items[0].(*ast.EntryDecl)
-	stmts := entry.Fns[0].Body.Stmts
+	fn := prog.Items[0].(*ast.FnDecl)
+	stmts := fn.Body.Stmts
 	if len(stmts) != 1 {
 		t.Fatalf("语句数 %d，期望 1", len(stmts))
 	}
@@ -179,18 +174,16 @@ func TestVariantConstructParsed(t *testing.T) {
 	// 两种变体构造：`T.V { … }` 带载荷，`T.V` 不带（后者留在 Select 里由 checker 认）。
 	src := `type Shape = Circle | Square { side: u64 }
 
-entry E {
-  fn f() -> Shape {
-    let a = Shape.Circle
-    let b = Shape.Square { side: 7 }
-    return b
-  }
+entry f() -> Shape {
+  let a = Shape.Circle
+  let b = Shape.Square { side: 7 }
+  return b
 }`
 	prog, err := File("t.dlt", src)
 	if err != nil {
 		t.Fatalf("解析失败：%v", err)
 	}
-	stmts := prog.Items[1].(*ast.EntryDecl).Fns[0].Body.Stmts
+	stmts := prog.Items[1].(*ast.FnDecl).Body.Stmts
 
 	// 零字段变体：`Shape.Circle` 是 Select，而不报错（checker 再认）。
 	if sel, ok := stmts[0].(*ast.Let).Value.(*ast.Select); !ok {
@@ -209,19 +202,69 @@ entry E {
 }
 
 func TestPropagationBinding(t *testing.T) {
-	src := `entry E {
-  fn f(sys: Sys) -> u64 {
-    let h = sys.hash64(b"x")!
-    return h
-  }
+	src := `entry f(sys: Sys) -> u64 {
+  let h = sys.hash64(b"x")!
+  return h
 }`
 	prog, err := File("t.dlt", src)
 	if err != nil {
 		t.Fatalf("解析失败：%v", err)
 	}
-	entry := prog.Items[0].(*ast.EntryDecl)
-	stmt := entry.Fns[0].Body.Stmts[0].(*ast.Let)
+	fn := prog.Items[0].(*ast.FnDecl)
+	stmt := fn.Body.Stmts[0].(*ast.Let)
 	if _, ok := stmt.Value.(*ast.Propagate); !ok {
 		t.Errorf("`!` 应绑定到整个调用，得到 %T", stmt.Value)
+	}
+}
+
+// TestEntryShellRejected 旧写法 `entry Name { fn … }` 必须报错并给改写提示。
+//
+// 减法一律取「必不写」而不是「可省略」：允许两种形状共存不是减法，只是多一个选项。
+func TestEntryShellRejected(t *testing.T) {
+	_, err := File("t.dlt", `entry Demo {
+  fn f() -> Unit
+    invariant "x"
+  {
+  }
+}
+`)
+	if err == nil {
+		t.Fatal("entry 套壳的旧写法应当报错")
+	}
+	if !strings.Contains(err.Error(), "entry 直接写签名") {
+		t.Errorf("报错没给改写提示：%v", err)
+	}
+}
+
+// TestEntryFlag 拆平后入口就是一个带 Entry 标记的 FnDecl，顶层普通 fn 的标记为假。
+func TestEntryFlag(t *testing.T) {
+	prog, err := File("t.dlt", `entry f() -> Unit
+  invariant "x"
+{
+}
+
+fn g() -> Unit
+  invariant "y"
+{
+}
+`)
+	if err != nil {
+		t.Fatalf("解析失败：%v", err)
+	}
+	entry := prog.Items[0].(*ast.FnDecl)
+	plain := prog.Items[1].(*ast.FnDecl)
+	if !entry.Entry {
+		t.Errorf("entry f 的 Entry 标记应为真：%+v", entry)
+	}
+	if plain.Entry {
+		t.Errorf("普通 fn g 的 Entry 标记应为假：%+v", plain)
+	}
+}
+
+// TestEntryNeedsBody 只写签名不写函数体的 entry 不能过解析。
+func TestEntryNeedsBody(t *testing.T) {
+	_, err := File("t.dlt", "entry f() -> Unit\n  invariant \"x\"\n")
+	if err == nil || !strings.Contains(err.Error(), "必须有函数体") {
+		t.Fatalf("entry 缺函数体应报错，得到 %v", err)
 	}
 }

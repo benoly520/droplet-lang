@@ -39,14 +39,14 @@
 | --- | --- | --- | --- | --- |
 | 动词 | `check` / `mem` / `bench` / `explore` / `trace` / `verify` | `parse` / `check` / `build` / `contract`（+ `help`） | 让服务跑起来所需的最小子集 | D1 |
 | 错误码 | `E0`–`E12` | `E1`（类型与匹配）、`E2`（能力与签名）、`E3`（边界序列化）、`E11` + 语法号 `E0003`–`E0009` + 生成期 `E-GEN` | 没实现的检查不报假错误；生成期只剩结构形状类报错 | 随特性 |
-| 增量编译 | 未限定 | 每次全量重编 | 样例只有 91 行（`contract.dlt` 53 + `main.dlt` 38） | 不做 |
+| 增量编译 | 未限定 | 每次全量重编 | 样例只有 86 行（`contract.dlt` 50 + `main.dlt` 36） | 不做 |
 | 契约 JSON | 含 `envs` 分组 | 已删该字段 | checker 拒绝 env → `contract` 走不到导出那一步，字段永远为空 | 随 env 一起回来 |
 
 ## 4. 一条跨阶段的老毛病：`check` 的保证比 `build` 弱
 
-### 4.1 已修：四类构造在 `check` 阶段就拦下
+### 4.1 已修：五类构造在 `check` 阶段就拦下
 
-审计时撞到四次同一个形状 —— **`check` 说 ok，`build` 才报错**：
+审计时撞到四次同一个形状 —— **`check` 说 ok，`build` 才报错**（D1 补上第五类）：
 
 | 构造 | 修之前的 `check` | 修之前的 `build` | 现在 |
 | --- | --- | --- | --- |
@@ -54,6 +54,7 @@
 | `host Sys { fn log(u64) }` + `sys.log(1)` | ok | cc 报 `incompatible type for argument 1 of 'dp_sys_log'`（无 E 码、无行号） | `check` 报 `E2` |
 | `type Bad = Err { code: u64 }` | ok | `E-GEN: M2 不支持带字段的…变体` | `check` 报 `E1`（D1 起已支持，该行保留作历史；见 §5） |
 | `env App { port: u64 }` | ok | ok，配置被**静默丢弃** | `check` 报 `E1` |
+| `entry f() -> Unit`（只写签名不写函数体） | ok | cc 报 `undefined reference to 'dp_f_f'`（无 E 码、无行号） | parse 报 `E0006: entry f 必须有函数体` |
 
 原因只有一个：能力表以前长在 `internal/gen/c.go`，checker 看不见它；而表里也只记了参数
 **个数**，类型完全以 `.dlt` 里那份 `host` 声明为准，声明谎报也照单全收。
@@ -66,6 +67,9 @@
 - 带字段的变体 → 曾经 `E1`（类型与匹配），D1 变体构造落地后不再是偏差；
 - `internal/host/host_test.go` 锁住两件事：能力表恰好 10 项；每一项生成的 `dp_*` 调用都能在
   `rt.h` 找到原型。
+
+还有一个同类但更阴的形状：**多个 `entry`**。以前 `check` 照样 ok，而 `EntryPoint` 取的是 map
+迭代顺序里遇到的任意一个 —— 同一份源码连跑 6 次，入口在 `f` 与 `g` 之间跳过。现在报 `E1`。
 
 **结论**：`droplet check` 的 `ok` 现在等价于「能构建」。gen 里那两处检查降为防御性兜底。
 
@@ -87,6 +91,11 @@
   在声明处报 `E1: 变体名 X 已被 A.X 使用`。
 - **带字段的变体**（D1 落地）：`type Bad = Err { code: u64 }` 能声明、能构造、能 `match`；
   运行时错误映射仍只看 tag，字段留在语言侧（要按字段映射状态码时再动 `rt_http.c`）。
+- **`entry` 的写法**（D1 落地）：入口直接写签名 —— `entry handle(req: Request) -> Response | ApiError`，
+  不再有 `entry Name { fn … }` 那层壳。外层名字从不承载内容（不能鉴权、不带超时预算，一个程序也只能
+  有一个入口），所以删位置而不是删写法：**旧形状在 parse 就报 `E0006` 并给改写提示**。
+  壳没了，`EntryDecl` 这个 AST 节点也没了（入口 = 带 `Entry` 标记的 `FnDecl`，四处 switch 各少一个分支）；
+  将来的鉴权 / 超时 / 重试预算写成签名上的 intent，不回头把壳加回来。
 - **编译器用 Go 写**：SPEC 不规定实现语言；选型与理由在 IMPL-PLAN §7.1。
 - **产物是 C11 二进制**：SPEC 允许；`-print-c` 打印全文，`-keep-c` 保留 `<out>.c` 便于对照。
 
@@ -97,31 +106,43 @@ B=.build/droplet
 (cd code/lang && go build -o ../../.build/droplet ./cmd/droplet)
 
 # env 被拒：期望 E1，exit=1
-printf 'env App {\n  port: u64\n}\n\nentry E {\n  fn f() -> Unit\n  invariant "x"\n  {\n  }\n}\n' > .build/e.dlt
+printf 'env App {\n  port: u64\n}\n\nentry f() -> Unit\n  invariant "x"\n{\n}\n' > .build/e.dlt
 $B check .build/e.dlt
 
 # 裸变体名构造不出 sum 值：期望 E1「未定义标识符 NotFound」
-printf 'type ApiError = NotFound | Bad\n\nentry E {\n  fn f() -> u64 | ApiError\n  invariant "x"\n  {\n    return NotFound\n  }\n}\n' > .build/b.dlt
+printf 'type ApiError = NotFound | Bad\n\nentry f() -> u64 | ApiError\n  invariant "x"\n{\n  return NotFound\n}\n' > .build/b.dlt
 $B check .build/b.dlt
 
 # 表外能力：check 就报 E2（以前要拖到 build 才报 E-GEN）
-printf 'host Sys {\n  fn nope(u64) -> Unit\n}\n\nentry E {\n  fn f(sys: Sys) -> Unit\n  invariant "x"\n  {\n    sys.nope(1)\n  }\n}\n' > .build/c.dlt
+printf 'host Sys {\n  fn nope(u64) -> Unit\n}\n\nentry f(sys: Sys) -> Unit\n  invariant "x"\n{\n  sys.nope(1)\n}\n' > .build/c.dlt
 $B check .build/c.dlt
 
 # 带字段的变体：D1 起是合法构造，期望 ok
-printf 'type Bad = Err { code: u64 }\n\nentry E {\n  fn f() -> u64 | Bad\n  invariant "x"\n  {\n    return Bad.Err { code: 1 }\n  }\n}\n' > .build/f.dlt
+printf 'type Bad = Err { code: u64 }\n\nentry f() -> u64 | Bad\n  invariant "x"\n{\n  return Bad.Err { code: 1 }\n}\n' > .build/f.dlt
 $B check .build/f.dlt
 
 # 带载荷的变体裸写：期望 E1「要写成 `Bad.Err { … }`」
-printf 'type Bad = Err { code: u64 }\n\nentry E {\n  fn f() -> Bad\n  invariant "x"\n  {\n    return Bad.Err\n  }\n}\n' > .build/g.dlt
+printf 'type Bad = Err { code: u64 }\n\nentry f() -> Bad\n  invariant "x"\n{\n  return Bad.Err\n}\n' > .build/g.dlt
 $B check .build/g.dlt
 
 # 同名变体跨 sum：期望 E1「变体名 X 已被 A.X 使用」
-printf 'type A = X\ntype B = X\n\nentry E {\n  fn f() -> A\n  invariant "x"\n  {\n    return A.X\n  }\n}\n' > .build/h.dlt
+printf 'type A = X\ntype B = X\n\nentry f() -> A\n  invariant "x"\n{\n  return A.X\n}\n' > .build/h.dlt
 $B check .build/h.dlt
 
+# entry 套壳的旧写法：期望 E0006 并给改写提示（以前这层壳合法，里面那个名字从不承载内容）
+printf 'entry Demo {\n  fn f() -> Unit\n  invariant "x"\n  {\n  }\n}\n' > .build/i.dlt
+$B check .build/i.dlt
+
+# 两个入口：期望 E1「入口只能有一个」（以前静默按 map 迭代顺序挑一个当 EntryPoint）
+printf 'entry a() -> Unit\n  invariant "x"\n{\n}\n\nentry b() -> Unit\n  invariant "y"\n{\n}\n' > .build/j.dlt
+$B check .build/j.dlt
+
+# entry 只写签名不写函数体：期望 E0006「必须有函数体」（以前 check ok、到 cc 才 undefined reference）
+printf 'entry a() -> Unit\n  invariant "x"\n' > .build/k.dlt
+$B check .build/k.dlt
+
 # 声明谎报参数类型：check 直接报 E2（以前要到 cc 才炸，无 E 码无行号）
-printf 'host Sys {\n  fn log(u64) -> Unit\n}\n\nentry E {\n  fn f(sys: Sys) -> Unit\n  invariant "x"\n  {\n    sys.log(1)\n  }\n}\n' > .build/l.dlt
+printf 'host Sys {\n  fn log(u64) -> Unit\n}\n\nentry f(sys: Sys) -> Unit\n  invariant "x"\n{\n  sys.log(1)\n}\n' > .build/l.dlt
 $B check .build/l.dlt   # 期望 E2: 能力 Sys.log 的第 1 个参数运行时是 str，声明为 u64
 
 # 契约与生成物

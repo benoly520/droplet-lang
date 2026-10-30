@@ -4,10 +4,8 @@ host Sys {
   fn log(str) -> Unit
 }
 
-entry Demo {
-  fn greet(sys: Sys) -> Unit
-    invariant "greet 向标准输出写一行 world"
-  {
-    sys.log("world")
-  }
+entry greet(sys: Sys) -> Unit
+  invariant "greet 向标准输出写一行 world"
+{
+  sys.log("world")
 }

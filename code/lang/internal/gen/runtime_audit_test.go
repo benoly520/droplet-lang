@@ -22,15 +22,13 @@ var dpFnRe = regexp.MustCompile(`dp_[a-z0-9_]+\(`)
 // 生成器叫得到、现有样例又恰好没写」的几个函数——`==` 对 str / bytes / u64 分别
 // 落到 dp_str_eq / dp_bytes_eq / dp_val_eq。
 func TestRuntimeHasNoDeadFunctions(t *testing.T) {
-	probe := genC(t, source{"probe.dlt", `entry E {
-  fn f(s1: str, s2: str, b1: bytes, b2: bytes, u1: u64, u2: u64) -> Unit
-    invariant "触达 == 与 bytes 字面量的生成目标"
-  {
-    let a = s1 == s2
-    let b = b"probe" == b2
-    let c = u1 == u2
+	probe := genC(t, source{"probe.dlt", `entry f(s1: str, s2: str, b1: bytes, b2: bytes, u1: u64, u2: u64) -> Unit
+  invariant "触达 == 与 bytes 字面量的生成目标"
+{
+  let a = s1 == s2
+  let b = b"probe" == b2
+  let c = u1 == u2
 
-  }
 }`})
 	hello := genC(t, source{"hello.dlt", genSource(t, "../../examples/hello.dlt")})
 	webapi := genC(t,

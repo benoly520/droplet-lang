@@ -97,11 +97,7 @@ func Build(prog *ast.Program, res *check.Result) Doc {
 		case *ast.BoundaryDecl:
 			doc.Boundaries = append(doc.Boundaries, boundaryOf(n))
 		case *ast.FnDecl:
-			doc.Functions = append(doc.Functions, functionOf(n, false, hostSet))
-		case *ast.EntryDecl:
-			for _, fn := range n.Fns {
-				doc.Functions = append(doc.Functions, functionOf(fn, true, hostSet))
-			}
+			doc.Functions = append(doc.Functions, functionOf(n, n.Entry, hostSet))
 		}
 	}
 

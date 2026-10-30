@@ -149,13 +149,10 @@ func (g *gen) protos() {
 
 func (g *gen) funcs() {
 	for _, it := range g.prog.Items {
-		switch n := it.(type) {
-		case *ast.FnDecl:
+		// 入口现在也是普通的 FnDecl（带 Entry 标记），生成上没有区别：
+		// 谁进 main 由 res.EntryPoint 决定。
+		if n, ok := it.(*ast.FnDecl); ok {
 			g.fn(n)
-		case *ast.EntryDecl:
-			for _, fn := range n.Fns {
-				g.fn(fn)
-			}
 		}
 	}
 }

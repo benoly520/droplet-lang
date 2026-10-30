@@ -46,19 +46,17 @@ func TestExtraSyntaxHasNoUnknownNodes(t *testing.T) {
   port: u64
 }
 
-entry M {
-  fn g() -> u64
-    invariant "探针：覆盖 env / match / 三种字面量"
-  {
-    let a = 1
-    let b = true
-    let c = Unit
-    match a {
-      a => { return a },
-      _ => { return a }
-    }
-    return a
+entry g() -> u64
+  invariant "探针：覆盖 env / match / 三种字面量"
+{
+  let a = 1
+  let b = true
+  let c = Unit
+  match a {
+    a => { return a },
+    _ => { return a }
   }
+  return a
 }`
 	p, err := parse.File("probe.dlt", src)
 	if err != nil {
@@ -84,5 +82,24 @@ func checkNoUnknown(t *testing.T, name string, prog *ast.Program) {
 	// Intent 的规则名放在 rule 字段：kind 只属于节点类型。
 	if !strings.Contains(out, `"kind":"Intent"`) {
 		t.Errorf("%s：找不到 Intent 节点（rule 字段是否又写成了 kind？）", name)
+	}
+}
+
+// TestDumpMarksEntry 拆平后入口不再有独立节点：dump 用 FnDecl 的 entry 字段区分。
+func TestDumpMarksEntry(t *testing.T) {
+	root, ok := Program(load(t, "../../examples/hello.dlt")).(map[string]any)
+	if !ok {
+		t.Fatal("顶层不是对象")
+	}
+	b, err := json.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(b)
+	if !strings.Contains(out, `"entry":true`) {
+		t.Errorf("dump 里入口应带 entry:true，得到 %s", out)
+	}
+	if strings.Contains(out, "EntryDecl") {
+		t.Errorf("EntryDecl 这层壳已经删掉了，dump 里不该再出现")
 	}
 }

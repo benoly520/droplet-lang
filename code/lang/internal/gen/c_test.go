@@ -163,19 +163,17 @@ const shapeSrc = `host Sys {
 
 type Shape = Circle | Square { side: u64 }
 
-entry Demo {
-  fn greet(sys: Sys) -> Unit
-    invariant "构造 Square 后 match 绑定 side，宽为 7 时打印 wide"
-  {
-    let s = Shape.Square { side: 7 }
-    match s {
-      Circle => {
-        sys.log("round")
-      },
-      Square { side } => {
-        if side == 7 {
-          sys.log("wide")
-        }
+entry greet(sys: Sys) -> Unit
+  invariant "构造 Square 后 match 绑定 side，宽为 7 时打印 wide"
+{
+  let s = Shape.Square { side: 7 }
+  match s {
+    Circle => {
+      sys.log("round")
+    },
+    Square { side } => {
+      if side == 7 {
+        sys.log("wide")
       }
     }
   }

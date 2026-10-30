@@ -5,16 +5,12 @@
 package check
 
 import (
+	"droplet/internal/ast"
+	"droplet/internal/token"
 	"fmt"
 	"sort"
 )
 
-import (
-	"droplet/internal/ast"
-	"droplet/internal/token"
-)
-
-// ---------- 结果 ----------
 // ---------- 结果 ----------
 
 // Error 是一条检查错误。
@@ -88,6 +84,20 @@ func Program(p *ast.Program) *Result {
 	c.declareFns()
 	c.checkBodies()
 
+	// 入口只能有一个：c.fns 是 map，多入口时按迭代顺序选 EntryPoint
+	// 等于生成哪个 main 由随机数决定 —— 按名字排之后报错，取第一个。
+	var entries []string
+	for name, sig := range c.fns {
+		if sig.IsEntry {
+			entries = append(entries, name)
+		}
+	}
+	sort.Strings(entries)
+	if len(entries) > 1 {
+		c.errorf(c.fns[entries[1]].Decl.Pos, "E1",
+			"入口只能有一个：%s 与 %s 都标了 entry，留一个", entries[0], entries[1])
+	}
+
 	sort.SliceStable(c.errs, func(i, j int) bool {
 		a, b := c.errs[i].Pos, c.errs[j].Pos
 		if a.File != b.File {
@@ -110,10 +120,8 @@ func Program(p *ast.Program) *Result {
 		Types:     c.types,
 		Hosts:     c.hosts,
 	}
-	for name, sig := range c.fns {
-		if sig.IsEntry {
-			res.EntryPoint = name
-		}
+	if len(entries) > 0 {
+		res.EntryPoint = entries[0]
 	}
 	return res
 }

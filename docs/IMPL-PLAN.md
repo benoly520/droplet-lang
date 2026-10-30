@@ -106,17 +106,19 @@ COMMENT    := // ...          行注释
 
 ```ebnf
 program      := item*
-item         := record_type | sum_type | fn_decl | entry_decl
-              | host_decl | env_decl | boundary_decl
+item         := record_type | sum_type | fn_decl | host_decl | env_decl | boundary_decl
 
 record_type  := 'type' IDENT '{' field (',' field)* ','? '}'
 sum_type     := 'type' IDENT '=' variant ('|' variant)*
 field        := IDENT ':' type
 variant      := IDENT ('{' field (',' field)* '}')?
 
-fn_decl      := 'fn' IDENT '(' params? ')' '->' type intent* block
+fn_decl      := entry_kw IDENT '(' params? ')' '->' type intent* block
+entry_kw     := 'fn' | 'entry'      // 'entry' 前缀即入口，一个程序最多一个（多了报 E1）
+                                   // D1 拆平了 `entry Name { fn … }` 那层壳（H7）：
+                                   // 入口与普通函数同形，少一个 AST 节点
 params       := param (',' param)*
-param        := IDENT ':' type
+param        := IDENT ':' type      // 普通函数与 boundary 方法：参数名要进函数体 / 契约 JSON
 intent       := 'requires' expr
               | 'invariant' STRING
               | 'example' expr
@@ -124,15 +126,14 @@ intent       := 'requires' expr
               | 'cap' 'mem' '<' INT IDENT '>'
               | 'idempotent' 'by' IDENT
 
-entry_decl    := 'entry' IDENT '{' fn_decl+ '}'
-host_decl     := 'host' IDENT '{' host_fn+ '}'
-host_fn       := fn_decl_head                      // 无函数体，实现由运行时提供
+host_decl    := 'host' IDENT '{' host_fn+ '}'
+host_fn      := 'fn' IDENT '(' host_params? ')' '->' type  // 无函数体，实现由运行时提供
+host_params  := type (',' type)*                  // 能力签名不写参数名（v0.7）：权威是运行时原型
 env_decl      := 'env' IDENT '{' env_field+ '}'     // 只到语法层，D0 不实现（§5.4）
 env_field     := IDENT ':' type ('=' literal)?
 boundary_decl := 'boundary' IDENT '@' 'v' INT '{' bnd_method+ '}'
 bnd_method    := IDENT '(' params? ')' '->' type ('with' 'idempotency')? intent*
 
-fn_decl_head := 'fn' IDENT '(' params? ')' '->' type intent*
 
 block        := '{' stmt* '}'
 stmt         := let_stmt | return_stmt | if_stmt | match_stmt | expr_stmt
@@ -179,6 +180,7 @@ type         := 'str' | 'bytes' | 'u64' | 'i64' | 'bool' | 'Unit'
 | `host` 能力裸调（`log(x)` 而非 `sys.log(x)`） | E1 | 能力必须经 host 参数访问，保证能力来源可静态枚举 |
 | 跨 `boundary` 使用非序列化类型 | E3 | D0 只有基础类型，恒通过 |
 | `entry` / `boundary` 方法无 `example` 也无 `invariant` | E11 | 硬门禁 |
+| 多个 `entry` | E1 | 一个程序只能有一个入口；D1 之前会静默取 map 迭代顺序里的任意一个当 EntryPoint，生成哪个 `main` 由随机数决定 |
 | 词法 / 语法错误 | E0 | 带行号列号 |
 
 **D0 不检查**：效果集内容、`cap` 上界、`idempotent` 一致性、`requires` 静态可判性（只解析）。
@@ -209,12 +211,10 @@ host Sys {
   fn log(str) -> Unit
 }
 
-entry Demo {
-  fn greet(sys: Sys) -> Unit
-    invariant "greet 向标准输出写一行 world"
-  {
-    sys.log("world")
-  }
+entry greet(sys: Sys) -> Unit
+  invariant "greet 向标准输出写一行 world"
+{
+  sys.log("world")
 }
 ```
 
@@ -272,39 +272,37 @@ boundary BlobApi @v1 {
 ### 4.3 `code/webapi/src/main.dlt`
 
 ```droplet
-entry Serve {
-  fn handle(req: Request, fs: BlobFs, ver: Versioning, sys: Sys, root: str)
-      -> Response | ApiError
-    invariant "非 GET/PUT 的请求一律 405"
-  {
-    if req.path == "/health" {
-      return Response{status: 200, body: b"{\"ok\":true}", etag: ""}
-    }
-    if req.path == "/v1/keys" {
-      if req.method == "GET" {
-        let body = fs.list_json(root)!
-        return Response{status: 200, body: body, etag: ""}
-      }
-      if req.method == "POST" {
-        fs.create(root, req.key)!
-        return Response{status: 200, body: b"", etag: ""}
-      }
-    }
-    if req.path == "/v1/blob" {
-      if req.method == "GET" {
-        let body = fs.read(root, req.key)!
-        let tag = sys.u64_str(sys.hash64(body))
-        return Response{status: 200, body: body, etag: tag}
-      }
-      if req.method == "PUT" {
-        fs.backup(root, req.key)
-        let etag = fs.write(root, req.key, req.body)!
-        ver.commit_soon(root)
-        return Response{status: 200, body: b"", etag: sys.u64_str(etag.hash)}
-      }
-    }
-    return Response{status: 405, body: b"", etag: ""}
+entry handle(req: Request, fs: BlobFs, ver: Versioning, sys: Sys, root: str)
+  -> Response | ApiError
+  invariant "非 GET/PUT 的请求一律 405"
+{
+  if req.path == "/health" {
+    return Response{status: 200, body: b"{\"ok\":true}", etag: ""}
   }
+  if req.path == "/v1/keys" {
+    if req.method == "GET" {
+      let body = fs.list_json(root)!
+      return Response{status: 200, body: body, etag: ""}
+    }
+    if req.method == "POST" {
+      fs.create(root, req.key)!
+      return Response{status: 200, body: b"", etag: ""}
+    }
+  }
+  if req.path == "/v1/blob" {
+    if req.method == "GET" {
+      let body = fs.read(root, req.key)!
+      let tag = sys.u64_str(sys.hash64(body))
+      return Response{status: 200, body: body, etag: tag}
+    }
+    if req.method == "PUT" {
+      fs.backup(root, req.key)
+      let etag = fs.write(root, req.key, req.body)!
+      ver.commit_soon(root)
+      return Response{status: 200, body: b"", etag: sys.u64_str(etag.hash)}
+    }
+  }
+  return Response{status: 405, body: b"", etag: ""}
 }
 ```
 
@@ -320,19 +318,17 @@ host Sys {
 
 type Shape = Circle | Square { side: u64 }
 
-entry Demo {
-  fn greet(sys: Sys) -> Unit
-    invariant "构造 Square 后 match 绑定 side，宽为 7 时打印 wide"
-  {
-    let s = Shape.Square { side: 7 }
-    match s {
-      Circle => {
-        sys.log("round")
-      },
-      Square { side } => {
-        if side == 7 {
-          sys.log("wide")
-        }
+entry greet(sys: Sys) -> Unit
+  invariant "构造 Square 后 match 绑定 side，宽为 7 时打印 wide"
+{
+  let s = Shape.Square { side: 7 }
+  match s {
+    Circle => {
+      sys.log("round")
+    },
+    Square { side } => {
+      if side == 7 {
+        sys.log("wide")
       }
     }
   }
@@ -788,7 +784,7 @@ SPEC §2.2 的 H7（重复书写预算）是补上去的，而 D0 的实现正�
 | 缺口 | 实测（2026-10-30） | 减法形式 | 归属 |
 | --- | --- | --- | --- |
 | `Response` 的 `etag` 字段可推导 | `etag: ""` ×4，共 5 处构造；唯一非空值是 `sys.u64_str(etag.hash)`，而 GET 路径的 tag 也是 `sys.u64_str(sys.hash64(body))` —— 同一个东西算了两遍 | 删掉 `etag` 字段，由运行时从 body 算。**不能靠“字段默认值”绕过**：§5.2 已写明“缺省值必须显式构造，零值不合法” | D1（动 HTTP 契约） |
-| `entry X { fn f }` 双层外壳 | 2 处 `entry`（`hello.dlt` 的 `Demo`、`main.dlt` 的 `Serve`），每处只有 1 个 `fn`，这层从不承载内容（鉴权/超时预算是 D1 才有的） | 把签名直接挂在 `entry` 上，去掉内层 `fn` | D1（动 AST 与 gen 的入口查找） |
+| `entry X { fn f }` 双层外壳 | 2 处 `entry`（`hello.dlt` 的 `Demo`、`main.dlt` 的 `Serve`），每处只有 1 个 `fn`，这层从不承载内容 | 把签名直接挂在 `entry` 上，去掉内层 `fn` | **已落地**（D1 v0.9：`EntryDecl` 整个节点删掉，入口=带 `Entry` 标记的 `FnDecl`；将来的鉴权/超时预算写成签名上的 intent，不回头加壳） |
 | host 声明的参数名 | `fn log(msg: str)` 的 `msg` 既不影响语义，也不进报错文本（报错写的是“第 N 个参数”） | 从语法里删掉：`fn log(str) -> Unit` | **已落地**（v0.7，只改 parser 与样例） |
 | 末尾 `return Unit` | `hello.dlt` 11 行有效代码里的 1 行纯骨架；任一 Unit 函数都要写 | 规定 Unit 函数**不写** `return` | **已落地**（v0.7，只改 parser 与 gen） |
 | `boundary ... with idempotency` | 单个效果也要 `with` | 单效果用标记：`get(key: str) -> bytes idempotent` | D1 |
@@ -804,12 +800,16 @@ SPEC §2.2 的 H7（重复书写预算）是补上去的，而 D0 的实现正�
 `E1: …是多余的：返回 Unit 的函数不写 return，删掉这一行即可`），不做静默兼容；
 `boundary` 方法与普通函数的参数名保留（前者进对外契约 JSON，后者进函数体）。
 
+第三条（`entry` 壳）随 D1 落地，报错文本是 E0006「entry 直接写签名，不套 `{ fn … }`」并给改写提示；
+同批补的两条护栏是多入口报 E1、`entry` 缺函数体报 E0006，三条都实跑验证过，见 D0-DEVIATIONS §6 的 i / j / k 探针。
+
 硬证据：`droplet build -print-c` 在「旧样例 + 旧编译器」与「新样例 + 新编译器」下输出**逐字相同**
 （`hello.dlt` 与 `webapi` 各一份）；等价性本来也可以从结构上看出来 —— 能力调用走
 `internal/host` 的运行时原型（参数名不参与生成），`return Unit` 与 gen 的兜底
 `return ((dp_unit){0});` 是同一句。减法不改变语义，只改变要写的字节。
 
-「D1」的三条会动 AST 或 HTTP 契约，按里程碑走。不修，H7 就只是一句口号 ——
+「D1」的三条会动 AST 或 HTTP 契约，按里程碑走（`entry` 那条已于 v0.9 落地，剩 `etag` 与 `env`）。
+不修，H7 就只是一句口号 ——
 而它存在的理由正是“口号拦不住样板”。
 
 ### 8.3 H8 基线：D0 的实现规模
@@ -818,21 +818,21 @@ H8 是 SPEC §2.2 里最新补的一条（单文件 ≤ 800 行、编译器 + �
 
 | 位置 | 行数 | 对照 H8 |
 | --- | --- | --- |
-| `internal/gen/`（4 个文件，最大 `c.go` 338） | 860 | ok |
-| `internal/check/`（9 个文件，最大 `types.go` 225） | 1338 | ok |
-| `internal/parse/parse.go` | 646 | ok |
-| `internal/ast` | 379 | ok |
+| `internal/gen/`（4 个文件，最大 `c.go` 335） | 857 | ok |
+| `internal/check/`（9 个文件，最大 `types.go` 225） | 1335 | ok |
+| `internal/parse/parse.go` | 661 | ok |
+| `internal/ast` | 374 | ok |
 | `internal/lex` | 311 | ok |
-| `internal/dump` | 262 | ok |
+| `internal/dump` | 258 | ok |
 | 其余（cmd / contract / host / token / runtime） | 774 | ok |
-| Go 非测试合计 | 4570 | — |
+| Go 非测试合计 | 4566 | — |
 | 内嵌运行时 C（4 个 `.c` + `rt.h`） | 1462（最大 `rt_http.c` 615） | ok |
-| **合计** | **6032** | 占 8000 的 75% |
+| **合计** | **6028** | 占 8000 的 75% |
 
 另一个不打算消灭、只打算标价的数字：**新增一个 AST 节点要改 5 处** —— `ast`（结构体）→ `parse`（解析）→
 `check`（类型与签名）→ `gen`（生成 C）→ `dump`（`parse` 的输出）。这是管道结构的必然，不是缺陷；
 登记它只是为了在“加个语法”的决策时看得见价钱。目前只有 `dump` 有专用护栏（`Unknown*` 两条测试），
-`check` 与 `gen` 靠 72 个用例。
+`check` 与 `gen` 靠 77 个用例。
 
 处置（已完成 2026-10-30）：`check.go` 原 1188 行**同包拆 8 个文件**（不拆包）——
 `check.go`（编排与 `Result`，161）、`types.go`（类型 / 作用域 / 类型判定，225）、
@@ -851,7 +851,7 @@ H8 是 SPEC §2.2 里最新补的一条（单文件 ≤ 800 行、编译器 + �
 3. **诊断级**：7 个反例（E1 未定义类型 / E11 缺意图 / E2 能力参数谎报 / E3 不可序列化 /
    env 拒收 / match 未穷尽 / 变体带字段）的错误输出逐字相同，含行列号与消息。
 
-兜底是 72 个用例 + `accept.sh` 12 项 + `go vet`。
+兜底是 77 个用例 + `accept.sh` 12 项 + `go vet`。
 
 D1 追加（2026-10-30）：变体构造落地时 `gen/c.go` 从 798 涨到 826，**卡线变成破线**，
 按同一条处置拆成 4 个文件（`c.go` 338 顶层拼接与函数、`stmts.go` 122 语句、`exprs.go` 221 表达式、
@@ -863,6 +863,17 @@ D1 追加（2026-10-30）：变体构造落地时 `gen/c.go` 从 798 涨到 826�
 上面那 7 个诊断级反例里只有「变体带字段」翻面（`E1` → `ok`），其余 6 条的报错文本、行列号一字未改；
 翻面后新增两条反例（带载荷变体裸写 `T.V` 要提示补 `{ … }`、同名变体跨 sum 要报 tag 冲突），
 命令与期望输出登记在 D0-DEVIATIONS §6。
+
+D1 第二项（2026-10-30，v0.9）：`entry` 扁平化删掉了 `EntryDecl` 这个 AST 节点 ——
+入口就是一个带 `Entry` 标记的 `FnDecl`，于是 `check`/`gen`/`contract`/`dump` 各少一个分支
+（Go 非测试合计 4570 → 4566，是本项目第一次**减法让编译器变小**）。
+代价写在 parse：多一段「旧写法给改写提示」的判定。顺带补了两条一直漏着的护栏：
+多个 `entry` 以前静默按 map 迭代顺序挑一个当 EntryPoint（生成哪个 `main` 由随机数决定），
+现在报 `E1`（旧编译器连跑 6 次同一个程序，入口在 `f` 与 `g` 之间跳）；
+`entry` 只写签名不写函数体以前 `check` 说 ok、到 `cc` 才炸（`undefined reference to 'dp_f_f'`，
+无 E 码无行号），现在 parse 就报 `E0006: entry f 必须有函数体`。
+等价性证据同前：旧编译器跑旧语法、新编译器跑新语法，`hello` / `shape` / `webapi` 三份
+`build -print-c` 输出逐字相同；`contract` JSON 只有入口函数的 `pos` 变了（壳占的两行没了）。
 
 ## 9. 风险与回退
 

@@ -37,8 +37,6 @@ func pos(items []ast.Item) token.Pos {
 		return n.Pos
 	case *ast.FnDecl:
 		return n.Pos
-	case *ast.EntryDecl:
-		return n.Pos
 	case *ast.HostDecl:
 		return n.Pos
 	case *ast.EnvDecl:
@@ -76,10 +74,8 @@ func item(it ast.Item) any {
 	case *ast.SumType:
 		return obj("SumType", n.Pos, "name", n.Name, "variants", variants(n.Variants))
 	case *ast.FnDecl:
-		return obj("FnDecl", n.Pos, "name", n.Name, "params", params(n.Params),
+		return obj("FnDecl", n.Pos, "name", n.Name, "entry", n.Entry, "params", params(n.Params),
 			"ret", typ(n.Ret), "intents", intents(n.Intents), "body", block(n.Body))
-	case *ast.EntryDecl:
-		return obj("EntryDecl", n.Pos, "name", n.Name, "fns", fns(n.Fns))
 	case *ast.HostDecl:
 		return obj("HostDecl", n.Pos, "name", n.Name, "fns", fns(n.Fns))
 	case *ast.EnvDecl:

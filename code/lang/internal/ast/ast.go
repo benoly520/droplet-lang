@@ -79,6 +79,11 @@ type FnDecl struct {
 	Ret     Type
 	Intents []Intent
 	Body    *Block
+
+	// Entry 表示这是一个可执行入口（`entry` 引入的签名）。
+	// 以前入口是 `entry Name { fn … }` 两层壳，那层壳从不承载内容（H7），
+	// 拆平之后少一个 AST 节点：入口就是一个带 Entry 标记的函数。
+	Entry bool
 }
 
 // Param 是函数参数。
@@ -86,13 +91,6 @@ type Param struct {
 	Pos  token.Pos
 	Name string
 	Type Type
-}
-
-// EntryDecl 是可执行入口，内含一个或多个函数。
-type EntryDecl struct {
-	Pos  token.Pos
-	Name string
-	Fns  []*FnDecl
 }
 
 // HostDecl 声明一组由运行时提供实现的能力。
@@ -309,9 +307,6 @@ func (*SumType) item() {}
 
 func (*FnDecl) node() {}
 func (*FnDecl) item() {}
-
-func (*EntryDecl) node() {}
-func (*EntryDecl) item() {}
 
 func (*HostDecl) node() {}
 func (*HostDecl) item() {}
