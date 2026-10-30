@@ -157,6 +157,7 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 | [IMPL-PLAN.md](IMPL-PLAN.md) | 实施：里程碑、§8.1–§8.3 三份基线、§6 复核命令 |
 | [D0-DEVIATIONS.md](D0-DEVIATIONS.md) | 实现与设计的有意偏差，每条带补齐时机 |
 | NEXT.md | 本文件：交接与待办 |
+| `.github/workflows/ci.yml` | 两档 CI：`floor`（Go 1.22，守下限）+ `latest`（守前向）。只跑 build / vet / test |
 
 ## 6. 这份文档怎么维护
 

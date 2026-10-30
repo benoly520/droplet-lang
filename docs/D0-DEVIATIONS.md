@@ -13,7 +13,7 @@
 
 | 项 | SPEC | D0 实际 | 原因 | 补齐 |
 | --- | --- | --- | --- | --- |
-| `env` 声明 | §5.7 一等特性；缺键即编译失败 | 能解析；checker 报 `E1`「不在 D0 子集」，`check`/`build`/`contract` 三个动词一律不复 | 配置由运行时 `dp_cfg_from_env` 读环境变量，`.dlt` 侧没有消费方 | D1 |
+| `env` 声明 | §5.7 一等特性；缺键即编译失败 | **已完成（v0.11，`8fdde01`）**：`env` 块注册为带 `IsEnv` 的 record，服务入口必须声明且补齐五键；源码不得构造 env 值；前缀由块名推出（`App` → `APP`）；生成器加载器在缺键/非法值时启动即失败；`contract` 导出 `envs` | 曾因「`.dlt` 侧没有消费方」被拒收，`env` 落地后消费方就是 handler 的 `cfg` 参数 | 已完成 |
 | 关键字 | 14 个（§14.2） | 10 个；缺 `move` `end` `task` `for` | 无区域、无任务、无循环；handler 只有 `if` 链 | 随区域/任务模型 |
 | `else` | 不在 14 个关键字里 | 上下文关键字，`if/else` 可编译可运行 | 比 `match bool` 好读，且实测不占关键字预算 | D1 复评 |
 | intent 校验 | §5.10：`E10` 抓不到 mutation 即硬错；`E11` 无 intent 不编译 | 只做 `E11`。`requires`/`example`/`effects`/`cap` 能解析并导出，**不校验**；表达式不导出（`exprOf` 只认字面量） | mutation testing 要独立验证器；也没有表达式打印器 | D1（先补 `fmt`） |
@@ -23,7 +23,7 @@
 
 | 项 | SPEC | D0 实际 | 原因 | 补齐 |
 | --- | --- | --- | --- | --- |
-| 412 条件失败 | 错误是值（C1） | 运行时在**进 handler 之前**判定 | 以前 handler 表达不了（构造不出错误值）；D1 变体构造落地后，语言侧障碍已消失 | 现在可做：handler 返回 `ApiError.Conflict`，runtime 去掉自带的 If-Match 比对 |
+| 412 条件失败 | 错误是值（C1） | 运行时在**进 handler 之前**判定 | 以前 handler 表达不了（构造不出错误值）。**2026-10-30 决定改口径**：变体构造落地后语言侧障碍已消失，但这段比对是**安全边界**（与「非法 key 不进 handler」同级）—— 搬到 handler 后忘一次就是静默丢更新。语言侧的正解是 `boundary … with idempotency` 合成，不是交还给人 | D2 只补 `PreconditionFailed` 变体与 412 映射（让 handler 能表达**自己的**条件失败）；运行时的 HTTP `If-Match` 比对**保留**，到 **D3 合流**时才删。届时须重跑长稳 |
 | `ETag` 由谁书写 | IMPL-PLAN §2 曾写「PUT 成功返回新 `ETag`」 | v0.10 起 ETag 由**运行时**按 `dp_sys_u64_str(dp_sys_hash64(body))` 从响应 body 推导：非空 body 就有头，空 body 就没有。`PUT` 的成功响应因此不带 tag（要新版本号请 `GET`），`/health` 与 `/v1/keys` 则**开始**带 tag | 同一份表示只能有一个版本号（SPEC §2.2 H7 第四条减法）；`If-Match` 的比对本来就在运行时，两处必须用同一个函数才对得上 —— 对不上就是静默的并发 bug | 已完成（行为变化，客户端视角见 IMPL-PLAN §2） |
 | keep-alive | 未限定 | 不做；每请求一连接，`Connection: close` | 手写 HTTP 最容易在这里响应错位；也省内存 | 不做 |
 | chunked | 未限定 | 拒绝，回 501 | 防请求走私；body 上限 8 MiB 够用 | 不做 |
@@ -34,14 +34,19 @@
 | 快照 | 未限定 | `<key>.<unix>.<seq>`，每 key 只留最近 `DP_SNAPSHOT_KEEP` 份（默认 8，0 = 不轮转） | 不带 `seq` 时同秒两次写会互相覆盖；不轮转 72 h 堆约 8640 个文件 | 已完成 |
 | 传输安全 | 未限定 | 无 TLS，只有静态 `Bearer` token | 部署形态要求反代终结 TLS（IMPL-PLAN §7.3） | 不做 |
 
+**D2 将新增一条偏差（已决定，未落地）**：删除 `Response` 之后，成功响应的状态码固定为 200
+（`Unit` 成功 = 200 + 空 body），**201 / 204 / 206 等暂时无法表达**。今天 `Response{status: 201}`
+是能写的，所以这条**现在还不是偏差**，D2 落地当日生效。补齐：D3 由 `boundary` 的成功形状合成状态码
+（与错误变体共用同一张 tag → status 表）。
+
 ## 3. 工具链
 
 | 项 | SPEC | D0 实际 | 原因 | 补齐 |
 | --- | --- | --- | --- | --- |
 | 动词 | `check` / `mem` / `bench` / `explore` / `trace` / `verify` | `parse` / `check` / `build` / `contract`（+ `help`） | 让服务跑起来所需的最小子集 | D1 |
 | 错误码 | `E0`–`E12` | `E1`（类型与匹配）、`E2`（能力与签名）、`E3`（边界序列化）、`E11` + 语法号 `E0003`–`E0009` + 生成期 `E-GEN` | 没实现的检查不报假错误；生成期只剩结构形状类报错 | 随特性 |
-| 增量编译 | 未限定 | 每次全量重编 | 样例只有 80 行（`contract.dlt` 43 + `main.dlt` 37） | 不做 |
-| 契约 JSON | 含 `envs` 分组 | 已删该字段 | checker 拒绝 env → `contract` 走不到导出那一步，字段永远为空 | 随 env 一起回来 |
+| 增量编译 | 未限定 | 每次全量重编 | 样例只有 91 行（`contract.dlt` 54 + `main.dlt` 37） | 不做 |
+| 契约 JSON | 含 `envs` 分组 | **已完成（v0.11）**：导出 `envs`（键名 / 类型 / 变量名 / 必填） | 曾因 checker 拒绝 env 而删掉该字段，`env` 落地后随之一并回来（`doc_test.go` 有断言） | 已完成 |
 
 ## 4. 一条跨阶段的老毛病：`check` 的保证比 `build` 弱
 

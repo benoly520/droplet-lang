@@ -1,0 +1,65 @@
+name: CI
+
+# 两档，各管一件事：
+#   floor —— 用 go.mod 声明的下限（1.22）编一遍、跑全部用例。任何 1.23+ 的 API 混进来，
+#            或有人顺手把 go 指令抬高，这一档立刻红。GOTOOLCHAIN=local 保证它**不会**
+#            偷偷去下载新工具链来"修好"自己。
+#   latest —— 用最新稳定版编一遍，守前向兼容（新版本引入的编译错误/deprecation 先看见）。
+#
+# 只做 build / vet / test。accept.sh 与 soak.sh 需要端口与常开机器，不放进 CI。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  floor:
+    name: Go 1.22（工具链下限）
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache: false
+      - name: 报告实际工具链
+        run: go version
+      - name: go build
+        working-directory: code/lang
+        run: go build -o "$RUNNER_TEMP/droplet" ./cmd/droplet
+      - name: go vet
+        working-directory: code/lang
+        run: go vet ./...
+      - name: go test
+        working-directory: code/lang
+        run: go test ./...
+
+  latest:
+    name: Go latest（前向兼容）
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: false
+      - name: 报告实际工具链
+        run: go version
+      - name: go build
+        working-directory: code/lang
+        run: go build -o "$RUNNER_TEMP/droplet" ./cmd/droplet
+      - name: go vet
+        working-directory: code/lang
+        run: go vet ./...
+      - name: go test
+        working-directory: code/lang
+        run: go test ./...
