@@ -9,7 +9,7 @@
 
 ## 0. 现在的状态（截至 2026-10-30）
 
-- `origin/main` = `main` = `56251e6`（D2 之前的提交），工作区见本轮提交后更新。
+- `origin/main` = `main` = `ed9b1e0`（v0.12，D2 落地的那笔）。
 - 本轮（v0.12）做的事：**D2 落地 —— 删掉 `Response`，响应面统一为「成功即值」**。
   - 入口成功类型只能是 `bytes`（有体）或 `Unit`（无体），签名回到 `-> bytes | ApiError`；
     `Response{status: 200, body: X}` 在 `check` 就报 `E1`，并提示「它在语言里就是 `X`」。
