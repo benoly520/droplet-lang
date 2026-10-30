@@ -29,7 +29,7 @@ func TestRuntimeHasNoDeadFunctions(t *testing.T) {
     let a = s1 == s2
     let b = b"probe" == b2
     let c = u1 == u2
-    return Unit
+
   }
 }`})
 	hello := genC(t, source{"hello.dlt", genSource(t, "../../examples/hello.dlt")})

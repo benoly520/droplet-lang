@@ -53,7 +53,7 @@
 | 构造 | 修之前的 `check` | 修之前的 `build` | 现在 |
 | --- | --- | --- | --- |
 | `sys.nope(1)`（表外能力） | ok | `E-GEN: 运行时不提供能力 Sys.nope` | `check` 报 `E2` |
-| `host Sys { fn log(x: u64) }` + `sys.log(1)` | ok | cc 报 `incompatible type for argument 1 of 'dp_sys_log'`（无 E 码、无行号） | `check` 报 `E2` |
+| `host Sys { fn log(u64) }` + `sys.log(1)` | ok | cc 报 `incompatible type for argument 1 of 'dp_sys_log'`（无 E 码、无行号） | `check` 报 `E2` |
 | `type Bad = Err { code: u64 }` | ok | `E-GEN: M2 不支持带字段的…变体` | `check` 报 `E1` |
 | `env App { port: u64 }` | ok | ok，配置被**静默丢弃** | `check` 报 `E1` |
 
@@ -92,7 +92,7 @@ B=.build/droplet
 (cd code/lang && go build -o ../../.build/droplet ./cmd/droplet)
 
 # env 被拒：期望 E1，exit=1
-printf 'env App {\n  port: u64\n}\n\nentry E {\n  fn f() -> Unit\n  invariant "x"\n  {\n    return Unit\n  }\n}\n' > .build/e.dlt
+printf 'env App {\n  port: u64\n}\n\nentry E {\n  fn f() -> Unit\n  invariant "x"\n  {\n  }\n}\n' > .build/e.dlt
 $B check .build/e.dlt
 
 # 裸变体名构造不出 sum 值：期望 E1「未定义标识符 NotFound」
@@ -100,7 +100,7 @@ printf 'type ApiError = NotFound | Bad\n\nentry E {\n  fn f() -> u64 | ApiError\
 $B check .build/b.dlt
 
 # 表外能力：check 就报 E2（以前要拖到 build 才报 E-GEN）
-printf 'host Sys {\n  fn nope(x: u64) -> Unit\n}\n\nentry E {\n  fn f(sys: Sys) -> Unit\n  invariant "x"\n  {\n    sys.nope(1)\n    return Unit\n  }\n}\n' > .build/c.dlt
+printf 'host Sys {\n  fn nope(u64) -> Unit\n}\n\nentry E {\n  fn f(sys: Sys) -> Unit\n  invariant "x"\n  {\n    sys.nope(1)\n  }\n}\n' > .build/c.dlt
 $B check .build/c.dlt
 
 # 带字段的变体：同样在 check 报 E1
@@ -108,7 +108,7 @@ printf 'type Bad = Err { code: u64 }\n\nentry E {\n  fn f() -> u64 | Bad\n  inva
 $B check .build/f.dlt
 
 # 声明谎报参数类型：check 直接报 E2（以前要到 cc 才炸，无 E 码无行号）
-printf 'host Sys {\n  fn log(x: u64) -> Unit\n}\n\nentry E {\n  fn f(sys: Sys) -> Unit\n  invariant "x"\n  {\n    sys.log(1)\n    return Unit\n  }\n}\n' > .build/l.dlt
+printf 'host Sys {\n  fn log(u64) -> Unit\n}\n\nentry E {\n  fn f(sys: Sys) -> Unit\n  invariant "x"\n  {\n    sys.log(1)\n  }\n}\n' > .build/l.dlt
 $B check .build/l.dlt   # 期望 E2: 能力 Sys.log 的第 1 个参数运行时是 str，声明为 u64
 
 # 契约与生成物

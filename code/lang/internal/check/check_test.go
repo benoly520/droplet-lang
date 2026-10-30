@@ -82,7 +82,7 @@ func TestErrorVariantTags(t *testing.T) {
 const errPrelude = `
 type Bad = Nope
 host BlobFs {
-  fn read(root: str, key: str) -> bytes | Bad
+  fn read(str, str) -> bytes | Bad
 }
 `
 
@@ -97,21 +97,21 @@ func TestUndefinedFunction(t *testing.T) {
     invariant "无"
   {
     nope()
-    return Unit
+
   }
 }`)
 	expectOne(t, res, "E1", "未定义函数")
 }
 
 func TestWrongArgCount(t *testing.T) {
-	res := checkSrc(t, `fn g(a: u64) -> Unit { return Unit }
+	res := checkSrc(t, `fn g(a: u64) -> Unit {}
 
 entry E {
   fn f() -> Unit
     invariant "无"
   {
     g()
-    return Unit
+
   }
 }`)
 	expectOne(t, res, "E1", "需要 1 个参数")
@@ -125,7 +125,7 @@ entry E {
     invariant "无"
   {
     let r = R{a: 1}
-    return Unit
+
   }
 }`)
 	expectOne(t, res, "E1", "缺少字段 b")
@@ -141,7 +141,7 @@ entry E {
     match x {
       A => Unit
     }
-    return Unit
+
   }
 }`)
 	expectOne(t, res, "E1", "未穷尽")
@@ -182,7 +182,7 @@ entry E {
     invariant "无"
   {
     fs.read("r", "k")
-    return Unit
+
   }
 }`)
 	expectOne(t, res, "E1", "被静默丢弃")
@@ -191,15 +191,52 @@ entry E {
 func TestEntryWithoutIntent(t *testing.T) {
 	res := checkSrc(t, `entry E {
   fn f() -> Unit {
-    return Unit
+
   }
 }`)
 	expectOne(t, res, "E11", "缺少 example 或 invariant")
 }
 
+// 返回 Unit 的函数不写 return：`return Unit` 是零信息的重复书写。
+func TestReturnUnitRejected(t *testing.T) {
+	res := checkSrc(t, `entry E {
+  fn f() -> Unit
+    invariant "无"
+  {
+    return Unit
+  }
+}`)
+	expectOne(t, res, "E1", "`return Unit` 是多余的")
+}
+
+// Unit 函数不写 return 是合法的（hello.dlt 就是这么写的）。
+func TestUnitWithoutReturnAccepted(t *testing.T) {
+	res := checkSrc(t, `entry E {
+  fn f() -> Unit
+    invariant "无"
+  {
+  }
+}`)
+	if len(res.Errors) != 0 {
+		t.Fatalf("Unit 函数不写 return 应当通过，得到 %v", res.Errors)
+	}
+}
+
+// 非 Unit 函数里写 `return Unit` 仍然是类型错误，不是"多余"。
+func TestReturnUnitInNonUnitFunction(t *testing.T) {
+	res := checkSrc(t, `entry E {
+  fn f() -> u64
+    invariant "无"
+  {
+    return Unit
+  }
+}`)
+	expectOne(t, res, "E1", "返回 Unit")
+}
+
 func TestBoundaryUnserializable(t *testing.T) {
 	// 用真实能力（Sys.log）做参数，免得跟 E2「运行时不提供能力」撞在一起。
-	res := checkSrc(t, `host Sys { fn log(msg: str) -> Unit }
+	res := checkSrc(t, `host Sys { fn log(str) -> Unit }
 
 boundary B @v1 {
   m() -> Sys
@@ -209,14 +246,14 @@ boundary B @v1 {
 }
 
 func TestHostCapabilityNotInRuntime(t *testing.T) {
-	res := checkSrc(t, `host Sys { fn nope(x: u64) -> Unit }
+	res := checkSrc(t, `host Sys { fn nope(u64) -> Unit }
 
 entry E {
   fn f(sys: Sys) -> Unit
     invariant "无"
   {
     sys.nope(1)
-    return Unit
+
   }
 }`)
 	expectOne(t, res, "E2", "运行时不提供能力 Sys.nope")
@@ -224,14 +261,14 @@ entry E {
 
 func TestHostCapabilityArity(t *testing.T) {
 	// 能力名对、参数个数不对：声明了 2 个，运行时原型是 1 个。
-	res := checkSrc(t, `host Sys { fn log(a: str, b: str) -> Unit }
+	res := checkSrc(t, `host Sys { fn log(str, str) -> Unit }
 
 entry E {
   fn f(sys: Sys) -> Unit
     invariant "无"
   {
     sys.log("a", "b")
-    return Unit
+
   }
 }`)
 	expectOne(t, res, "E2", "需要 1 个参数，声明了 2")
@@ -239,14 +276,14 @@ entry E {
 
 func TestHostCapabilityParamType(t *testing.T) {
 	// 声明谎报参数类型：以前 check 返回 ok，要等 cc 报 incompatible type。
-	res := checkSrc(t, `host Sys { fn log(x: u64) -> Unit }
+	res := checkSrc(t, `host Sys { fn log(u64) -> Unit }
 
 entry E {
   fn f(sys: Sys) -> Unit
     invariant "无"
   {
     sys.log(1)
-    return Unit
+
   }
 }`)
 	expectOne(t, res, "E2", "Sys.log 的第 1 个参数运行时是 str，声明为 u64")
@@ -260,7 +297,7 @@ entry E {
     invariant "无"
   {
     let t = sys.now_unix()
-    return Unit
+
   }
 }`)
 	expectOne(t, res, "E2", "Sys.now_unix 运行时返回 i64，声明为 str")
@@ -273,14 +310,14 @@ func TestHostCapabilityRecordParam(t *testing.T) {
 }
 
 host BlobFs {
-  fn read(root: ETag, key: str) -> bytes
+  fn read(ETag, str) -> bytes
 }
 
 entry E {
   fn f(fs: BlobFs) -> Unit
     invariant "无"
   {
-    return Unit
+
   }
 }`)
 	expectOne(t, res, "E2", "BlobFs.read 的第 1 个参数不能是 ETag")
@@ -309,7 +346,7 @@ entry E {
   {
     let r = R{a: 1}
     let s = R{a: "文本"}
-    return Unit
+
   }
 }`)
 	if len(res.Errors) < 2 {
@@ -330,7 +367,7 @@ entry E {
   fn f() -> Unit
     invariant "无"
   {
-    return Unit
+
   }
 }`)
 	expectOne(t, res, "E1", "不在 D0 子集")

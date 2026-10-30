@@ -8,7 +8,7 @@ More precisely: **the enabling layer for a generate-and-verify paradigm** — wh
 
 Droplet optimizes for one thing above all: **making AI mistakes impossible to keep silent, and making verification cheap enough that an agent will actually run it.** Not "a safer, more abstract, more elegant language" — a language where errors cannot stay hidden, checks finish in milliseconds, and the runtime is light enough to fit on the smallest production instance.
 
-> Status: **D0 implemented, D1 not started.** A 91-line example service (contract + handler) compiles to a C11 binary that boots in under 2 MB RSS and speaks HTTP/1.1; 58 Go tests cover lexer, parser, checker, generator, host-capability signatures, runtime dead-code audit, AST dump and contract export. The implemented language is a deliberate subset of the design — every gap carries a reason and a fill-in milestone in [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md). Full proposal: [docs/SPEC.md](docs/SPEC.md) (Chinese). Where things stand and what is next: [docs/NEXT.md](docs/NEXT.md).
+> Status: **D0 implemented, D1 not started.** A 91-line example service (contract + handler) compiles to a C11 binary that boots in under 2 MB RSS and speaks HTTP/1.1; 63 Go tests cover lexer, parser, checker, generator, host-capability signatures, runtime dead-code audit, AST dump and contract export. The implemented language is a deliberate subset of the design — every gap carries a reason and a fill-in milestone in [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md). Full proposal: [docs/SPEC.md](docs/SPEC.md) (Chinese). Where things stand and what is next: [docs/NEXT.md](docs/NEXT.md).
 
 ## Quick start
 
@@ -46,8 +46,12 @@ Droplet's answer is to make those facts **visible in the signature and checkable
 | H4 | Idle-service RSS in production | ≤ 3 MB |
 | H5 | Idle CPU / per-request overhead | ≤ 0.5% of one core / ≤ 2 µs |
 | H6 | **Marginal** memory cost per added route / task | reported by `droplet mem`, budgeted in CI |
+| H7 | **Repeated-writing budget**: the same field of a record literal written with the same constant ≥3 times, or the same keyword-and-brackets-only line ≥3 times | 0 occurrences — a gap in *syntax*, not in docs |
+| H8 | **Implementation-size budget**: lines per source file; compiler (excl. tests) + embedded runtime | ≤ 800 lines per file; ≤ 8000 lines total |
 
-H1 and H4–H6 squeeze the language from both sides (see SPEC §9 for the full mechanism-level reduction list and CI gates): one limits **how much you must teach the model**, the others limit **how much you may hide in the runtime — and how much each new feature adds to it**. A 3 MB idle service that balloons to 80 MB after 20 routes has not met the budget; the real bill is `routes × marginal bytes × instances`. Both disciplines point the same way — an invisible mechanism is invisible precisely because it decides something for you at runtime, and every decision costs memory. **What AI cannot verify is usually also what costs the most.**
+H1 and H4–H8 squeeze the language from both sides (see SPEC §9 for the full mechanism-level reduction list and CI gates): one limits **how much you must teach the model**, the others limit **how much you may hide in the runtime — and how much each new feature adds to it**. A 3 MB idle service that balloons to 80 MB after 20 routes has not met the budget; the real bill is `routes × marginal bytes × instances`. Both disciplines point the same way — an invisible mechanism is invisible precisely because it decides something for you at runtime, and every decision costs memory. **What AI cannot verify is usually also what costs the most.**
+
+H7 and H8 close the remaining two loopholes: H7 makes verbosity a *compiler* error (fix the syntax, don't add a doc section), and H8 keeps the verifier itself small enough to be read and repaired by an agent — a checker nobody can read only certifies trust.
 
 ## Paradigm (SPEC §0)
 

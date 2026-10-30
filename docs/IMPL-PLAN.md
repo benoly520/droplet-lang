@@ -1,6 +1,6 @@
 # Droplet 实现计划（D0 子集 → C 后端 → 示例 Web API 服务）
 
-> 状态：v0.2 / 2026-10-30 / 上位文档 `docs/SPEC.md` v0.4
+> 状态：v0.2 / 2026-10-30 / 上位文档 `docs/SPEC.md` v0.7
 > 目标：用最小语言子集跑通「`.dlt` → C 二进制 → 真实 HTTP 服务」闭环。
 > 首个真实服务是一个**通用哑存储 Web API**：字节级 CRUD + 版本头 + 可插拔的版本化钩子。
 >
@@ -203,7 +203,7 @@ type         := 'str' | 'bytes' | 'u64' | 'i64' | 'bool' | 'Unit'
 // 最小闭环：验证 lexer + parser + checker + codegen + cc 五层都能跑通
 // 判据：droplet build examples/hello.dlt && ./hello 打印 world
 host Sys {
-  fn log(msg: str) -> Unit
+  fn log(str) -> Unit
 }
 
 entry Demo {
@@ -211,7 +211,6 @@ entry Demo {
     invariant "greet 向标准输出写一行 world"
   {
     sys.log("world")
-    return Unit
   }
 }
 ```
@@ -239,22 +238,22 @@ type Response {
 }
 
 host BlobFs {
-  fn read(root: str, key: str) -> bytes | ApiError
-  fn write(root: str, key: str, body: bytes) -> ETag | ApiError
-  fn backup(root: str, key: str) -> Unit
-  fn create(root: str, key: str) -> bool | ApiError
-  fn list_json(root: str) -> bytes | ApiError
+  fn read(str, str) -> bytes | ApiError
+  fn write(str, str, bytes) -> ETag | ApiError
+  fn backup(str, str) -> Unit
+  fn create(str, str) -> bool | ApiError
+  fn list_json(str) -> bytes | ApiError
 }
 
 host Versioning {
-  fn commit_soon(root: str, key: str) -> Unit
+  fn commit_soon(str, str) -> Unit
 }
 
 host Sys {
   fn now_unix() -> i64
-  fn hash64(data: bytes) -> u64
-  fn u64_str(x: u64) -> str
-  fn log(msg: str) -> Unit
+  fn hash64(bytes) -> u64
+  fn u64_str(u64) -> str
+  fn log(str) -> Unit
 }
 
 boundary BlobApi @v1 {
@@ -595,7 +594,8 @@ droplet-lang/code/lang/
   internal/lex/lex.go
   internal/ast/ast.go
   internal/parse/parse.go
-  internal/check/check.go        # 两遍式检查，导出类型/Tag/Sigs 供 codegen 复用
+  internal/check/               # 两遍式检查，导出类型/Tag/Sigs 供 codegen 复用（8 个文件，同包）
+    check.go  types.go  decls.go  hostcap.go  boundary.go  stmts.go  exprs.go  calls.go
   internal/host/host.go          # host 能力表：名字 + 参数/返回的 ABI 类型 + 生成 C 调用的方式
   internal/dump/dump.go          # AST → JSON（M0 的验收出口）
   internal/gen/c.go              # AST → C11
@@ -753,8 +753,8 @@ SPEC §2.2 的 H7（重复书写预算）是补上去的，而 D0 的实现正�
 | --- | --- | --- | --- |
 | `Response` 的 `etag` 字段可推导 | `etag: ""` ×4，共 5 处构造；唯一非空值是 `sys.u64_str(etag.hash)`，而 GET 路径的 tag 也是 `sys.u64_str(sys.hash64(body))` —— 同一个东西算了两遍 | 删掉 `etag` 字段，由运行时从 body 算。**不能靠“字段默认值”绕过**：§5.2 已写明“缺省值必须显式构造，零值不合法” | D1（动 HTTP 契约） |
 | `entry X { fn f }` 双层外壳 | 2 处 `entry`（`hello.dlt` 的 `Demo`、`main.dlt` 的 `Serve`），每处只有 1 个 `fn`，这层从不承载内容（鉴权/超时预算是 D1 才有的） | 把签名直接挂在 `entry` 上，去掉内层 `fn` | D1（动 AST 与 gen 的入口查找） |
-| host 声明的参数名 | `fn log(msg: str)` 的 `msg` 既不影响语义，也不进报错文本（报错写的是“第 N 个参数”） | 从语法里删掉：`fn log(str) -> Unit` | D0 可修（只改 parser 与样例） |
-| 末尾 `return Unit` | `hello.dlt` 11 行有效代码里的 1 行纯骨架；任一 Unit 函数都要写 | 规定 Unit 函数**不写** `return` | D0 可修（只改 parser 与 gen） |
+| host 声明的参数名 | `fn log(msg: str)` 的 `msg` 既不影响语义，也不进报错文本（报错写的是“第 N 个参数”） | 从语法里删掉：`fn log(str) -> Unit` | **已落地**（v0.7，只改 parser 与样例） |
+| 末尾 `return Unit` | `hello.dlt` 11 行有效代码里的 1 行纯骨架；任一 Unit 函数都要写 | 规定 Unit 函数**不写** `return` | **已落地**（v0.7，只改 parser 与 gen） |
 | `boundary ... with idempotency` | 单个效果也要 `with` | 单效果用标记：`get(key: str) -> bytes idempotent` | D1 |
 
 **减法一律采取“必不写”，不用“可省略”。** 允许省略只是把“必写”变成“写不写都行”：手写字节没少、
@@ -763,8 +763,18 @@ SPEC §2.2 的 H7（重复书写预算）是补上去的，而 D0 的实现正�
 `match` 分支之间必须写逗号、尾随可选 —— 这条容易漏，但它**不是 H7 项**（逗号不是重复书写，
 是分隔符），已记在 §5.4 与 §8.1。
 
-「D0 可修」的两条不改语义、不改生成的 C，只改 parse；「D1」的三条会动 AST 或 HTTP 契约，按里程碑走。
-不修，H7 就只是一句口号 —— 而它存在的理由正是“口号拦不住样板”。
+两条「D0 可修」已于 2026-10-30 落地（SPEC §5.1.1）：旧写法一律编译期报错并给改写提示
+（`E0006: host 能力的参数不写名字：把 “…: ...” 改成只写类型`、
+`E1: …是多余的：返回 Unit 的函数不写 return，删掉这一行即可`），不做静默兼容；
+`boundary` 方法与普通函数的参数名保留（前者进对外契约 JSON，后者进函数体）。
+
+硬证据：`droplet build -print-c` 在「旧样例 + 旧编译器」与「新样例 + 新编译器」下输出**逐字相同**
+（`hello.dlt` 与 `webapi` 各一份）；等价性本来也可以从结构上看出来 —— 能力调用走
+`internal/host` 的运行时原型（参数名不参与生成），`return Unit` 与 gen 的兜底
+`return ((dp_unit){0});` 是同一句。减法不改变语义，只改变要写的字节。
+
+「D1」的三条会动 AST 或 HTTP 契约，按里程碑走。不修，H7 就只是一句口号 ——
+而它存在的理由正是“口号拦不住样板”。
 
 ### 8.3 H8 基线：D0 的实现规模
 
@@ -772,26 +782,40 @@ H8 是 SPEC §2.2 里最新补的一条（单文件 ≤ 800 行、编译器 + �
 
 | 位置 | 行数 | 对照 H8 |
 | --- | --- | --- |
-| `internal/check/check.go` | 1188 | **违反**（上限 800） |
 | `internal/gen/c.go` | 798 | 卡线 |
-| `internal/parse/parse.go` | 609 | ok |
+| `internal/check/`（8 个文件，最大 `types.go` 225） | 1275 | ok |
+| `internal/parse/parse.go` | 627 | ok |
 | `internal/ast` | 377 | ok |
 | `internal/lex` | 311 | ok |
 | `internal/dump` | 262 | ok |
 | 其余（cmd / contract / host / token / runtime） | 774 | ok |
-| Go 非测试合计 | 4319 | — |
+| Go 非测试合计 | 4424 | — |
 | 内嵌运行时 C（4 个 `.c` + `rt.h`） | 1462（最大 `rt_http.c` 615） | ok |
-| **合计** | **5781** | 占 8000 的 72% |
+| **合计** | **5886** | 占 8000 的 74% |
 
 另一个不打算消灭、只打算标价的数字：**新增一个 AST 节点要改 5 处** —— `ast`（结构体）→ `parse`（解析）→
 `check`（类型与签名）→ `gen`（生成 C）→ `dump`（`parse` 的输出）。这是管道结构的必然，不是缺陷；
 登记它只是为了在“加个语法”的决策时看得见价钱。目前只有 `dump` 有专用护栏（`Unknown*` 两条测试），
-`check` 与 `gen` 靠 58 个用例。
+`check` 与 `gen` 靠 63 个用例。
 
-处置（唯一真违反）：`check.go` 1188 行**同包拆 7 个文件**（不拆包）：`check.go` 编排与 `Result`、
-`types.go`（`Kind`/`Type`/作用域/`resolve`）、`decls.go`（声明收集与签名）、`hostcap.go`（能力表比对）、
-`boundary.go`（边界与入口意图）、`stmts.go`（块/`if`/`match`）、`exprs.go`（表达式与调用）。目标每个 ≤ 250 行，
-**逻辑零改动**，由 58 个用例 + `accept.sh` 12 项兜底。
+处置（已完成 2026-10-30）：`check.go` 原 1188 行**同包拆 8 个文件**（不拆包）——
+`check.go`（编排与 `Result`，161）、`types.go`（类型 / 作用域 / 类型判定，225）、
+`decls.go`（声明收集与签名，213）、`hostcap.go`（能力表比对，76）、
+`boundary.go`（边界与意图，87）、`stmts.go`（函数体与语句，196）、
+`exprs.go`（表达式，214）、`calls.go`（调用与实参，103）。
+
+比原计划（7 个）多一个 `calls.go`：7 文件方案下 `exprs.go` 会到 303 行，超过 250 目标 ——
+「拆了等于没解决痛点」，H8 的度量单位是"一处改动要读多少上下文"，不是"文件数达标"。
+
+**逻辑零改动**，三条独立证据：
+
+1. **代码级**：56 个顶层声明（去掉注释与缩进后）逐字一致 —— 用脚本把两边的声明切开排序比对；
+2. **行为级**：`droplet build -print-c` 的 C 输出逐字相同（`webapi` 与 `hello.dlt` 各一份），
+   `droplet contract` 的 JSON 与 `droplet parse` 的 AST JSON 也逐字相同；
+3. **诊断级**：7 个反例（E1 未定义类型 / E11 缺意图 / E2 能力参数谎报 / E3 不可序列化 /
+   env 拒收 / match 未穷尽 / 变体带字段）的错误输出逐字相同，含行列号与消息。
+
+兜底是 63 个用例 + `accept.sh` 12 项 + `go vet`。
 
 ## 9. 风险与回退
 

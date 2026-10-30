@@ -47,8 +47,8 @@ func TestParseHello(t *testing.T) {
 	if fn.Intents[0].Kind != "invariant" {
 		t.Errorf("intent 类型 %q，期望 invariant", fn.Intents[0].Kind)
 	}
-	if fn.Body == nil || len(fn.Body.Stmts) != 2 {
-		t.Fatalf("greet 函数体应为 2 条语句，得到 %+v", fn.Body)
+	if fn.Body == nil || len(fn.Body.Stmts) != 1 {
+		t.Fatalf("greet 函数体应为 1 条语句（Unit 函数不写 return），得到 %+v", fn.Body)
 	}
 }
 
@@ -119,13 +119,46 @@ func TestParseErrorReportsPosition(t *testing.T) {
 	}
 }
 
+// host 能力参数不写名字：名字的权威是 internal/host 的运行时原型，
+// 声明处再写一遍是零信息的重复书写。
+func TestHostParamNameRejected(t *testing.T) {
+	src := `host Sys {
+  fn log(msg: str) -> Unit
+}`
+	_, err := File("t.dlt", src)
+	if err == nil {
+		t.Fatal("host 能力参数带名字应当报错")
+	}
+	if !strings.Contains(err.Error(), "不写名字") {
+		t.Errorf("错误信息缺少改写提示：%v", err)
+	}
+}
+
+// 无名参数是 host 能力的正确写法。
+func TestHostParamAnonAccepted(t *testing.T) {
+	src := `host Sys {
+  fn log(str) -> Unit
+}`
+	prog, err := File("t.dlt", src)
+	if err != nil {
+		t.Fatalf("解析失败：%v", err)
+	}
+	h := prog.Items[0].(*ast.HostDecl)
+	if len(h.Fns[0].Params) != 1 {
+		t.Fatalf("参数个数 %d，期望 1", len(h.Fns[0].Params))
+	}
+	if h.Fns[0].Params[0].Name != "" {
+		t.Errorf("host 能力参数不应有名字，得到 %q", h.Fns[0].Params[0].Name)
+	}
+}
+
 func TestIfBlockNotParsedAsConstruct(t *testing.T) {
 	src := `entry E {
   fn f(x: bool) -> Unit {
     if x {
-      return Unit
+
     }
-    return Unit
+
   }
 }`
 	prog, err := File("t.dlt", src)
@@ -134,8 +167,8 @@ func TestIfBlockNotParsedAsConstruct(t *testing.T) {
 	}
 	entry := prog.Items[0].(*ast.EntryDecl)
 	stmts := entry.Fns[0].Body.Stmts
-	if len(stmts) != 2 {
-		t.Fatalf("语句数 %d，期望 2", len(stmts))
+	if len(stmts) != 1 {
+		t.Fatalf("语句数 %d，期望 1", len(stmts))
 	}
 	if _, ok := stmts[0].(*ast.If); !ok {
 		t.Errorf("首条语句应为 if，得到 %T", stmts[0])

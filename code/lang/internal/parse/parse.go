@@ -108,7 +108,7 @@ func (p *Parser) parseItem() ast.Item {
 	case token.KwType:
 		return p.parseTypeDecl()
 	case token.KwFn:
-		return p.parseFn(true)
+		return p.parseFn(true, false)
 	case token.KwEntry:
 		return p.parseEntry()
 	case token.KwHost:
@@ -168,11 +168,14 @@ func (p *Parser) parseVariant() ast.Variant {
 
 // ---------- 函数与入口 ----------
 
-func (p *Parser) parseFn(allowBody bool) *ast.FnDecl {
+// parseFn 解析函数声明或 host 能力声明。
+//
+// hostSig 为真表示这是 host 能力签名：参数只写类型，不写名字。
+func (p *Parser) parseFn(allowBody, hostSig bool) *ast.FnDecl {
 	start := p.advance().Pos // fn
 	fn := &ast.FnDecl{Pos: start, Name: p.expectIdent("函数名").Text}
 	p.expect(token.LParen, "(")
-	fn.Params = p.parseParams()
+	fn.Params = p.parseParams(hostSig)
 	p.expect(token.RParen, ")")
 	p.expect(token.Arrow, "->")
 	fn.Ret = p.parseType()
@@ -183,12 +186,26 @@ func (p *Parser) parseFn(allowBody bool) *ast.FnDecl {
 	return fn
 }
 
-func (p *Parser) parseParams() []ast.Param {
+// parseParams 解析参数列表。
+//
+// host 能力签名里参数名不承载信息（权威是 internal/host 的运行时原型，
+// 那里有名字与 ABI 类型），所以只写类型：fn read(str, str) -> bytes。
+// 普通函数的参数要进函数体引用，必须写名字：fn handle(req: Request) -> Response。
+func (p *Parser) parseParams(hostSig bool) []ast.Param {
 	params := []ast.Param{}
 	for !p.at(token.RParen) {
-		pr := ast.Param{Pos: p.cur().Pos, Name: p.expectIdent("参数名").Text}
-		p.expect(token.Colon, ":")
-		pr.Type = p.parseType()
+		pr := ast.Param{Pos: p.cur().Pos}
+		if hostSig {
+			if p.peekKind(1) == token.Colon {
+				p.fail(p.cur().Pos,
+					"E0006: host 能力的参数不写名字：把 `%s: ...` 改成只写类型", p.cur().Text)
+			}
+			pr.Type = p.parseType()
+		} else {
+			pr.Name = p.expectIdent("参数名").Text
+			p.expect(token.Colon, ":")
+			pr.Type = p.parseType()
+		}
 		params = append(params, pr)
 		if p.at(token.Comma) {
 			p.advance()
@@ -252,7 +269,7 @@ func (p *Parser) parseEntry() ast.Item {
 	e := &ast.EntryDecl{Pos: start, Name: p.expectIdent("entry 名").Text}
 	p.expect(token.LBrace, "{")
 	for p.at(token.KwFn) {
-		e.Fns = append(e.Fns, p.parseFn(true))
+		e.Fns = append(e.Fns, p.parseFn(true, false))
 	}
 	p.expect(token.RBrace, "}")
 	return e
@@ -263,7 +280,7 @@ func (p *Parser) parseHost() ast.Item {
 	h := &ast.HostDecl{Pos: start, Name: p.expectIdent("host 名").Text}
 	p.expect(token.LBrace, "{")
 	for p.at(token.KwFn) {
-		h.Fns = append(h.Fns, p.parseFn(false))
+		h.Fns = append(h.Fns, p.parseFn(false, true))
 	}
 	p.expect(token.RBrace, "}")
 	return h
@@ -311,7 +328,8 @@ func (p *Parser) parseBoundary() ast.Item {
 	for !p.at(token.RBrace) {
 		m := &ast.BndMethod{Pos: p.cur().Pos, Name: p.expectIdent("方法名").Text}
 		p.expect(token.LParen, "(")
-		m.Params = p.parseParams()
+		// boundary 方法的参数名进对外契约 JSON，必须保留。
+		m.Params = p.parseParams(false)
 		p.expect(token.RParen, ")")
 		p.expect(token.Arrow, "->")
 		m.Ret = p.parseType()

@@ -107,7 +107,7 @@ entry E {
   fn f() -> Unit
     invariant "无"
   {
-    return Unit
+
   }
 }`
 	prog, err := parse.File("t.dlt", src)

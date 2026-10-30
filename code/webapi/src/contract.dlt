@@ -20,22 +20,22 @@ type Response {
 }
 
 host BlobFs {
-  fn read(root: str, key: str) -> bytes | ApiError
-  fn write(root: str, key: str, body: bytes) -> ETag | ApiError
-  fn backup(root: str, key: str) -> Unit
-  fn create(root: str, key: str) -> bool | ApiError
-  fn list_json(root: str) -> bytes | ApiError
+  fn read(str, str) -> bytes | ApiError
+  fn write(str, str, bytes) -> ETag | ApiError
+  fn backup(str, str) -> Unit
+  fn create(str, str) -> bool | ApiError
+  fn list_json(str) -> bytes | ApiError
 }
 
 host Versioning {
-  fn commit_soon(root: str, key: str) -> Unit
+  fn commit_soon(str, str) -> Unit
 }
 
 host Sys {
   fn now_unix() -> i64
-  fn hash64(data: bytes) -> u64
-  fn u64_str(x: u64) -> str
-  fn log(msg: str) -> Unit
+  fn hash64(bytes) -> u64
+  fn u64_str(u64) -> str
+  fn log(str) -> Unit
 }
 
 boundary BlobApi @v1 {
