@@ -58,10 +58,29 @@ func (c *checker) declare() {
 			}
 
 		case *ast.EnvDecl:
-			// D0 不实现 env：parser 认识它、checker 与 gen 都不处理，不报错就等于
-			// 静默丢配置（半实现比不支持更危险）。
-			c.errorf(n.Pos, "E1",
-				"env 声明不在 D0 子集（D1 实现）；配置目前走环境变量，见 docs/IMPL-PLAN.md §6")
+			// env 块名就是一个类型（D1）：入口参数写 cfg: App 就是普通的 record 引用，
+			// 不需要新的类型面；不同的是它只能由生成的加载器构造，源码里写不出字面量。
+			if c.env != nil {
+				c.errorf(n.Pos, "E1", "env 块只能有一个：%s 与 %s，D1 不支持多套配置",
+					c.env.Name, n.Name)
+				continue
+			}
+			if builtin(n.Name) != nil {
+				c.errorf(n.Pos, "E1", "配置名 %s 与内置类型冲突", n.Name)
+				continue
+			}
+			if _, dup := c.types[n.Name]; dup {
+				c.errorf(n.Pos, "E1", "配置名 %s 与类型 %s 重名", n.Name, n.Name)
+				continue
+			}
+			c.types[n.Name] = &Type{
+				Kind:         KRecord,
+				Name:         n.Name,
+				Pos:          n.Pos,
+				FieldsByName: map[string]*Field{},
+				IsEnv:        true,
+			}
+			c.env = &EnvSpec{Name: n.Name, Prefix: envPrefix(n.Name), Pos: n.Pos}
 		}
 	}
 }
@@ -107,7 +126,65 @@ func (c *checker) fillTypes() {
 				t.VariantsByName[v.Name] = vv
 				c.variantOrder = append(c.variantOrder, v.Name)
 			}
+
+		case *ast.EnvDecl:
+			if c.env == nil || c.env.Name != n.Name {
+				continue // 重名的块已在 declare() 报过，不在此处叠加
+			}
+			c.fillEnv(n)
 		}
+	}
+}
+
+// fillEnv 把 env 键解析成字段与加载面：类型限子集、默认值形状必须匹配类型。
+func (c *checker) fillEnv(n *ast.EnvDecl) {
+	owner := c.types[n.Name]
+	for _, f := range n.Fields {
+		if _, dup := owner.FieldsByName[f.Name]; dup {
+			c.errorf(f.Pos, "E1", "配置键 %s 重复", f.Name)
+			continue
+		}
+		ft := c.resolve(f.Type)
+		if ft.Kind != KU64 && ft.Kind != KStr {
+			c.errorf(f.Pos, "E1", "配置键 %s 的类型 %s 不支持：env 只接受 u64 与 str",
+				f.Name, ft.Name)
+			continue
+		}
+		key := EnvKey{Name: f.Name, Pos: f.Pos, Type: ft}
+		if val, has, ok := c.envDefault(f, ft); ok {
+			key.Default, key.HasDefault = val, has
+		}
+		c.env.Keys = append(c.env.Keys, key)
+		fd := &Field{Name: f.Name, Pos: f.Pos, Type: ft}
+		owner.Fields = append(owner.Fields, fd)
+		owner.FieldsByName[f.Name] = fd
+	}
+}
+
+// envDefault 校验默认值与声明类型是否同形。
+// 返回（值, 有没有默认值, 形状是否合法）：第三个为 false 时已报过错。
+func (c *checker) envDefault(f ast.EnvField, ft *Type) (string, bool, bool) {
+	if f.Default == nil {
+		return "", false, true // 必填：没有默认值，但不是错误
+	}
+	bad := func(got string) (string, bool, bool) {
+		c.errorf(f.Pos, "E1",
+			"配置键 %s 声明为 %s，默认值却是 %s：删掉默认值或改成同类型字面量", f.Name, ft.Name, got)
+		return "", false, false
+	}
+	switch n := f.Default.(type) {
+	case *ast.IntLit:
+		if ft.Kind != KU64 {
+			return bad("整数字面量")
+		}
+		return n.Value, true, true
+	case *ast.StrLit:
+		if ft.Kind != KStr {
+			return bad("字符串字面量")
+		}
+		return n.Value, true, true
+	default:
+		return bad("非字面量")
 	}
 }
 
@@ -162,7 +239,7 @@ func (c *checker) registerFn(fn *ast.FnDecl, host string, isEntry bool) *FnSig {
 }
 
 func (c *checker) newSig(fn *ast.FnDecl, host string) *FnSig {
-	sig := &FnSig{Name: fn.Name, Pos: fn.Pos, Host: host, Decl: fn}
+	sig := &FnSig{Name: fn.Name, Pos: fn.Pos, Host: host, Decl: fn, ReqIdx: -1}
 	for _, p := range fn.Params {
 		sig.Params = append(sig.Params, c.resolve(p.Type))
 		sig.ParamNames = append(sig.ParamNames, p.Name)

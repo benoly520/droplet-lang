@@ -40,6 +40,7 @@ type Result struct {
 	Sigs      map[string]*FnSig
 	Types     map[string]*Type
 	Hosts     map[string]*Type
+	Env       *EnvSpec // 程序的 env 声明；没有就是 nil
 }
 
 // ---------- 检查器 ----------
@@ -54,6 +55,8 @@ type checker struct {
 
 	scope *scope
 	curFn *FnSig
+
+	env *EnvSpec // 已见过的 env 块（D1 只允许一个）
 
 	variantOrder []string          // 变体声明顺序，保证 tag 分配稳定
 	variantOwner map[string]string // 变体名 → 首次声明它的 sum，保证 tag 全局唯一
@@ -82,6 +85,7 @@ func Program(p *ast.Program) *Result {
 	c.fillTypes()
 	c.declareFns()
 	c.checkBodies()
+	c.checkEnvService()
 
 	// 入口只能有一个：c.fns 是 map，多入口时按迭代顺序选 EntryPoint
 	// 等于生成哪个 main 由随机数决定 —— 按名字排之后报错，取第一个。
@@ -118,6 +122,9 @@ func Program(p *ast.Program) *Result {
 		Sigs:      c.fns,
 		Types:     c.types,
 		Hosts:     c.hosts,
+	}
+	if c.env != nil {
+		res.Env = c.env
 	}
 	if len(entries) > 0 {
 		res.EntryPoint = entries[0]

@@ -65,6 +65,10 @@ func (g *gen) typeDecls() {
 			names = append(names, n.Name)
 		case *ast.SumType:
 			names = append(names, n.Name)
+		case *ast.EnvDecl:
+			// env 块名就是一个 record：它的 struct 与字段由这里统一生成，
+			// 不同之处只在构造点（只有生成的加载器造得出它）。
+			names = append(names, n.Name)
 		}
 	}
 	if len(names) == 0 {

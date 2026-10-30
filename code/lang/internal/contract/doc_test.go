@@ -74,6 +74,40 @@ func TestWebapiContract(t *testing.T) {
 	}
 }
 
+// TestEnvExport 锁定配置面的导出：运维拿到这份 JSON 就能拼出环境变量，
+// 而不需要去猜哪个键是必填的（SPEC §5.7 的「缺键即起不来」要能被预先查）。
+func TestEnvExport(t *testing.T) {
+	prog, res := load(t, "../../../webapi/src/contract.dlt", "../../../webapi/src/main.dlt")
+	doc := Build(prog, res)
+
+	if len(doc.Envs) != 1 {
+		t.Fatalf("期望 1 个 env 块，得到 %d", len(doc.Envs))
+	}
+	g := doc.Envs[0]
+	if g.Name != "App" || g.Prefix != "APP" {
+		t.Fatalf("块名与前缀错：%s / %s", g.Name, g.Prefix)
+	}
+	if len(g.Keys) != 5 {
+		t.Fatalf("期望 5 个配置键，得到 %d", len(g.Keys))
+	}
+	want := map[string]Env{
+		"port":     {Name: "port", Type: "u64", Var: "APP_PORT", Default: "8787"},
+		"bind":     {Name: "bind", Type: "str", Var: "APP_BIND", Default: `"0.0.0.0"`},
+		"root":     {Name: "root", Type: "str", Var: "APP_ROOT", Required: true},
+		"token":    {Name: "token", Type: "str", Var: "APP_TOKEN", Default: `""`},
+		"max_body": {Name: "max_body", Type: "u64", Var: "APP_MAX_BODY", Default: "8388608"},
+	}
+	for _, k := range g.Keys {
+		w, ok := want[k.Name]
+		if !ok {
+			t.Fatalf("多了一个配置键：%s", k.Name)
+		}
+		if k.Type != w.Type || k.Var != w.Var || k.Default != w.Default || k.Required != w.Required {
+			t.Fatalf("配置键 %s 导出错：得到 %+v，期望 %+v", k.Name, k, w)
+		}
+	}
+}
+
 // TestTagNumbers 锁定 tag 分配规则：错误变体从 100 起，其余从 1 起，成功不占位。
 func TestTagNumbers(t *testing.T) {
 	prog, res := load(t, "../../../webapi/src/contract.dlt", "../../../webapi/src/main.dlt")
@@ -136,5 +170,9 @@ func TestNilResult(t *testing.T) {
 	}
 	if len(doc.Boundaries) != 1 {
 		t.Fatalf("boundary 应照旧导出，得到 %d", len(doc.Boundaries))
+	}
+	// env 也只靠语法树就能导出：变量名与必填性都是声明里的事实。
+	if len(doc.Envs) != 1 || len(doc.Envs[0].Keys) != 5 {
+		t.Fatalf("env 应照旧导出，得到 %+v", doc.Envs)
 	}
 }

@@ -29,6 +29,16 @@ func (c *checker) checkConstruct(n *ast.Construct) *Type {
 		}
 		return tInval
 	}
+	if t.IsEnv {
+		// 配置的值来自启动环境，不来自源码：能写 `App{ … }` 就等于把部署事实硬编码进二进制，
+		// 而 SPEC §5.7 要的正是「缺键在起服务前就失败」而不是「缺键被一个字面量补上」。
+		c.errorf(n.Pos, "E1",
+			"配置类型 %s 不能在源码里构造：它的值来自 env 声明与启动环境", t.Name)
+		for _, f := range n.Fields {
+			c.checkExpr(f.Value)
+		}
+		return t
+	}
 	c.checkFields(t.Name, t.Fields, t.FieldsByName, n.Fields, n.Pos)
 	return t
 }

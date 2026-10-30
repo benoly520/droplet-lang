@@ -492,7 +492,7 @@ static void handle_conn(int fd, dp_handler h, const dp_cfg* cfg) {
 
   dp_response resp;
   memset(&resp, 0, sizeof resp);
-  int rc = h(a, cfg->root, &rq, &resp);
+  int rc = h(a, &rq, &resp);
   if (rc != 0) {
     send_status(fd, status_for_tag(rc), "error");
     dp_arena_free(a);
@@ -517,28 +517,6 @@ static void handle_conn(int fd, dp_handler h, const dp_cfg* cfg) {
 
 /* ---------- 入口 ---------- */
 
-dp_cfg dp_cfg_from_env(void) {
-  dp_cfg c;
-  const char* port = getenv("DP_PORT");
-  const char* bind_addr = getenv("DP_BIND");
-  const char* root = getenv("DP_ROOT");
-  const char* token = getenv("DP_TOKEN");
-  const char* max_body = getenv("DP_MAX_BODY");
-
-  c.port = port ? (uint16_t)strtoul(port, NULL, 10) : (uint16_t)8787;
-  c.bind = dp_str_from_cstr(bind_addr && bind_addr[0] ? bind_addr : "0.0.0.0");
-  c.root = dp_str_from_cstr(root ? root : "./data");
-  c.token = dp_str_from_cstr(token ? token : "");
-  c.max_body = max_body ? (size_t)strtoul(max_body, NULL, 10) : (8u << 20);
-  if (c.port == 0u) {
-    c.port = 8787;
-  }
-  if (c.max_body == 0u) {
-    c.max_body = 8u << 20;
-  }
-  return c;
-}
-
 int dp_serve(dp_handler h, const dp_cfg* cfg) {
   signal(SIGPIPE, SIG_IGN);
   /* commit 子进程只 fork 不 wait，忽略 SIGCHLD 让内核自动收割，不留僵尸 */
@@ -548,7 +526,7 @@ int dp_serve(dp_handler h, const dp_cfg* cfg) {
    * 那就是「启动成功、运行全废」的静默降级。宁可当场失败。 */
   char rootbuf[4096];
   if (cfg->root.n == 0u || cfg->root.n >= sizeof rootbuf) {
-    fprintf(stderr, "droplet: DP_ROOT 长度 %zu 不在 1..%zu\n",
+    fprintf(stderr, "droplet: 配置 root 长度 %zu 不在 1..%zu\n",
             (size_t)cfg->root.n, sizeof rootbuf - 1u);
     return 1;
   }
@@ -574,15 +552,21 @@ int dp_serve(dp_handler h, const dp_cfg* cfg) {
   addr.sin_addr.s_addr = htonl(INADDR_ANY);
   addr.sin_port = htons(cfg->port);
 
-  /* 监听地址：默认全网；放反代后面时用 DP_BIND=127.0.0.1 收窄 */
+  /* 监听地址由 env 声明给出（默认值也写在那里）：不是合法 IPv4 就不起服务，
+   * 不默默回退到全网监听。 */
   char bindbuf[64];
-  if (cfg->bind.n > 0u && cfg->bind.n < sizeof bindbuf) {
-    memcpy(bindbuf, cfg->bind.p, cfg->bind.n);
-    bindbuf[cfg->bind.n] = '\0';
-    if (inet_pton(AF_INET, bindbuf, &addr.sin_addr) != 1) {
-      fprintf(stderr, "droplet: DP_BIND=%s 不是合法 IPv4，回退 0.0.0.0\n", bindbuf);
-      addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    }
+  if (cfg->bind.n == 0u || cfg->bind.n >= sizeof bindbuf) {
+    fprintf(stderr, "droplet: 配置 bind 长度 %zu 不在 1..%zu\n",
+            (size_t)cfg->bind.n, sizeof bindbuf - 1u);
+    close(s);
+    return 1;
+  }
+  memcpy(bindbuf, cfg->bind.p, cfg->bind.n);
+  bindbuf[cfg->bind.n] = '\0';
+  if (inet_pton(AF_INET, bindbuf, &addr.sin_addr) != 1) {
+    fprintf(stderr, "droplet: 配置 bind=%s 不是合法 IPv4\n", bindbuf);
+    close(s);
+    return 1;
   }
 
   if (bind(s, (struct sockaddr*)&addr, sizeof addr) < 0) {

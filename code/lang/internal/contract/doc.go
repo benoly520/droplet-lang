@@ -8,6 +8,7 @@ package contract
 import (
 	"sort"
 	"strconv"
+	"strings"
 
 	"droplet/internal/ast"
 	"droplet/internal/check"
@@ -15,12 +16,11 @@ import (
 )
 
 // Doc 是导出的契约文档。
-//
-// 没有 envs 一项：D0 的 checker 拒绝 env 声明，contract 根本走不到导出那一步。
 type Doc struct {
 	Boundaries []Boundary `json:"boundaries"`
 	Functions  []Function `json:"functions"`
 	Tags       []Tag      `json:"tags"`
+	Envs       []EnvGroup `json:"envs,omitempty"`
 }
 
 // Boundary 是一个对外接口声明。
@@ -45,6 +45,23 @@ type Field struct {
 	Name    string `json:"name"`
 	Type    string `json:"type"`
 	Default string `json:"default,omitempty"`
+}
+
+// EnvGroup 是一个 env 块。Prefix 是环境变量前缀，运维对照的就这一行。
+type EnvGroup struct {
+	Name   string `json:"name"`
+	Prefix string `json:"prefix"`
+	Keys   []Env  `json:"keys"`
+}
+
+// Env 是一个配置键。required 为 true 代表缺失即启动失败；
+// var 是它的读取面 —— 源码里不出现这个名字，但部署的人必须看得见（SPEC §5.7）。
+type Env struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Var      string `json:"var"`
+	Default  string `json:"default,omitempty"`
+	Required bool   `json:"required"`
 }
 
 // Function 是一个函数签名；Entry 为 true 表示它是入口。
@@ -98,6 +115,8 @@ func Build(prog *ast.Program, res *check.Result) Doc {
 			doc.Boundaries = append(doc.Boundaries, boundaryOf(n))
 		case *ast.FnDecl:
 			doc.Functions = append(doc.Functions, functionOf(n, n.Entry, hostSet))
+		case *ast.EnvDecl:
+			doc.Envs = append(doc.Envs, envOf(n))
 		}
 	}
 
@@ -115,6 +134,21 @@ func Build(prog *ast.Program, res *check.Result) Doc {
 		}
 	}
 	return doc
+}
+
+// envOf 导出一个 env 块。前缀与变量名的规则只定在 check 里一处，这里只负责呈现。
+func envOf(n *ast.EnvDecl) EnvGroup {
+	g := EnvGroup{Name: n.Name, Prefix: strings.ToUpper(n.Name), Keys: make([]Env, 0, len(n.Fields))}
+	for _, f := range n.Fields {
+		g.Keys = append(g.Keys, Env{
+			Name:     f.Name,
+			Type:     typeOf(f.Type),
+			Var:      check.EnvVar(g.Prefix, f.Name),
+			Default:  exprOf(f.Default),
+			Required: f.Default == nil,
+		})
+	}
+	return g
 }
 
 func boundaryOf(n *ast.BoundaryDecl) Boundary {

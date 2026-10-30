@@ -27,7 +27,7 @@ const usageText = `droplet - Droplet 语言工具链
   droplet check <file.dlt>...            类型与错误检查
   droplet build <file.dlt>... -o <out>   生成 C、调用 cc，产出可执行文件
                                          -print-c 只输出 C；-keep-c 保留 <out>.c
-  droplet contract <file.dlt>...         导出契约 JSON（boundary / 函数签名 / tag 表）
+  droplet contract <file.dlt>...         导出契约 JSON（boundary / 函数签名 / tag 表 / env 配置）
   droplet help                           显示本帮助
 `
 

@@ -62,8 +62,8 @@ func startBlobdIn(t *testing.T, root string, env ...string) (string, func()) {
 
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("DP_PORT=%d", port),
-		"DP_ROOT="+root,
+		fmt.Sprintf("APP_PORT=%d", port),
+		"APP_ROOT="+root,
 	)
 	cmd.Env = append(cmd.Env, env...)
 	cmd.Stdout = io.Discard
@@ -229,6 +229,18 @@ func TestServiceEndToEnd(t *testing.T) {
 	})
 }
 
+// svcEnv 是服务形态必需的 env 声明：checker 要求补齐运行时五键（SPEC §5.7），
+// 内联探针都要带上它才能走到生成期。值本身不重要，这些探针不跑进程。
+const svcEnv = `env App {
+  port: u64 = 18999,
+  bind: str = "127.0.0.1",
+  root: str = "/tmp/dp-probe",
+  token: str = "",
+  max_body: u64 = 1024
+}
+
+`
+
 // genErrText 走完 parse → check → gen，返回生成期的报错（没有错误返回 ""）。
 func genErrText(t *testing.T, text string) string {
 	t.Helper()
@@ -247,7 +259,7 @@ func genErrText(t *testing.T, text string) string {
 // TestResponseEtagFieldRejected 锁住 v0.10 的第四条语法减法：ETag 由运行时从 body
 // 推导，所以 Response 里再写 etag 不是「可以忽略」，而是在生成期就报错并给改法。
 func TestResponseEtagFieldRejected(t *testing.T) {
-	got := genErrText(t, `type ApiError = NotFound
+	got := genErrText(t, svcEnv+`type ApiError = NotFound
 
 type Request { method: str }
 
@@ -257,7 +269,7 @@ type Response {
   etag: str
 }
 
-entry handle(req: Request, root: str) -> Response | ApiError
+entry handle(req: Request) -> Response | ApiError
   invariant "一律 405"
 {
   return Response{status: 405, body: b"", etag: "x"}
@@ -269,7 +281,7 @@ entry handle(req: Request, root: str) -> Response | ApiError
 
 // TestUnknownResponseFieldRejected：不在响应面上的字段一律拒绝，不能静默丢弃。
 func TestUnknownResponseFieldRejected(t *testing.T) {
-	got := genErrText(t, `type ApiError = NotFound
+	got := genErrText(t, svcEnv+`type ApiError = NotFound
 
 type Request { method: str }
 
@@ -279,7 +291,7 @@ type Response {
   retry_after: u64
 }
 
-entry handle(req: Request, root: str) -> Response | ApiError
+entry handle(req: Request) -> Response | ApiError
   invariant "一律 405"
 {
   return Response{status: 405, body: b"", retry_after: 1}
@@ -513,12 +525,50 @@ func TestMissingRootFailsFast(t *testing.T) {
 
 	missing := filepath.Join(t.TempDir(), "nope")
 	cmd := exec.Command(bin)
-	cmd.Env = append(os.Environ(), "DP_PORT=18795", "DP_ROOT="+missing)
+	cmd.Env = append(os.Environ(), "APP_PORT=18795", "APP_ROOT="+missing)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("数据目录缺失时不应启动成功，输出：%s", out)
 	}
 	if !strings.Contains(string(out), "数据目录不可用") {
 		t.Fatalf("退出原因应指明数据目录，得到：%s", out)
+	}
+}
+
+// TestMissingRequiredCfgFailsFast：无默认值的键缺失 → 不起服务，报错要说出
+// 环境变量名与它来自哪个 env 块。以前这里会用 ./data 默默起来。
+func TestMissingRequiredCfgFailsFast(t *testing.T) {
+	bin := build(t,
+		source{"contract.dlt", genSource(t, "../../../webapi/src/contract.dlt")},
+		source{"main.dlt", genSource(t, "../../../webapi/src/main.dlt")},
+	)
+
+	cmd := exec.Command(bin)
+	cmd.Env = []string{"APP_PORT=18796"} // 故意不给 APP_ROOT
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("必填配置缺失时不应启动成功，输出：%s", out)
+	}
+	if !strings.Contains(string(out), "缺少配置 APP_ROOT") {
+		t.Fatalf("退出原因应指明缺哪个键，得到：%s", out)
+	}
+}
+
+// TestBadCfgValueFailsFast：u64 键拿到非数字时报错退出，不静默回退到默认端口。
+func TestBadCfgValueFailsFast(t *testing.T) {
+	bin := build(t,
+		source{"contract.dlt", genSource(t, "../../../webapi/src/contract.dlt")},
+		source{"main.dlt", genSource(t, "../../../webapi/src/main.dlt")},
+	)
+
+	missing := filepath.Join(t.TempDir(), "nope")
+	cmd := exec.Command(bin)
+	cmd.Env = append(os.Environ(), "APP_PORT=1879x", "APP_ROOT="+missing)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("非法端口不应启动成功，输出：%s", out)
+	}
+	if !strings.Contains(string(out), "APP_PORT=1879x 不是整数") {
+		t.Fatalf("退出原因应指明非法值，得到：%s", out)
 	}
 }

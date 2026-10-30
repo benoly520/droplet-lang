@@ -56,7 +56,7 @@ else
     -o "$OUT/blobd" >/dev/null
   DP_COMMIT_DEBOUNCE=${SOAK_DEBOUNCE:-60}
   export DP_COMMIT_DEBOUNCE
-  export DP_BIND=127.0.0.1 DP_PORT="$PORT" DP_ROOT="$OUT/data" DP_TOKEN=soak
+  export APP_BIND=127.0.0.1 APP_PORT="$PORT" APP_ROOT="$OUT/data" APP_TOKEN=soak
   "$OUT/blobd" 2>"$OUT/srv.log" &
   PID=$!
   U=http://127.0.0.1:$PORT

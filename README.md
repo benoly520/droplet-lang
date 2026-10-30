@@ -8,7 +8,7 @@ More precisely: **the enabling layer for a generate-and-verify paradigm** — wh
 
 Droplet optimizes for one thing above all: **making AI mistakes impossible to keep silent, and making verification cheap enough that an agent will actually run it.** Not "a safer, more abstract, more elegant language" — a language where errors cannot stay hidden, checks finish in milliseconds, and the runtime is light enough to fit on the smallest production instance.
 
-> Status: **D0 implemented, D1 underway** — the first three D1 items have landed: constructing sum variant values (`T.V` / `T.V { … }`), flattening `entry` (an entry is now a function declared with `entry`, no `{ fn … }` shell), and dropping `Response.etag` (the runtime derives the ETag header from the body, so handlers no longer write it). An 80-line example service (contract + handler) compiles to a C11 binary that boots in under 2 MB RSS and speaks HTTP/1.1; 79 Go tests cover lexer, parser, checker, generator, host-capability signatures, runtime dead-code audit, AST dump and contract export. The implemented language is a deliberate subset of the design — every gap carries a reason and a fill-in milestone in [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md). Full proposal: [docs/SPEC.md](docs/SPEC.md) (Chinese). Where things stand and what is next: [docs/NEXT.md](docs/NEXT.md).
+> Status: **D0 implemented, D1 complete** — all four D1 items have landed: constructing sum variant values (`T.V` / `T.V { … }`), flattening `entry` (an entry is now a function declared with `entry`, no `{ fn … }` shell), dropping `Response.etag` (the runtime derives the ETag header from the body, so handlers no longer write it), and typed `env` configuration (an `env App { … }` block becomes a record type the handler receives as `cfg`, so a missing required key fails at startup instead of at deploy time and source never spells an environment-variable name). A 91-line example service (contract + handler) compiles to a C11 binary that boots in under 2 MB RSS and speaks HTTP/1.1; 89 Go tests cover lexer, parser, checker, generator, host-capability signatures, runtime dead-code audit, AST dump and contract export. The implemented language is still a deliberate subset of the design — every gap (opaque secrets, feature-flag lifetimes, …) carries a reason and a fill-in milestone in [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md). Full proposal: [docs/SPEC.md](docs/SPEC.md) (Chinese). Where things stand and what is next: [docs/NEXT.md](docs/NEXT.md).
 
 ## Quick start
 
@@ -22,8 +22,8 @@ mkdir -p .build
 # the example service: contract + handler → binary → HTTP
 .build/droplet contract code/webapi/src/contract.dlt code/webapi/src/main.dlt      # JSON contract + variant tags
 .build/droplet build    code/webapi/src/contract.dlt code/webapi/src/main.dlt -o .build/blobd
-mkdir -p .build/data    # DP_ROOT must already exist, else the server exits at startup
-DP_ROOT=.build/data DP_TOKEN=t .build/blobd &
+mkdir -p .build/data    # APP_ROOT is required (no default) and must already exist; missing either → the server exits at startup
+APP_ROOT=.build/data APP_TOKEN=t .build/blobd &
 curl -s -X PUT -H 'Authorization: Bearer t' --data 'hello' localhost:8787/v1/blob/demo
 curl -s        -H 'Authorization: Bearer t' localhost:8787/v1/blob/demo              # hello
 ```

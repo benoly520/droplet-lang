@@ -19,6 +19,17 @@ type Response {
   body: bytes
 }
 
+// 服务底座配置：键名与类型固定（运行时按这五个键服务），默认值就写在声明里。
+// 源码里不出现环境变量名：读取面由块名推出，root → APP_ROOT。
+// token 的空默认值是**显式书写**的：不鉴权这件事写在代码里，部署时只能补上、不能抹掉。
+env App {
+  port: u64 = 8787,
+  bind: str = "0.0.0.0",
+  root: str,
+  token: str = "",
+  max_body: u64 = 8388608
+}
+
 host BlobFs {
   fn read(str, str) -> bytes | ApiError
   fn write(str, str, bytes) -> ETag | ApiError

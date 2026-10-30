@@ -83,17 +83,17 @@ typedef struct {
 
 typedef struct {
   uint16_t port;
-  dp_str bind; /* 监听地址，默认 "0.0.0.0"；放反代后面时给 "127.0.0.1" */
+  dp_str bind; /* 监听地址，放反代后面时收窄到 127.0.0.1 */
   dp_str root;
   dp_str token; /* 为空表示不校验 Authorization */
   size_t max_body;
 } dp_cfg;
 
-/* 返回 0 表示已填 out；返回 100+ 表示错误 tag，由运行时映射状态码。 */
-typedef int (*dp_handler)(dp_arena* a, dp_str root, const dp_request* rq, dp_response* out);
+/* 返回 0 表示已填 out；返回 100+ 表示错误 tag，由运行时映射状态码。
+ * 这里没有 root：配置由 env 声明驱动，生成的代码把加载好的值放进 dp_cfg。 */
+typedef int (*dp_handler)(dp_arena* a, const dp_request* rq, dp_response* out);
 
-dp_cfg dp_cfg_from_env(void);
-int    dp_serve(dp_handler h, const dp_cfg* cfg);
+int dp_serve(dp_handler h, const dp_cfg* cfg);
 
 /* ---- 文件哑存储 ---- */
 bool       dp_valid_key(dp_str key);

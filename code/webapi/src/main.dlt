@@ -1,5 +1,5 @@
 // 示例服务入口：把 HTTP 请求映射到哑存储能力。
-entry handle(req: Request, fs: BlobFs, ver: Versioning, root: str)
+entry handle(req: Request, fs: BlobFs, ver: Versioning, cfg: App)
     -> Response | ApiError
   invariant "非 GET/PUT 的请求一律 405"
 {
@@ -9,26 +9,26 @@ entry handle(req: Request, fs: BlobFs, ver: Versioning, root: str)
 
   if req.path == "/v1/keys" {
     if req.method == "GET" {
-      let body = fs.list_json(root)!
+      let body = fs.list_json(cfg.root)!
       return Response{status: 200, body: body}
     }
     if req.method == "POST" {
-      fs.create(root, req.key)!
+      fs.create(cfg.root, req.key)!
       return Response{status: 200, body: b""}
     }
   }
 
   if req.path == "/v1/blob" {
     if req.method == "GET" {
-      let body = fs.read(root, req.key)!
+      let body = fs.read(cfg.root, req.key)!
       return Response{status: 200, body: body}
     }
     if req.method == "PUT" {
-      fs.backup(root, req.key)
+      fs.backup(cfg.root, req.key)
       // write 返回的新版本 ETag 这里用不上：响应头里的 ETag 由运行时从 body 推导，
       // 客户端要新版本号就 GET（v0.10，SPEC §2.2 H7）。
-      fs.write(root, req.key, req.body)!
-      ver.commit_soon(root, req.key)
+      fs.write(cfg.root, req.key, req.body)!
+      ver.commit_soon(cfg.root, req.key)
       return Response{status: 200, body: b""}
     }
   }

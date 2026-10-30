@@ -27,22 +27,11 @@ func (g *gen) main() {
 		return
 	}
 
-	if idx := requestParamIndex(sig); idx >= 0 {
-		g.serviceMain(sig, idx)
+	if sig.IsService {
+		g.serviceMain(sig, sig.ReqIdx)
 		return
 	}
 	g.cliMain(sig)
-}
-
-// requestParamIndex 找出 entry 里的 Request 参数。
-// 有它 → 生成 HTTP 服务；没有 → 生成命令行调用（如 hello）。
-func requestParamIndex(sig *check.FnSig) int {
-	for i, p := range sig.Params {
-		if p.Kind == check.KRecord && p.Name == "Request" {
-			return i
-		}
-	}
-	return -1
 }
 
 // cliMain 生成命令行形态：参数按位置取 argv，缺省用类型零值。
@@ -119,8 +108,9 @@ func (g *gen) serviceMain(sig *check.FnSig, reqIdx int) {
 		return
 	}
 
-	g.line("static int dp_serve_handle(dp_arena* a, dp_str root, const dp_request* rq, dp_response* out) {")
-	g.line("  (void)root;")
+	// 配置先于处理器：静态 g_cfg 与加载器要出现在使用它之前，C 没有提升声明。
+	g.cfgLoader()
+	g.line("static int dp_serve_handle(dp_arena* a, const dp_request* rq, dp_response* out) {")
 
 	// 从 dp_request 构造 Request
 	g.line("  dp_T_%s v_req = {0};", reqType.Name)
@@ -133,9 +123,9 @@ func (g *gen) serviceMain(sig *check.FnSig, reqIdx int) {
 		g.line("  v_req.m_%s = %s;", f.Name, src)
 	}
 
-	// 其余参数：root 注入，其他类型给零值
+	// 其余参数：host 能力由运行时提供（生成期跳过），env 类型注入加载好的配置，
+	// 其他形状在 checker 里已被拦住（见 check/env.go 的绑定规则）。
 	args := []string{"a"}
-	rootUsed := false
 	for i, p := range sig.Params {
 		if p.Kind == check.KHost {
 			continue
@@ -144,9 +134,8 @@ func (g *gen) serviceMain(sig *check.FnSig, reqIdx int) {
 			args = append(args, "v_req")
 			continue
 		}
-		if p.Kind == check.KStr && !rootUsed {
-			args = append(args, "root")
-			rootUsed = true
+		if p.IsEnv {
+			args = append(args, "g_cfg")
 			continue
 		}
 		name := "v_" + sig.ParamNames[i]
@@ -176,7 +165,81 @@ func (g *gen) serviceMain(sig *check.FnSig, reqIdx int) {
 	g.line("}")
 	g.line("")
 	g.line("int main(void) {")
-	g.line("  dp_cfg cfg = dp_cfg_from_env();")
+	g.line("  if (dp_cfg_load() != 0) { return 1; }")
+	g.line("  dp_cfg cfg = {0};")
+	// 五个底座键到 dp_cfg 的映射：类型转换处就是范围校验处，
+	// 以前那些「port=0 就回退 8787」的静默降级已全部删掉。
+	g.line("  if (g_cfg.m_port == 0ull || g_cfg.m_port > 65535ull) {")
+	g.line("    fprintf(stderr, \"droplet: 配置 port=%%llu 不在 1..65535\\n\", (unsigned long long)g_cfg.m_port);")
+	g.line("    return 1;")
+	g.line("  }")
+	g.line("  cfg.port = (uint16_t)g_cfg.m_port;")
+	g.line("  cfg.bind = g_cfg.m_bind;")
+	g.line("  cfg.root = g_cfg.m_root;")
+	g.line("  cfg.token = g_cfg.m_token;")
+	g.line("  if (g_cfg.m_max_body == 0ull) {")
+	g.line("    fprintf(stderr, \"droplet: 配置 max_body 必须大于 0\\n\");")
+	g.line("    return 1;")
+	g.line("  }")
+	g.line("  cfg.max_body = (size_t)g_cfg.m_max_body;")
 	g.line("  return dp_serve(dp_serve_handle, &cfg);")
 	g.line("}")
+}
+
+// cfgLoader 按 env 声明生成配置加载器：每个键一段 getenv，有默认值的用声明里的
+// 默认值，没默认值的缺失即失败退出（SPEC §5.7 的「缺键就起不来」在 D1 落在启动瞬间）。
+// 环境变量名由块名推出（APP_ROOT），源码里不出现它；u64 键非数字同样直接失败，
+// 不回退——一个把 8080x 默默当默认端口起来的服务比一个不起的服务更难查。
+func (g *gen) cfgLoader() {
+	env := g.res.Env
+	if env == nil {
+		g.failf(token.Pos{}, "服务形态缺少 env 声明：这一步应由 checker 拦下")
+		return
+	}
+	g.line("static dp_T_%s g_cfg;", env.Name)
+	g.line("static int dp_cfg_load(void) {")
+	for _, k := range env.Keys {
+		name := check.EnvVar(env.Prefix, k.Name)
+		g.line("  {")
+		g.line("    const char* v = getenv(%q);", name)
+		switch k.Type.Kind {
+		case check.KU64:
+			g.line("    if (v != NULL && *v != '\\0') {")
+			g.line("      char* end = NULL;")
+			g.line("      unsigned long long x = strtoull(v, &end, 10);")
+			g.line("      if (end == v || end == NULL || *end != '\\0') {")
+			g.line("        fprintf(stderr, \"droplet: 配置 %s=%%s 不是整数\\n\", v);", name)
+			g.line("        return 1;")
+			g.line("      }")
+			g.line("      g_cfg.m_%s = (uint64_t)x;", k.Name)
+			g.line("    } else {")
+			if !k.HasDefault {
+				g.missingKey(name, env, k)
+			} else {
+				g.line("      g_cfg.m_%s = %sull; /* 声明里的默认值 */", k.Name, k.Default)
+			}
+			g.line("    }")
+		case check.KStr:
+			if k.HasDefault {
+				g.line("    g_cfg.m_%s = (v != NULL && *v != '\\0') ? dp_str_from_cstr(v) : dp_str_lit(%s);",
+					k.Name, cString(k.Default))
+			} else {
+				g.line("    if (v == NULL || *v == '\\0') {")
+				g.missingKey(name, env, k)
+				g.line("    }")
+				g.line("    g_cfg.m_%s = dp_str_from_cstr(v);", k.Name)
+			}
+		}
+		g.line("  }")
+	}
+	g.line("  return 0;")
+	g.line("}")
+	g.line("")
+}
+
+// missingKey 生成「必填键缺失就退出」那段：报错里要说出环境变量名、块名与键的类型。
+func (g *gen) missingKey(name string, env *check.EnvSpec, k check.EnvKey) {
+	g.line("      fprintf(stderr, \"droplet: 缺少配置 %s（env %s 的 %s: %s 没有默认值）\\n\");",
+		name, env.Name, k.Name, k.Type.Name)
+	g.line("      return 1;")
 }

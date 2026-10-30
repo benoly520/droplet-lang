@@ -40,6 +40,27 @@ type Type struct {
 	Methods        map[string]*FnSig
 	Items          []*Type // KUnion 的成员，第 0 个是成功类型
 	Method         *FnSig  // KHostMethod 指向的能力签名
+	IsEnv          bool    // 由 env 块带来的 record：只能由生成的加载器构造
+}
+
+// EnvKey 是一个配置键。Default 存的是**值本身**（整数的十进制写法或字符串内容），
+// 不是 C 文本：怎么落进 C 由 gen 决定，校验与导出都只看这个值。
+type EnvKey struct {
+	Name       string
+	Pos        token.Pos
+	Type       *Type
+	Default    string // HasDefault 为 false 时无意义
+	HasDefault bool
+}
+
+// EnvSpec 是程序的 env 声明。Prefix 是环境变量前缀（块名大写），
+// 所以下面每个键的读取面是 <Prefix>_<键名大写>：`.dlt` 源码里永远不出现环境变
+// 量名（SPEC §5.7「配置不是环境变量名」）。
+type EnvSpec struct {
+	Name   string
+	Prefix string
+	Keys   []EnvKey
+	Pos    token.Pos
 }
 
 // Field 是 record 字段或变体字段。
@@ -66,6 +87,8 @@ type FnSig struct {
 	Ret        *Type
 	Host       string // 所属 host 名；普通函数为空
 	IsEntry    bool
+	IsService  bool // 服务形态：带 Request 参数且返回 Response | 错误
+	ReqIdx     int  // Request 参数在 Params 里的下标，非服务形态为 -1
 	Decl       *ast.FnDecl
 }
 

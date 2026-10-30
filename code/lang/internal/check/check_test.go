@@ -401,18 +401,171 @@ entry f() -> Unit
 	}
 }
 
-func TestEnvDeclRejected(t *testing.T) {
-	// SPEC §5.7 把 env 列为关键字，但 D0 不实现；不报错就是静默丢配置。
-	res := checkSrc(t, `env App {
-  port: u64
+// ---------- env：声明完整性与服务形态接线（D1）----------
+
+// fullEnv 是补齐了运行时五键的声明，多条用例共用它。
+const fullEnv = `env App {
+  port: u64 = 8787,
+  bind: str = "0.0.0.0",
+  root: str,
+  token: str = "",
+  max_body: u64 = 8388608
 }
 
-entry f() -> Unit
+`
+
+const svcTypes = `type ApiError = NotFound
+
+type Request { method: str }
+
+type Response {
+  status: u64,
+  body: bytes
+}
+
+`
+
+func TestEnvAccepted(t *testing.T) {
+	// 正例：补齐五键 + 入口拿 cfg，零错误，且配置面进了 Result.Env 供生成器与契约用。
+	res := checkSrc(t, fullEnv+svcTypes+`entry handle(req: Request, cfg: App) -> Response | ApiError
+  invariant "一律 405"
+{
+  return Response{status: 405, body: b""}
+}`)
+	if len(res.Errors) != 0 {
+		t.Fatalf("期望 0 个错误，实际：%v", res.Errors)
+	}
+	if res.Env == nil || len(res.Env.Keys) != 5 || res.Env.Prefix != "APP" {
+		t.Fatalf("Result.Env 不完整：%+v", res.Env)
+	}
+}
+
+func TestEnvOnCliEntryRejected(t *testing.T) {
+	// 命令行程序的配置走 argv：一个没人读的 env 块就是死声明。
+	res := checkSrc(t, fullEnv+`entry f() -> Unit
   invariant "无"
 {
 
 }`)
-	expectOne(t, res, "E1", "不在 D0 子集")
+	expectOne(t, res, "E1", "无人消费")
+}
+
+func TestServiceRequiresEnv(t *testing.T) {
+	// 以前服务可以从内置默认值起服务（token 缺失 = 不鉴权），现在不行。
+	res := checkSrc(t, svcTypes+`entry handle(req: Request) -> Response | ApiError
+  invariant "一律 405"
+{
+  return Response{status: 405, body: b""}
+}`)
+	expectOne(t, res, "E1", "服务必须声明 env 块")
+}
+
+func TestEnvMissingRuntimeKey(t *testing.T) {
+	res := checkSrc(t, `env App {
+  port: u64 = 8787,
+  bind: str = "0.0.0.0",
+  token: str,
+  max_body: u64 = 1024
+}
+
+`+svcTypes+`entry handle(req: Request, cfg: App) -> Response | ApiError
+  invariant "一律 405"
+{
+  return Response{status: 405, body: b""}
+}`)
+	expectOne(t, res, "E1", "缺配置键 root")
+}
+
+func TestEnvBadKeyType(t *testing.T) {
+	res := checkSrc(t, `env App {
+  port: u64 = 8787,
+  bind: str = "0.0.0.0",
+  root: str,
+  token: str = "",
+  max_body: u64 = 1024,
+  banner: bytes
+}
+
+`+svcTypes+`entry handle(req: Request, cfg: App) -> Response | ApiError
+  invariant "一律 405"
+{
+  return Response{status: 405, body: b""}
+}`)
+	expectOne(t, res, "E1", "只接受 u64 与 str")
+}
+
+func TestEnvDefaultShapeMismatch(t *testing.T) {
+	res := checkSrc(t, `env App {
+  port: u64 = "8787",
+  bind: str = "0.0.0.0",
+  root: str,
+  token: str = "",
+  max_body: u64 = 1024
+}
+
+`+svcTypes+`entry handle(req: Request, cfg: App) -> Response | ApiError
+  invariant "一律 405"
+{
+  return Response{status: 405, body: b""}
+}`)
+	expectOne(t, res, "E1", "默认值却是 字符串字面量")
+}
+
+func TestEnvRuntimeKeyType(t *testing.T) {
+	// 端口写成 str：生成代码要把它填进 dp_cfg.port，类型不对就不接。
+	res := checkSrc(t, `env App {
+  port: str = "8787",
+  bind: str = "0.0.0.0",
+  root: str,
+  token: str = "",
+  max_body: u64 = 1024
+}
+
+`+svcTypes+`entry handle(req: Request, cfg: App) -> Response | ApiError
+  invariant "一律 405"
+{
+  return Response{status: 405, body: b""}
+}`)
+	expectOne(t, res, "E1", "配置键 port 必须是 u64")
+}
+
+func TestEnvNotConstructible(t *testing.T) {
+	// 配置的值来自启动环境：源码里能写 App{…} 就等于把部署事实硬编码进二进制。
+	res := checkSrc(t, fullEnv+svcTypes+`entry handle(req: Request) -> Response | ApiError
+  invariant "一律 405"
+{
+  return Response{status: 405, body: b""}
+}
+
+fn mk() -> App
+  invariant "无"
+{
+  return App{port: 1, bind: "x", root: "/tmp", token: "", max_body: 2}
+}`)
+	expectOne(t, res, "E1", "不能在源码里构造")
+}
+
+func TestEnvTwoBlocksRejected(t *testing.T) {
+	res := checkSrc(t, fullEnv+`env Other {
+  port: u64 = 1
+}
+
+`+svcTypes+`entry handle(req: Request, cfg: App) -> Response | ApiError
+  invariant "一律 405"
+{
+  return Response{status: 405, body: b""}
+}`)
+	expectOne(t, res, "E1", "env 块只能有一个")
+}
+
+func TestServiceUnboundParamRejected(t *testing.T) {
+	// 锁住 v0.11 消灭的那条位置魔法：以前 entry 里第一个 str 参数会被默默当 root。
+	res := checkSrc(t, fullEnv+svcTypes+`entry handle(req: Request, cfg: App, root: str) -> Response | ApiError
+  invariant "一律 405"
+{
+  return Response{status: 405, body: b""}
+}`)
+	expectOne(t, res, "E1", "无法绑定")
 }
 
 // expectOne 断言恰好有一条指定错误码的错误，且消息包含关键字。

@@ -22,7 +22,7 @@ git init -q .
 DP_COMMIT_CMD='git add -A -- "$DP_COMMIT_KEY" && git -c user.name=droplet -c user.email=dp@example.com commit -q -m "snapshot $DP_COMMIT_KEY"'
 export DP_COMMIT_CMD
 export DP_COMMIT_DEBOUNCE=0
-export DP_BIND=127.0.0.1 DP_PORT=18799 DP_ROOT="$B/data" DP_TOKEN=secret
+export APP_BIND=127.0.0.1 APP_PORT=18799 APP_ROOT="$B/data" APP_TOKEN=secret
 
 "$B/blobd" 2>"$B/srv.log" &
 SRV=$!
