@@ -83,8 +83,13 @@ func TestParseWebapiMain(t *testing.T) {
 	if !ok || fn.Name != "handle" || !fn.Entry {
 		t.Fatalf("首个声明不是 entry handle：%#v", prog.Items[0])
 	}
-	if len(fn.Params) != 5 {
-		t.Fatalf("handle 签名不对：%+v", fn)
+	var names []string
+	for _, p := range fn.Params {
+		names = append(names, p.Name)
+	}
+	// 断言名字而不只是个数：v0.10 删 sys、v0.11 把 root 换成 cfg，只数个数的断言两次都漏过去了。
+	if got := strings.Join(names, ","); got != "req,fs,ver,cfg" {
+		t.Fatalf("handle 参数应为 req,fs,ver,cfg，得到 %s", got)
 	}
 	if fn.Ret == nil {
 		t.Fatal("handle 缺少返回类型")

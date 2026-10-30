@@ -22,6 +22,11 @@
   **余量只剩 1619 行** —— §8.3 那条「加语法与拆文件同一条提交」的纪律，从现在起是硬要求。
 - 用例：`grep -c '^func Test'` = **91**（上一轮 79；本轮 +10 checker +2 生成期集成）。
   验收 `accept.sh` 仍是 13 项，结论未变。
+- **基线已修绿（2026-10-30）**：`TestParseWebapiMain` 一直断言 `handle` 有 5 个参数，
+  而样例从 v0.10 起就是 4 个（`git blame` 证明断言来自初始提交）—— 也就是说
+  「91 个用例全绿」这个结论至少两轮不成立，实际是 90 绿 1 红。已改成断言参数**名字**
+  （`req,fs,ver,cfg`），只数个数的写法正是它漏两次的原因。同一条提交把 `go` 指令 1.24 → 1.22
+  （理由见 IMPL-PLAN §7.1），Go 1.22.5 实测 `go test ./...` 退出码 0。
 - **本轮没跑长稳**，而 `env` 改了启动路径（配置加载先于监听）。所以 §2 P0 的门禁比之前更硬：
   下一次改动落地前，至少要重跑一次 `SOAK_SECONDS=60`，3 天口径仍挂在 P0。
 
@@ -29,10 +34,10 @@
 ## 1. 新机器五分钟上手
 
 ```sh
-go version                                    # 需 ≥ 1.24（code/lang/go.mod 声明的最低版本）
+go version                                    # 需 ≥ 1.22（code/lang/go.mod 声明的最低版本，2026-10-30 由 1.24 下调）
 mkdir -p .build                               # 编译产物放这里，目录不会自动建
 cd code/lang && go build -o ../../.build/droplet ./cmd/droplet
-go test ./...                                 # 期望全部包 ok（共 91 个用例）
+go test ./...                                 # 判据是退出码 0，不是"数 ok 行"（见 §4）；共 91 个用例
 ```
 
 还需要 `cc`（gcc 或 clang，编译器以 `-std=c11` 调用它）。
@@ -51,7 +56,7 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 
 ```sh
 .build/droplet check code/webapi/src/contract.dlt code/webapi/src/main.dlt
-# 实测输出：ok: 8 项声明，1 个函数，入口 handle
+# 实测输出：ok: 9 项声明，1 个函数，入口 handle（env App 块算一项，v0.11 起是 9）
 # （v0.9 之后入口就是那个函数本身，不再有外层的壳名）
 ```
 
@@ -129,9 +134,11 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 - 同一份文档里「先改写旧探针、再插入新探针」的顺序不能倒，且**给旧写法留样本**：
   D0-DEVIATIONS §6 的 i.dlt 就是要用 `entry Demo { fn … }` 被 E0006 拒掉，它不能被自己的批量改写误伤；
   本轮第一条脚本因为一个锚点 `count == 0` 直接 abort，整个文件未写入（幸好 raise 得早，没写出半改状态）
-- **后台 / 非交互 shell 里的 `go` 不是同一个**：它会解析到 `/usr/bin/go`（1.22），
-  `go build` 直接报 `go.mod requires go >= 1.24（GOTOOLCHAIN=local）`。跑长稳、跑后台任务先
-  `export PATH=/home/monom/sdk/go1.24/bin:$PATH`
+- **后台 / 非交互 shell 里的 `go` 可能不是同一个**：它常常解析到 `/usr/bin/go`。
+  以前这会让 `go build` 报 `go.mod requires go >= 1.24（GOTOOLCHAIN=local）`；
+  2026-10-30 起下限降到 1.22，`/usr/bin/go`（1.22.5）已可编、全套用例绿（实测）。
+  仍要留神的是**任何一个 `go` 低于 1.22** 的环境，以及 `GOTOOLCHAIN=auto` 在缺工具链时
+  静默去联网下载 —— 那会表现为"网络超时"而不是"版本不对"
 - **长稳的「0 失败」要先证明观测的是活的、且是新的进程**：上一班的 72 h 实例还占着端口时，
   新实例 bind 失败立刻退出，`$!` 那个 pid 已经死了 —— `/proc/$PID/status` 读不到就写 rss=0，
   而请求全由**旧二进制**答着，于是「2 轮 0 失败、全程 1 线程」全绿但整轮无效。
