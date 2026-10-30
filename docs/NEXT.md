@@ -9,20 +9,26 @@
 
 ## 0. 现在的状态（截至 2026-10-30）
 
-- 本地 `main` = `012c0ea`（`chore(lang)`），本文件这条 docs(next) 再压在上面 ——
-  **共 5 条未推送，`origin/main` 仍在 `90ccef3`**（`git log --oneline origin/main..main` 实测）：
-  `5c69477` 变体构造 → `f71c50b` docs(next) → `d49e6a0` entry 扁平化 → `012c0ea` 注释清理 → docs(next)。
-- `d49e6a0` 做的事：入口从 `entry Name { fn f(…) }` 改成 `entry f(…)` —— 那层壳从不承载内容，
-  按 H7 删的是语法位置而不是写法：旧形状在 parse 就报 `E0006` 并给改写提示。
-  `EntryDecl` 这个 AST 节点整个删掉（入口 = 带 `Entry` 标记的 `FnDecl`），
-  `check`/`gen`/`contract`/`dump` 各少一个分支。顺带补两条漏着的护栏：多入口报 `E1`
-  （以前静默按 map 迭代顺序挑 EntryPoint）、`entry` 缺函数体报 `E0006`（以前拖到 `cc` 才炸）。
-- `012c0ea`：清掉上一轮 `check.go` 拆分留下的重复注释（纯注释，`-print-c` 逐字相同）。
-- 本轮已实测：`gofmt -l` 无输出、`go vet ./...` 无输出、**77 个用例全绿**、`accept.sh` 12 项全通、
-  `hello` 打出 `world`、`shape` 打出 `wide`、**旧编译器跑旧语法 / 新编译器跑新语法的三份 `-print-c` 逐字相同**
-  （hello 23 / shape 47 / blobd 133 行），`contract` JSON 只有入口的 `pos` 变了
-- 60 s 压缩长稳（`SOAK_SECONDS=60 sh soak.sh`）本轮重跑过，退出码 0（2 轮 0 失败、无残留）；
-  3 天长稳仍没做 —— 它需要一台常开的机器（见 §2 P0）
+- `origin/main` = `9d7d30a`（上一轮收尾时已 push，本地与远端同步过）；本轮在其上再压
+  **3 条未推送**：`feat(lang)` 删 `Response.etag` + `docs(lang)` 四份规范文档 +
+  本文件这条 `docs(next)`（`git log --oneline origin/main..main` 实测，别凭印象写）。
+- 本轮（v0.10）做的事：`Response` 的 `etag` 字段从语法里删掉，ETag 改由**运行时从 body 推导**
+  （`rt_http.c`：`dp_sys_u64_str(dp_sys_hash64(resp.body))`，空 body 就不发这个头）。
+  连带：`dp_response` 少一个字段、gen 的响应映射多两个拒绝分支（`etag` 与「未知响应字段」，
+  后者以前被静默丢弃）、入口不再收 `sys: Sys`（推导后 handler 里 `sys.*` 零调用）。
+  样例 86 → 80 行（`contract.dlt` 43 + `main.dlt` 37），实现 6023 → 6034 行。
+- 行为变化两条，都已登记 D0-DEVIATIONS §2：`PUT` 的成功响应不再带 `ETag`（客户端要新版本号请
+  `GET`）；`/health` 与 `/v1/keys` 的响应**开始**带 `ETag`（旧代码在那两处写 `etag: ""` = 不发头）。
+  `GET` 的 tag 值与 `If-Match` 的比对逐字节不变 —— 新旧都是同一个函数对同一份内容求值。
+- 本轮已实测：`gofmt -l` 无输出、`go vet ./...` 无输出、**79 个用例全绿**、`accept.sh` **13 项**全通、
+  `hello` 打出 `world`、`shape` 打出 `wide`、D0-DEVIATIONS §6 的 13 条探针（含新增 m / o / p 三条）
+  逐条与文档期望相同；`-print-c` 行数 hello 23 / shape 47 / webapi 130（原 133，少三行 `m_etag`）。
+  **这一条减法不要求 `-print-c` 逐字相同**（它删的是两次计算里的一次，不是书写冗余），
+  判据换成 HTTP 行为等价，见 SPEC §5.1.1 与 IMPL-PLAN §8.2。
+- 60 s 压缩长稳重跑过，退出码 0（2 轮 0 失败、`fail.log` 0 字节、1 线程、无残留）；
+  **第一次跑是无效的** —— 上一班留下的 72 h 长稳实例还占着 18800，新实例 bind 失败即退出，
+  请求全打在旧二进制上，而 `sample.log` 的 rss 列是 0（见 §4）。已给 `soak.sh`
+  加「自建实例启动即退出就报错」的护栏，并杀掉残留进程。3 天长稳仍没做（需要常开的机器，见 §2 P0）。
 
 ## 1. 新机器五分钟上手
 
@@ -30,7 +36,7 @@
 go version                                    # 需 ≥ 1.24（code/lang/go.mod 声明的最低版本）
 mkdir -p .build                               # 编译产物放这里，目录不会自动建
 cd code/lang && go build -o ../../.build/droplet ./cmd/droplet
-go test ./...                                 # 期望全部包 ok（共 77 个用例）
+go test ./...                                 # 期望全部包 ok（共 79 个用例）
 ```
 
 还需要 `cc`（gcc 或 clang，编译器以 `-std=c11` 调用它）。
@@ -49,7 +55,7 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 
 ```sh
 .build/droplet check code/webapi/src/contract.dlt code/webapi/src/main.dlt
-# 实测输出：ok: 9 项声明，1 个函数，入口 handle
+# 实测输出：ok: 8 项声明，1 个函数，入口 handle
 # （v0.9 之后入口就是那个函数本身，不再有外层的壳名）
 ```
 
@@ -61,24 +67,37 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 - 命令：`sh code/webapi/deploy/soak.sh 72`
 - 判据：退出码 0；`.build/soak/fail.log` **为 0 字节**（脚本会预建这个空文件，它存在不代表失败）；RSS 斜率 ≤ 64 KB/h
 - 想先压缩时间自测：`SOAK_SECONDS=60 sh code/webapi/deploy/soak.sh`（60 秒 = 2 轮，实测退出码 0、1 线程、无残留子进程）
+- **跑之前先确认端口空闲**：`ss -ltn | grep 18800` 与 `pgrep -x blobd` 都该是空的。残留实例会把
+  新实例的 bind 顶掉，而请求照样有响应（来自旧二进制）—— 这种「0 失败」是假的。
+  `sample.log` 的 rss 列为 0 就是这个形状；v0.10 起脚本自己会拦（启动即退出 → 报错并退出 1）
 
 ### P1 · D1 设计项（**需要点头**）
 
-- **删 `Response.etag`**：它可由 body 推导（GET 路径已经在算同一个 hash），现为 5 处构造里 4 处写 `""`
-- **`env` 一等特性**：现在 `check` 直接拒（`E1`），配置走环境变量
-- 两条都是 H7 基线里剩下未还的账，见 [IMPL-PLAN §8.2](IMPL-PLAN.md)；判据是 H7 实测归零 +
-  77 用例与 `accept.sh` 全通 + 旧写法报错带改写提示
-- 已定顺序：删 `Response.etag` → `env`（`env` 放最后因为它要跟 `contract` 的 `envs` 分组一起回来）
+- **`env` 一等特性**：现在 `check` 直接拒（`E1`），配置走环境变量。D1 剩下的最后一条，
+  它要跟 `contract` 的 `envs` 分组一起回来
+- **H7 还欠 8 处**（本轮数出来的，以前没进清单）：`main.dlt` 里 `status: 200` ×5、`body: b""` ×3。
+  它们删不掉，因为重复的是**值**不是书写位置；处置要动 handler 的返回形状（「成功即值」：
+  `entry` 直接返回 `bytes | ApiError`，状态码与 `Content-Type` 由运行时包装）。
+  **这条动了入口的返回类型，要单独点头**，已登记 IMPL-PLAN §8.2 归属 D2
+- **`Response` 的字段形状仍长在 gen**：`check` 说 ok 而 `build` 报 `E-GEN` 的三类（缺 `status` /
+  写 `etag` / 未知字段）没有收进 checker —— 「响应面」目前不是 checker 的概念。
+  要不要搬过去是笔设计账，见 D0-DEVIATIONS §4.1 与 IMPL-PLAN §8.1
+- 已定顺序：`env` → 上面两条另议
 - **新解锁的一条**：412 条件失败可以改回「错误是值」了 —— handler 返回 `ApiError.Conflict`，
   同时删掉 `rt_http.c` 里自带的 If-Match 比对。以前它在语言侧表达不出来（构造不出错误值），
   变体构造落地后障碍消失。这条动了 HTTP 语义与运行时，**要单独点头**，也意味着要重跑长稳
 
-## 3. 等你拍板的两件事
+## 3. 等你拍板的三件事
 
-1. 现在本地攒了 5 条未推送（变体构造 + docs(next) + entry 扁平化 + 注释清理 + docs(next)）：`git push`，
-   还是继续攒到 D1 第三项（删 `Response.etag`）？
-2. `.build/verify.sh` 要不要提升为入库脚本 `code/webapi/deploy/verify-docs.sh`
-   （它把 IMPL-PLAN §6 的复核命令整段跑一遍，现在只在被 gitignore 的目录里）？
+1. D1 只剩 `env` 一条（它要跟 `contract` 的 `envs` 分组一起回来）。是接着做 `env`，
+   还是先做 §2 里那条「成功即值」的返回形状改造（能把 H7 的 8 处一次清掉，但动入口签名）？
+2. 72 h 长稳现在具备了重跑条件（残留进程已清、脚本会拒绝端口被占）。要不要在本机后台重新起一条
+   `sh code/webapi/deploy/soak.sh 72`？它要求这台机器这几天不关机，且 `.build/soak/` 不能被清理。
+3. 本轮把 D0-DEVIATIONS §6 的复核命令整段抽出来跑过一遍（`.build/verify_d0.sh`，在被 gitignore 的目录里）。
+   要不要提升为入库脚本 `code/webapi/deploy/verify-docs.sh`？它能把「文档里的期望 = 实际输出」
+   变成一条可重跑的护栏，代价是要加一个端口 / 路径隔离，否则它会跟 `accept.sh` 互相干扰
+
+（上一班的拍板项「要不要现在 push」已执行：`90ccef3..9d7d30a` 已推。）
 
 ## 4. 坑（踩过的，别再踩）
 
@@ -117,6 +136,15 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 - **后台 / 非交互 shell 里的 `go` 不是同一个**：它会解析到 `/usr/bin/go`（1.22），
   `go build` 直接报 `go.mod requires go >= 1.24（GOTOOLCHAIN=local）`。跑长稳、跑后台任务先
   `export PATH=/home/monom/sdk/go1.24/bin:$PATH`
+- **长稳的「0 失败」要先证明观测的是活的、且是新的进程**：上一班的 72 h 实例还占着端口时，
+  新实例 bind 失败立刻退出，`$!` 那个 pid 已经死了 —— `/proc/$PID/status` 读不到就写 rss=0，
+  而请求全由**旧二进制**答着，于是「2 轮 0 失败、全程 1 线程」全绿但整轮无效。
+  `soak.sh` 已加护栏（sleep 0.4 后 `kill -0 $PID` 不成就报错退出），判据也补在 §2 P0
+- 一次性脚本往 markdown 里插 **shell 探针**时，探针文本里的 `\n` 要用 `r'''…'''` 原样字符串：
+  普通字符串里的 `\\n` 会被 Python 先吃掉，写进文档的 printf 参数就成了真换行，
+  整条探针碎成一地（本轮 `patch_dev_etag.py` 第一版就是这样，重写后才对）
+- 改「用例数 / 验收项数」这种散在多处的小数字，先 `grep -rn` 全仓再改：本轮 77 → 79、12 → 13
+  合计 7 处（README×2、IMPL-PLAN×3、NEXT×1、D0-DEVIATIONS×1），漏一处就是一份自相矛盾的文档
 
 ## 5. 文档地图
 
