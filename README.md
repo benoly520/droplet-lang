@@ -8,7 +8,7 @@ More precisely: **the enabling layer for a generate-and-verify paradigm** — wh
 
 Droplet optimizes for one thing above all: **making AI mistakes impossible to keep silent, and making verification cheap enough that an agent will actually run it.** Not "a safer, more abstract, more elegant language" — a language where errors cannot stay hidden, checks finish in milliseconds, and the runtime is light enough to fit on the smallest production instance.
 
-> Status: **D0 implemented, D1 not started.** A 91-line example service (contract + handler) compiles to a C11 binary that boots in under 2 MB RSS and speaks HTTP/1.1; 58 Go tests cover lexer, parser, checker, generator, host-capability signatures, runtime dead-code audit, AST dump and contract export. The implemented language is a deliberate subset of the design — every gap carries a reason and a fill-in milestone in [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md). Full proposal: [docs/SPEC.md](docs/SPEC.md) (Chinese).
+> Status: **D0 implemented, D1 not started.** A 91-line example service (contract + handler) compiles to a C11 binary that boots in under 2 MB RSS and speaks HTTP/1.1; 58 Go tests cover lexer, parser, checker, generator, host-capability signatures, runtime dead-code audit, AST dump and contract export. The implemented language is a deliberate subset of the design — every gap carries a reason and a fill-in milestone in [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md). Full proposal: [docs/SPEC.md](docs/SPEC.md) (Chinese). Where things stand and what is next: [docs/NEXT.md](docs/NEXT.md).
 
 ## Quick start
 
