@@ -63,6 +63,13 @@ else
   T=soak
   trap 'kill $PID 2>/dev/null || true' EXIT
   sleep 0.4
+  # 端口被上一轮残留实例占着时，新实例 bind 失败立刻退出：不先确认它活着，
+  # 观测到的是别人家的进程（甚至旧二进制），整轮数据都不可信（v0.10 实踩过）。
+  if ! kill -0 "$PID" 2>/dev/null; then
+    echo "soak: 自建实例启动即退出（多半是端口 $PORT 被占），srv.log：" >&2
+    cat "$OUT/srv.log" >&2
+    exit 1
+  fi
 fi
 
 A="Authorization: Bearer $T"

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"droplet/internal/check"
 )
 
 // startBlobd 编译 webapi 契约并拉起服务，返回 base URL 与清理函数。
@@ -116,9 +118,13 @@ func TestServiceEndToEnd(t *testing.T) {
 	defer stop()
 
 	t.Run("health", func(t *testing.T) {
-		code, body, _ := do(t, "GET", base+"/health", "", nil)
+		code, body, hdr := do(t, "GET", base+"/health", "", nil)
 		if code != 200 || body != `{"ok":true}` {
 			t.Fatalf("code=%d body=%q", code, body)
+		}
+		// 推导规则只看 body：handler 一个字也没写 ETag，非空表示就有版本
+		if hdr.Get("ETag") == "" {
+			t.Fatal("非空 body 应有运行时推导的 ETag")
 		}
 	})
 
@@ -128,9 +134,9 @@ func TestServiceEndToEnd(t *testing.T) {
 		if code != 200 {
 			t.Fatalf("PUT 返回 %d", code)
 		}
-		etag = hdr.Get("ETag")
-		if etag == "" {
-			t.Fatal("PUT 响应缺少 ETag")
+		// ETag 由运行时从 body 推导：PUT 的响应体是空的，没有表示就没有版本（v0.10）
+		if got := hdr.Get("ETag"); got != "" {
+			t.Fatalf("PUT 空 body 不该带 ETag，得到 %q", got)
 		}
 	})
 
@@ -139,8 +145,10 @@ func TestServiceEndToEnd(t *testing.T) {
 		if code != 200 || body != "hello" {
 			t.Fatalf("code=%d body=%q", code, body)
 		}
-		if hdr.Get("ETag") != etag {
-			t.Fatalf("GET 的 ETag=%q，期望 %q", hdr.Get("ETag"), etag)
+		// 新版本号从 GET 拿：这是 v0.10 之后客户端唯一的取 tag 路径
+		etag = hdr.Get("ETag")
+		if etag == "" {
+			t.Fatal("GET 响应缺少 ETag：它应由运行时从 body 推导，handler 不写")
 		}
 	})
 
@@ -169,6 +177,16 @@ func TestServiceEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("etag-follows-body", func(t *testing.T) {
+		code, body, hdr := do(t, "GET", base+"/v1/blob/demo", "", nil)
+		if code != 200 || body != "hello2" {
+			t.Fatalf("code=%d body=%q", code, body)
+		}
+		if hdr.Get("ETag") == etag {
+			t.Fatalf("body 变了而 ETag 没变：%q", hdr.Get("ETag"))
+		}
+	})
+
 	t.Run("if-match-412", func(t *testing.T) {
 		code, _, _ := do(t, "PUT", base+"/v1/blob/demo", "nope", map[string]string{"If-Match": `"deadbeef"`})
 		if code != 412 {
@@ -191,9 +209,12 @@ func TestServiceEndToEnd(t *testing.T) {
 	})
 
 	t.Run("405", func(t *testing.T) {
-		code, _, _ := do(t, "DELETE", base+"/v1/blob/demo", "", nil)
+		code, _, hdr := do(t, "DELETE", base+"/v1/blob/demo", "", nil)
 		if code != 405 {
 			t.Fatalf("DELETE 应 405，得到 %d", code)
+		}
+		if got := hdr.Get("ETag"); got != "" {
+			t.Fatalf("空 body 不该有 ETag，得到 %q", got)
 		}
 	})
 
@@ -206,6 +227,66 @@ func TestServiceEndToEnd(t *testing.T) {
 			t.Fatalf("超限 body 应 413，得到 %d", code)
 		}
 	})
+}
+
+// genErrText 走完 parse → check → gen，返回生成期的报错（没有错误返回 ""）。
+func genErrText(t *testing.T, text string) string {
+	t.Helper()
+	prog := parseAll(t, source{"svc.dlt", text})
+	res := check.Program(prog)
+	if len(res.Errors) > 0 {
+		t.Fatalf("源码有 %d 个检查错误：%v", len(res.Errors), res.Errors)
+	}
+	_, err := C(prog, res)
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// TestResponseEtagFieldRejected 锁住 v0.10 的第四条语法减法：ETag 由运行时从 body
+// 推导，所以 Response 里再写 etag 不是「可以忽略」，而是在生成期就报错并给改法。
+func TestResponseEtagFieldRejected(t *testing.T) {
+	got := genErrText(t, `type ApiError = NotFound
+
+type Request { method: str }
+
+type Response {
+  status: u64,
+  body: bytes,
+  etag: str
+}
+
+entry handle(req: Request, root: str) -> Response | ApiError
+  invariant "一律 405"
+{
+  return Response{status: 405, body: b"", etag: "x"}
+}`)
+	if !strings.Contains(got, "Response.etag 不用写") {
+		t.Fatalf("期望「Response.etag 不用写」，得到：%q", got)
+	}
+}
+
+// TestUnknownResponseFieldRejected：不在响应面上的字段一律拒绝，不能静默丢弃。
+func TestUnknownResponseFieldRejected(t *testing.T) {
+	got := genErrText(t, `type ApiError = NotFound
+
+type Request { method: str }
+
+type Response {
+  status: u64,
+  body: bytes,
+  retry_after: u64
+}
+
+entry handle(req: Request, root: str) -> Response | ApiError
+  invariant "一律 405"
+{
+  return Response{status: 405, body: b"", retry_after: 1}
+}`)
+	if !strings.Contains(got, "Response.retry_after 无法映射到响应") {
+		t.Fatalf("期望「Response.retry_after 无法映射到响应」，得到：%q", got)
+	}
 }
 
 // TestNotFoundMapsTo404 单独确认 404 不是 handler 里写死的。

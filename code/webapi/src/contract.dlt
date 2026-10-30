@@ -13,10 +13,10 @@ type Request {
   if_match: str
 }
 
+// 响应面只有 status 与 body：ETag 由运行时从 body 推导，handler 不写（SPEC §2.2 H7）。
 type Response {
   status: u64,
-  body: bytes,
-  etag: str
+  body: bytes
 }
 
 host BlobFs {
@@ -29,13 +29,6 @@ host BlobFs {
 
 host Versioning {
   fn commit_soon(str, str) -> Unit
-}
-
-host Sys {
-  fn now_unix() -> i64
-  fn hash64(bytes) -> u64
-  fn u64_str(u64) -> str
-  fn log(str) -> Unit
 }
 
 boundary BlobApi @v1 {

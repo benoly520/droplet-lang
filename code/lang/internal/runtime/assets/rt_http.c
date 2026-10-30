@@ -504,7 +504,14 @@ static void handle_conn(int fd, dp_handler h, const dp_cfg* cfg) {
     resp.content_type = dp_str_dup(a, resp.content_type);
     ct = resp.content_type.p;
   }
-  send_response(fd, resp.status, ct, resp.body, resp.etag);
+  /* ETag 从 handler 的 body 推导：同一份表示只能有一个版本号，让 handler 再写
+   * 一遍就是重复书写（SPEC §2.2 H7）。空 body 没有表示，就不发这个头；
+   * 运行时自己的错误页走 send_status，那是常量文本，也不该有版本。 */
+  dp_str etag = dp_str_lit("");
+  if (resp.body.n > 0u) {
+    etag = dp_sys_u64_str(a, dp_sys_hash64(resp.body));
+  }
+  send_response(fd, resp.status, ct, resp.body, etag);
   dp_arena_free(a);
 }
 

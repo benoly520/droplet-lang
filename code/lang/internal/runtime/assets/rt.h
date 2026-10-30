@@ -73,11 +73,12 @@ typedef struct {
   dp_bytes body;
 } dp_request;
 
+/* 响应面只有 status / content_type / body 三项。ETag 不在这里：它由运行时从 body
+ * 推导（SPEC §2.2 H7）—— 同一份表示再写第二个版本号就是重复书写。 */
 typedef struct {
   uint16_t status;
   dp_str content_type;
   dp_bytes body;
-  dp_str etag;
 } dp_response;
 
 typedef struct {

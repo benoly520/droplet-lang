@@ -33,14 +33,16 @@ U=http://127.0.0.1:18799
 A='Authorization: Bearer secret'
 
 code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+# ETag 由运行时从 body 推导（v0.10）：handler 一个字也不写，所以这里只看响应头。
+tag()  { curl -s -o /dev/null -D - "$@" | tr -d '\r' \
+  | awk -F': ' 'tolower($1)=="etag"{t=$2} END{print (t==""?"(none)":t)}'; }
 row() { printf '%-34s %s\n' "$1" "$2"; }
 
 row 'GET  /health (无 token)'      "$(code "$U/health")"
 row 'GET  /v1/keys (空)'           "$(code -H "$A" "$U/v1/keys")"
 row 'PUT  /v1/blob/demo'           "$(code -X PUT -H "$A" --data-binary 'hello' "$U/v1/blob/demo")"
 
-ETAG=$(curl -s -D - -o /dev/null -H "$A" "$U/v1/blob/demo" \
-  | tr -d '\r' | awk -F': ' 'tolower($1)=="etag"{print $2}')
+ETAG=$(tag -H "$A" "$U/v1/blob/demo")
 row 'GET  /v1/blob/demo (ETag)'    "$ETAG"
 row 'PUT  If-Match 命中'           "$(code -X PUT -H "$A" -H "If-Match: $ETAG" --data-binary 'hello2' "$U/v1/blob/demo")"
 row 'PUT  If-Match 不符 -> 412'    "$(code -X PUT -H "$A" -H 'If-Match: deadbeef' --data-binary 'x' "$U/v1/blob/demo")"
@@ -49,6 +51,7 @@ row 'GET  /v1/keys (两个)'         "$(curl -s -H "$A" "$U/v1/keys")"
 row 'GET  /v1/blob/missing -> 404' "$(code -H "$A" "$U/v1/blob/missing")"
 row 'GET  /v1/blob/../evil -> 400' "$(code -H "$A" --path-as-is "$U/v1/blob/../evil")"
 row 'DELETE /v1/blob/demo -> 405'  "$(code -X DELETE -H "$A" "$U/v1/blob/demo")"
+row 'DELETE 405 empty body'        "$(tag -X DELETE -H "$A" "$U/v1/blob/demo")"
 
 dd if=/dev/zero of="$B/big" bs=1M count=9 2>/dev/null
 row 'PUT  9 MiB -> 413'            "$(code -X PUT -H "$A" --data-binary @"$B/big" "$U/v1/blob/big")"

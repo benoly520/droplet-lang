@@ -115,7 +115,7 @@ func (g *gen) serviceMain(sig *check.FnSig, reqIdx int) {
 		return
 	}
 	if respType.FieldsByName["status"] == nil {
-		g.failf(token.Pos{}, "Response %s 缺少 status 字段", respType.Name)
+		g.failf(token.Pos{}, "响应类型 %s 缺少 status 字段：运行时只按 status 映射状态码", respType.Name)
 		return
 	}
 
@@ -163,10 +163,13 @@ func (g *gen) serviceMain(sig *check.FnSig, reqIdx int) {
 			g.line("  out->status = (uint16_t)_r.u.ok.m_status;")
 		case "body":
 			g.line("  out->body = _r.u.ok.m_body;")
-		case "etag":
-			g.line("  out->etag = _r.u.ok.m_etag;")
 		case "content_type":
 			g.line("  out->content_type = _r.u.ok.m_content_type;")
+		case "etag":
+			// v0.10 的第四条语法减法：ETag 由运行时从 body 推导（见 rt_http.c）。
+			g.failf(token.Pos{}, "Response.etag 不用写：ETag 头由运行时从 body 推导（SPEC §2.2 H7），删掉这个字段")
+		default:
+			g.failf(token.Pos{}, "Response.%s 无法映射到响应：可写的只有 status / body / content_type", f.Name)
 		}
 	}
 	g.line("  return 0;")

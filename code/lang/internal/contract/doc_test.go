@@ -66,9 +66,10 @@ func TestWebapiContract(t *testing.T) {
 	if entry == nil || entry.Name != "handle" {
 		t.Fatalf("没找到入口函数 handle：%+v", doc.Functions)
 	}
-	// 参数里的 BlobFs / Versioning / Sys 是 host 组，str 不是
-	if len(entry.Hosts) != 3 || entry.Hosts[0] != "BlobFs" ||
-		entry.Hosts[1] != "Versioning" || entry.Hosts[2] != "Sys" {
+	// 参数里的 BlobFs / Versioning 是 host 组，str 不是。v0.10 起入口不再要 Sys：
+	// 它原本只为算 ETag 而存在，而 ETag 现在由运行时从 body 推导。
+	if len(entry.Hosts) != 2 || entry.Hosts[0] != "BlobFs" ||
+		entry.Hosts[1] != "Versioning" {
 		t.Fatalf("host 列表错：%v", entry.Hosts)
 	}
 }
