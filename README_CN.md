@@ -6,7 +6,7 @@
 
 Droplet 只优化一件事：**让 AI 的错误无法保持沉默，让验证便宜到代理真的会去跑。** 不是"造一门更安全、更抽象、更优雅的语言"，而是造一门错误藏不住、检查以毫秒计、运行时轻到能塞进最小生产实例的语言。
 
-> **状态：D0 已实现；D1 四项已全部落地 ——「变体构造」（`T.V` / `T.V { … }`）、「`entry` 扁平化」（入口就是一个用 `entry` 声明的函数，不再有 `{ fn … }` 壳）、「删 `Response.etag`」（ETag 头由运行时从 body 推导，handler 不再书写）与「`env` 类型化配置」（一个 `env App { … }` 块成为一个 record 类型，handler 以 `cfg` 收到它；必填键缺失即在启动瞬间失败而非部署时才炸，源码里永不出现环境变量名）。** 一个 91 行的示例服务（契约 + 入口）能编成 C11 二进制，以不到 2 MB 常驻内存启动并讲 HTTP/1.1；89 个 Go 测试覆盖 lexer、parser、checker、生成器、host 能力签名、运行时死代码审计、AST 转储与契约导出。已实现的语言仍是设计的**有偏子集**，每一处缺口（密钥不透明类型、feature flag 生命周期……）都带原因与补齐里程碑，见 [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md)。完整提案见 [docs/SPEC.md](docs/SPEC.md)（§0 范式定位、§5.9 设计模式与 OOP 取舍、§5.10 意图一等公民、§7.8 收敛判据、§9 生产资源预算、附录 C 设计包袱自审）。英文版见 [README.md](README.md)。当前进度与下一步见 [docs/NEXT.md](docs/NEXT.md)。
+> **状态：D0 已实现；D1 四项已全部落地 ——「变体构造」（`T.V` / `T.V { … }`）、「`entry` 扁平化」（入口就是一个用 `entry` 声明的函数，不再有 `{ fn … }` 壳）、「删 `Response.etag`」（ETag 头由运行时从 body 推导，handler 不再书写）与「`env` 类型化配置」（一个 `env App { … }` 块成为一个 record 类型，handler 以 `cfg` 收到它；必填键缺失即在启动瞬间失败而非部署时才炸，源码里永不出现环境变量名）。** 一个 91 行的示例服务（契约 + 入口）能编成 C11 二进制，以不到 2 MB 常驻内存启动并讲 HTTP/1.1；91 个 Go 测试覆盖 lexer、parser、checker、生成器、host 能力签名、运行时死代码审计、AST 转储与契约导出。已实现的语言仍是设计的**有偏子集**，每一处缺口（密钥不透明类型、feature flag 生命周期……）都带原因与补齐里程碑，见 [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md)。完整提案见 [docs/SPEC.md](docs/SPEC.md)（§0 范式定位、§5.9 设计模式与 OOP 取舍、§5.10 意图一等公民、§7.8 收敛判据、§9 生产资源预算、附录 C 设计包袱自审）。英文版见 [README.md](README.md)。当前进度与下一步见 [docs/NEXT.md](docs/NEXT.md)。
 
 ## 快速开始
 

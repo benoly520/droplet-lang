@@ -9,26 +9,22 @@
 
 ## 0. 现在的状态（截至 2026-10-30）
 
-- `origin/main` = `main` = `aa62332`：本轮三条（`feat(lang)` 删 `Response.etag`、
-  `docs(lang)` 四份规范文档、`docs(next)`）**已 push**，`git log --oneline origin/main..main`
-  实测为空（别凭印象写）；下面记拍板结果的那条 `docs(next)` 补记随后同推。
-- 本轮（v0.10）做的事：`Response` 的 `etag` 字段从语法里删掉，ETag 改由**运行时从 body 推导**
-  （`rt_http.c`：`dp_sys_u64_str(dp_sys_hash64(resp.body))`，空 body 就不发这个头）。
-  连带：`dp_response` 少一个字段、gen 的响应映射多两个拒绝分支（`etag` 与「未知响应字段」，
-  后者以前被静默丢弃）、入口不再收 `sys: Sys`（推导后 handler 里 `sys.*` 零调用）。
-  样例 86 → 80 行（`contract.dlt` 43 + `main.dlt` 37），实现 6023 → 6034 行。
-- 行为变化两条，都已登记 D0-DEVIATIONS §2：`PUT` 的成功响应不再带 `ETag`（客户端要新版本号请
-  `GET`）；`/health` 与 `/v1/keys` 的响应**开始**带 `ETag`（旧代码在那两处写 `etag: ""` = 不发头）。
-  `GET` 的 tag 值与 `If-Match` 的比对逐字节不变 —— 新旧都是同一个函数对同一份内容求值。
-- 本轮已实测：`gofmt -l` 无输出、`go vet ./...` 无输出、**79 个用例全绿**、`accept.sh` **13 项**全通、
-  `hello` 打出 `world`、`shape` 打出 `wide`、D0-DEVIATIONS §6 的 13 条探针（含新增 m / o / p 三条）
-  逐条与文档期望相同；`-print-c` 行数 hello 23 / shape 47 / webapi 130（原 133，少三行 `m_etag`）。
-  **这一条减法不要求 `-print-c` 逐字相同**（它删的是两次计算里的一次，不是书写冗余），
-  判据换成 HTTP 行为等价，见 SPEC §5.1.1 与 IMPL-PLAN §8.2。
-- 60 s 压缩长稳重跑过，退出码 0（2 轮 0 失败、`fail.log` 0 字节、1 线程、无残留）；
-  **第一次跑是无效的** —— 上一班留下的 72 h 长稳实例还占着 18800，新实例 bind 失败即退出，
-  请求全打在旧二进制上，而 `sample.log` 的 rss 列是 0（见 §4）。已给 `soak.sh`
-  加「自建实例启动即退出就报错」的护栏，并杀掉残留进程。3 天长稳仍没做（需要常开的机器，见 §2 P0）。
+- `origin/main` = `main` = `8fdde01`，工作区干净（`git status --short` 空、
+  `git log --oneline origin/main..main` 空）。
+- 本轮（v0.11）做的事：**`env` 一等特性落地**，D1 四项至此全部完成。新文件 `check/env.go`（145 行）：
+  `env` 块注册为带 `IsEnv` 标记的 record；源码里**不许构造** env 值（配置只能来自启动环境）；
+  服务入口必须声明 `env` 块并补齐 `port/bind/root/token/max_body` 五键；命令行程序声明 `env` 报「无人消费」。
+  生成器加配置加载器（必填键缺失或值非法 → 启动即失败），环境变量前缀由块名推出（`App` → `APP`），
+  **源码里永不出现环境变量名**；`droplet contract` 增 `envs` 分组。
+  样例 80 → 91 行（`contract.dlt` 43 → 54 的行全是那个 `env App` 块；`main.dlt` 37 未变）。
+- 规模：Go 非测试 4566 → 4927（+361，其中 `check/env.go` 145、`gen/main.go` 的加载器与接线约 120），
+  内嵌运行时 1470 → 1454（-16），合计 6034 → **6381，占 H8 的 8000 的 80%**。
+  **余量只剩 1619 行** —— §8.3 那条「加语法与拆文件同一条提交」的纪律，从现在起是硬要求。
+- 用例：`grep -c '^func Test'` = **91**（上一轮 79；本轮 +10 checker +2 生成期集成）。
+  验收 `accept.sh` 仍是 13 项，结论未变。
+- **本轮没跑长稳**，而 `env` 改了启动路径（配置加载先于监听）。所以 §2 P0 的门禁比之前更硬：
+  下一次改动落地前，至少要重跑一次 `SOAK_SECONDS=60`，3 天口径仍挂在 P0。
+
 
 ## 1. 新机器五分钟上手
 
@@ -36,7 +32,7 @@
 go version                                    # 需 ≥ 1.24（code/lang/go.mod 声明的最低版本）
 mkdir -p .build                               # 编译产物放这里，目录不会自动建
 cd code/lang && go build -o ../../.build/droplet ./cmd/droplet
-go test ./...                                 # 期望全部包 ok（共 79 个用例）
+go test ./...                                 # 期望全部包 ok（共 91 个用例）
 ```
 
 还需要 `cc`（gcc 或 clang，编译器以 `-std=c11` 调用它）。
@@ -71,33 +67,33 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
   新实例的 bind 顶掉，而请求照样有响应（来自旧二进制）—— 这种「0 失败」是假的。
   `sample.log` 的 rss 列为 0 就是这个形状；v0.10 起脚本自己会拦（启动即退出 → 报错并退出 1）
 
-### P1 · D1 设计项（`env` 已点头，其余仍**需要点头**）
+### P1 · D2 设计项（三条合成一条，**全部待点头**，方案见 IMPL-PLAN §8.4）
 
-- **`env` 一等特性**：现在 `check` 直接拒（`E1`），配置走环境变量。D1 剩下的最后一条，
-  它要跟 `contract` 的 `envs` 分组一起回来
-- **H7 还欠 8 处**（本轮数出来的，以前没进清单）：`main.dlt` 里 `status: 200` ×5、`body: b""` ×3。
-  它们删不掉，因为重复的是**值**不是书写位置；处置要动 handler 的返回形状（「成功即值」：
-  `entry` 直接返回 `bytes | ApiError`，状态码与 `Content-Type` 由运行时包装）。
-  **这条动了入口的返回类型，要单独点头**，已登记 IMPL-PLAN §8.2 归属 D2
-- **`Response` 的字段形状仍长在 gen**：`check` 说 ok 而 `build` 报 `E-GEN` 的三类（缺 `status` /
-  写 `etag` / 未知字段）没有收进 checker —— 「响应面」目前不是 checker 的概念。
-  要不要搬过去是笔设计账，见 D0-DEVIATIONS §4.1 与 IMPL-PLAN §8.1
-- **拍板结果（2026-10-30）**：下一条做 `env`。上面两条（返回形状改造、checker 的响应面）
-  **没有点头**，留在本清单等下一轮再议
-- **新解锁的一条**：412 条件失败可以改回「错误是值」了 —— handler 返回 `ApiError.Conflict`，
-  同时删掉 `rt_http.c` 里自带的 If-Match 比对。以前它在语言侧表达不出来（构造不出错误值），
-  变体构造落地后障碍消失。这条动了 HTTP 语义与运行时，**要单独点头**，也意味着要重跑长稳
+- **删掉 `Response`，成功即值**（`entry -> bytes | ApiError`；无体用裸 `return`；状态码只在
+  `tag → status` 表里写一次）。这条同时吃掉下面两条，所以合成一批、只重跑一次长稳。
+- **H7 欠 8 处**：`main.dlt` 里 `status: 200` ×5、`body: b""` ×3。D2 之后应为 0。
+  注意 **3 处 `b""` 不是靠"成功即值"消掉的**，靠的是「裸 `return` = 单位值」这条新规则 —— 它才是 D2 里
+  唯一新增的语义，也是唯一需要认真反对的一条（见 §8.4 待点头表）。
+- **`Response` 的字段形状长在 gen**：`check` 说 ok 而 `build` 报 `E-GEN` 的三类（缺 `status` /
+  写 `etag` / 未知字段）。**原计划的"搬进 checker"不做了** —— 那是给同一套映射补一份并行实现。
+  删掉 `Response` 之后这三类在结构上不存在，check 与 build 不可能再分歧。
+- **412 只做一半**：加 `PreconditionFailed` 变体与 412 映射（该补的 D0 缺口），**但运行时里那段
+  `If-Match` 比对不删**。理由是安全边界（与 `dp_valid_key` 同级）：它由运行时把守时，handler 忘写
+  不会丢保护；搬到 handler 后忘一次就是静默丢更新。语言侧的正解是 `boundary ... with idempotency`
+  合成这条检查（D3），不是交还给人。**这一条与上一班的建议相反，请重点看 §8.4 的理由再点头。**
+- 批完之后要付的账：`accept.sh` 13 项必须逐条不变（其中两条最容易翻车：405 的**空 body**、
+  412 的**无快照无提交**）、重跑 `SOAK_SECONDS=60`、`README`/`SPEC` 的 H7 状态更新。
 
 ## 3. 上一班拍板的结果（2026-10-30）
 
-1. 下一条做 **`env` 一等特性**（连同 `contract` 的 `envs` 分组一起回来）。「成功即值」的
-   返回形状改造与「把响应面收进 checker」两条**没有点头**，留在 §2 P1 等下一轮再议。
+1. 下一条做 **`env` 一等特性**（连同 `contract` 的 `envs` 分组一起回来）——
+   **已落地**：`8fdde01`，D1 四项全完成。
 2. **不起 72 h 长稳**：本机不保证这几天不关机，P0 保持挂着；自测继续用
    `SOAK_SECONDS=60 sh code/webapi/deploy/soak.sh`（跑前先确认端口没被残留实例占）。
 3. `.build/verify_d0.sh` **不入库**：D0-DEVIATIONS §6 的 13 条探针继续按文档手跑；
    要变成可重跑的护栏，得先解决它跟 `accept.sh` / `soak.sh` 抢实例的问题。
-
-（本轮三条提交已 push：`9d7d30a..aa62332`。）
+4. （2026-10-30 追加）**D2 合成一批做**，方案与三件待点头写在 IMPL-PLAN §8.4；
+   本轮只落文档、没动代码。
 
 ## 4. 坑（踩过的，别再踩）
 
