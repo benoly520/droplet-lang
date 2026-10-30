@@ -9,15 +9,15 @@
 
 ## 0. 现在的状态（截至 2026-10-30）
 
-- `main` = `a4f7a3a`，**已推送**。其上还有一批**未提交**改动（本轮 = H8 拆分 + 两条语法减法）：
-  - P1 H8：`internal/check/` 同包拆 8 个文件（`check.go` 1188 → 161，最大 `types.go` 225）
-  - P2 两条语法减法：host 能力参数不写名字、Unit 函数不写 `return`（旧写法报 `E0006` / `E1` 并带改写提示）
-  - 跟着改的样例：`examples/hello.dlt`、`webapi/src/contract.dlt`；测试 58 → 63
-  - 文档：`docs/SPEC.md`（v0.7 §5.1.1）、`docs/IMPL-PLAN.md`（§8.2 / §8.3 基线刷新）、
-    `docs/D0-DEVIATIONS.md`（复核命令换成新语法）、两份 README（H7/H8 表与用例数）
+- 本地 `main` = `b646400`（`refactor(lang): check.go 同包拆分，并落地两条语法减法`），
+  **已提交、尚未推送**（`git log origin/main..main` 就是这一条）。工作区干净。
+- 那一条提交同时包含两件事（本来想拆两条，拆不开）：
+  - H8：`internal/check/` 同包拆 8 个文件（`check.go` 1188 → 161，最大 `types.go` 225）
+  - H7：host 能力参数不写名字、Unit 函数不写 `return`（旧写法报 `E0006` / `E1` 并带改写提示）
+  - 为什么不拆：新规则本身写在拆分后新建的 `stmts.go` 里，硬拆会造出一个测试跑不过的中间提交
 - 本轮已实测：`go vet ./...` 无输出、63 个用例全绿、`accept.sh` 12 项全通、
+  `SOAK_SECONDS=60 sh soak.sh` 退出码 0（2 轮 0 失败、1 线程、无残留子进程、`fail.log` 0 字节）、
   **`-print-c` 逐字相同**（旧样例+旧编译器 vs 新样例+新编译器，`hello.dlt` 与 `webapi` 各一份）
-- 具体文件清单以 `git status --short` 为准。
 
 ## 1. 新机器五分钟上手
 
@@ -50,15 +50,6 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 
 ## 2. 待办
 
-### P0 · 提交当前改动
-
-- 内容：P1（`internal/check/` 拆 8 文件）+ P2（两条语法减法及样例、测试、文档）——
-  具体是哪几个文件以 `git status --short` 为准
-- 判据：`git status --short` 为空
-- 建议拆两条提交，方便单独回退：
-  `refactor(check): check.go 同包拆 8 个文件，逻辑零改动` /
-  `feat(parse): 落地两条语法减法（host 参数无名、Unit 函数不写 return）`
-
 ### P0 · 3 天长稳（唯一需要「等」的事）
 
 - 为什么一直没做：需要一台常开的机器
@@ -74,12 +65,13 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 - **`env` 一等特性**：现在 `check` 直接拒（`E1`），配置走环境变量
 - 四条都是 H7 基线里剩下未还的账，见 [IMPL-PLAN §8.2](IMPL-PLAN.md)；判据是 H7 实测归零 +
   63 用例与 `accept.sh` 全通 + 旧写法报错带改写提示
+- 已定顺序：变体构造 → `entry` 扁平化 → 删 `Response.etag` → `env`（先解锁语言表达力，
+  再删冗余语法位置，`env` 放最后因为它要跟 `contract` 的 `envs` 分组一起回来）
 
-## 3. 等你拍板的三件事
+## 3. 等你拍板的两件事
 
-1. 本轮两条提交现在就做，还是先把 D1 四条一起改完再一起提交？
-2. D1 四条按什么顺序做（建议：变体构造 → `entry` 扁平化 → 删 `etag` → `env`）？
-3. `.build/verify.sh` 要不要提升为入库脚本 `code/webapi/deploy/verify-docs.sh`
+1. 本地那条提交现在 `git push`，还是等 D1 第一项（变体构造）做完一起推？
+2. `.build/verify.sh` 要不要提升为入库脚本 `code/webapi/deploy/verify-docs.sh`
    （它把 IMPL-PLAN §6 的复核命令整段跑一遍，现在只在被 gitignore 的目录里）？
 
 ## 4. 坑（踩过的，别再踩）
