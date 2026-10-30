@@ -9,9 +9,9 @@
 
 ## 0. 现在的状态（截至 2026-10-30）
 
-- `origin/main` = `9d7d30a`（上一轮收尾时已 push，本地与远端同步过）；本轮在其上再压
-  **3 条未推送**：`feat(lang)` 删 `Response.etag` + `docs(lang)` 四份规范文档 +
-  本文件这条 `docs(next)`（`git log --oneline origin/main..main` 实测，别凭印象写）。
+- `origin/main` = `main` = `aa62332`：本轮三条（`feat(lang)` 删 `Response.etag`、
+  `docs(lang)` 四份规范文档、`docs(next)`）**已 push**，`git log --oneline origin/main..main`
+  实测为空（别凭印象写）；下面记拍板结果的那条 `docs(next)` 补记随后同推。
 - 本轮（v0.10）做的事：`Response` 的 `etag` 字段从语法里删掉，ETag 改由**运行时从 body 推导**
   （`rt_http.c`：`dp_sys_u64_str(dp_sys_hash64(resp.body))`，空 body 就不发这个头）。
   连带：`dp_response` 少一个字段、gen 的响应映射多两个拒绝分支（`etag` 与「未知响应字段」，
@@ -71,7 +71,7 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
   新实例的 bind 顶掉，而请求照样有响应（来自旧二进制）—— 这种「0 失败」是假的。
   `sample.log` 的 rss 列为 0 就是这个形状；v0.10 起脚本自己会拦（启动即退出 → 报错并退出 1）
 
-### P1 · D1 设计项（**需要点头**）
+### P1 · D1 设计项（`env` 已点头，其余仍**需要点头**）
 
 - **`env` 一等特性**：现在 `check` 直接拒（`E1`），配置走环境变量。D1 剩下的最后一条，
   它要跟 `contract` 的 `envs` 分组一起回来
@@ -82,22 +82,22 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 - **`Response` 的字段形状仍长在 gen**：`check` 说 ok 而 `build` 报 `E-GEN` 的三类（缺 `status` /
   写 `etag` / 未知字段）没有收进 checker —— 「响应面」目前不是 checker 的概念。
   要不要搬过去是笔设计账，见 D0-DEVIATIONS §4.1 与 IMPL-PLAN §8.1
-- 已定顺序：`env` → 上面两条另议
+- **拍板结果（2026-10-30）**：下一条做 `env`。上面两条（返回形状改造、checker 的响应面）
+  **没有点头**，留在本清单等下一轮再议
 - **新解锁的一条**：412 条件失败可以改回「错误是值」了 —— handler 返回 `ApiError.Conflict`，
   同时删掉 `rt_http.c` 里自带的 If-Match 比对。以前它在语言侧表达不出来（构造不出错误值），
   变体构造落地后障碍消失。这条动了 HTTP 语义与运行时，**要单独点头**，也意味着要重跑长稳
 
-## 3. 等你拍板的三件事
+## 3. 上一班拍板的结果（2026-10-30）
 
-1. D1 只剩 `env` 一条（它要跟 `contract` 的 `envs` 分组一起回来）。是接着做 `env`，
-   还是先做 §2 里那条「成功即值」的返回形状改造（能把 H7 的 8 处一次清掉，但动入口签名）？
-2. 72 h 长稳现在具备了重跑条件（残留进程已清、脚本会拒绝端口被占）。要不要在本机后台重新起一条
-   `sh code/webapi/deploy/soak.sh 72`？它要求这台机器这几天不关机，且 `.build/soak/` 不能被清理。
-3. 本轮把 D0-DEVIATIONS §6 的复核命令整段抽出来跑过一遍（`.build/verify_d0.sh`，在被 gitignore 的目录里）。
-   要不要提升为入库脚本 `code/webapi/deploy/verify-docs.sh`？它能把「文档里的期望 = 实际输出」
-   变成一条可重跑的护栏，代价是要加一个端口 / 路径隔离，否则它会跟 `accept.sh` 互相干扰
+1. 下一条做 **`env` 一等特性**（连同 `contract` 的 `envs` 分组一起回来）。「成功即值」的
+   返回形状改造与「把响应面收进 checker」两条**没有点头**，留在 §2 P1 等下一轮再议。
+2. **不起 72 h 长稳**：本机不保证这几天不关机，P0 保持挂着；自测继续用
+   `SOAK_SECONDS=60 sh code/webapi/deploy/soak.sh`（跑前先确认端口没被残留实例占）。
+3. `.build/verify_d0.sh` **不入库**：D0-DEVIATIONS §6 的 13 条探针继续按文档手跑；
+   要变成可重跑的护栏，得先解决它跟 `accept.sh` / `soak.sh` 抢实例的问题。
 
-（上一班的拍板项「要不要现在 push」已执行：`90ccef3..9d7d30a` 已推。）
+（本轮三条提交已 push：`9d7d30a..aa62332`。）
 
 ## 4. 坑（踩过的，别再踩）
 
