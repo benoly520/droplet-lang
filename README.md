@@ -8,7 +8,7 @@ More precisely: **the enabling layer for a generate-and-verify paradigm** — wh
 
 Droplet optimizes for one thing above all: **making AI mistakes impossible to keep silent, and making verification cheap enough that an agent will actually run it.** Not "a safer, more abstract, more elegant language" — a language where errors cannot stay hidden, checks finish in milliseconds, and the runtime is light enough to fit on the smallest production instance.
 
-> Status: **D0 implemented, D1 underway** — the first two D1 items have landed: constructing sum variant values (`T.V` / `T.V { … }`) and flattening `entry` (an entry is now a function declared with `entry`, no `{ fn … }` shell). An 86-line example service (contract + handler) compiles to a C11 binary that boots in under 2 MB RSS and speaks HTTP/1.1; 77 Go tests cover lexer, parser, checker, generator, host-capability signatures, runtime dead-code audit, AST dump and contract export. The implemented language is a deliberate subset of the design — every gap carries a reason and a fill-in milestone in [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md). Full proposal: [docs/SPEC.md](docs/SPEC.md) (Chinese). Where things stand and what is next: [docs/NEXT.md](docs/NEXT.md).
+> Status: **D0 implemented, D1 underway** — the first three D1 items have landed: constructing sum variant values (`T.V` / `T.V { … }`), flattening `entry` (an entry is now a function declared with `entry`, no `{ fn … }` shell), and dropping `Response.etag` (the runtime derives the ETag header from the body, so handlers no longer write it). An 80-line example service (contract + handler) compiles to a C11 binary that boots in under 2 MB RSS and speaks HTTP/1.1; 79 Go tests cover lexer, parser, checker, generator, host-capability signatures, runtime dead-code audit, AST dump and contract export. The implemented language is a deliberate subset of the design — every gap carries a reason and a fill-in milestone in [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md). Full proposal: [docs/SPEC.md](docs/SPEC.md) (Chinese). Where things stand and what is next: [docs/NEXT.md](docs/NEXT.md).
 
 ## Quick start
 
@@ -28,7 +28,7 @@ curl -s -X PUT -H 'Authorization: Bearer t' --data 'hello' localhost:8787/v1/blo
 curl -s        -H 'Authorization: Bearer t' localhost:8787/v1/blob/demo              # hello
 ```
 
-`sh code/webapi/deploy/accept.sh` runs the 12 boundary checks (412 / 405 / 413 / 501 / ETag …); `sh code/webapi/deploy/soak.sh` is the long-running leak observation.
+`sh code/webapi/deploy/accept.sh` runs the 13 boundary checks (412 / 405 / 413 / 501 / derived ETag …); `sh code/webapi/deploy/soak.sh` is the long-running leak observation.
 
 ## Core idea
 

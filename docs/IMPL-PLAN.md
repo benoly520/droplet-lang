@@ -46,8 +46,8 @@ curl -H 'Authorization: Bearer dev' 'localhost:8787/v1/blob/demo'
 
 | 方法 | 路径 | 成功 | 失败 |
 | --- | --- | --- | --- |
-| GET | `/v1/blob/<key>` | 200 + 字节 + `ETag` | 404 不存在 / 400 非法 key |
-| PUT | `/v1/blob/<key>` | 200 + 新 `ETag` | 412 版本不符 / 413 超限 / 400 |
+| GET | `/v1/blob/<key>` | 200 + 字节 + `ETag`（运行时从 body 推导） | 404 不存在 / 400 非法 key |
+| PUT | `/v1/blob/<key>` | 200 + 空 body（**不带 `ETag`**，新版本号请 `GET`） | 412 版本不符 / 413 超限 / 400 |
 | GET | `/v1/keys` | 200 + `["k1","k2"]` | 500 |
 | POST | `/v1/keys/<key>` | 200 + 空 body | 400 非法 key / 500 |
 | GET | `/health` | 200 + `{"ok":true}` | — |
@@ -63,6 +63,9 @@ curl -H 'Authorization: Bearer dev' 'localhost:8787/v1/blob/demo'
 - key 校验与 `If-Match` 校验都在**进 handler 之前**由运行时做完（见 §5.4），handler 只看得到
   已经合法的 `key`、以及已经通过版本检查的写请求；
 - `PUT` 顺序固定：**快照 → 原子写 → 调度版本化提交**，提交在响应发出后执行；
+- `ETag` 不由 handler 书写（v0.10）：运行时按 `dp_sys_u64_str(dp_sys_hash64(body))` 从响应 body 推导，
+  空 body 没有表示就不发这个头；`If-Match` 的比对走同一个函数（当前内容的 hash），所以 `GET` 拿到的
+  tag 可以直接用于下一次 `PUT`，这条链与推导改造之前逐字节相同；
 - `PUT` body 上限 8 MiB（`DP_MAX_BODY` 可调），header 总量上限 8 KiB，单行 4 KiB，
   读写超时各 30 s（超时回 408）；拒绝 `Transfer-Encoding`（防请求走私）；
 - 每请求一个 arena，请求结束即 `dp_arena_free`。
@@ -205,8 +208,8 @@ type         := 'str' | 'bytes' | 'u64' | 'i64' | 'bool' | 'Unit'
 ### 4.1 `code/lang/examples/hello.dlt`
 
 ```droplet
-// 最小闭环：验证 lexer + parser + checker + codegen + cc 五层都能跑通
-// 判据：droplet build examples/hello.dlt && ./hello 打印 world
+// 最小闭环：验证 lexer + parser + checker + codegen + cc 五层都能跑通。
+// 判据：droplet build examples/hello.dlt && ./hello 打印 world。
 host Sys {
   fn log(str) -> Unit
 }
@@ -221,8 +224,10 @@ entry greet(sys: Sys) -> Unit
 ### 4.2 `code/webapi/src/contract.dlt`
 
 ```droplet
-// 通用哑存储 Web API 契约：服务端只做字节读写，不解构 payload
-type ETag { hash: u64 }
+// 通用哑存储 Web API 契约：服务端只做字节读写，不解构 payload。
+type ETag {
+  hash: u64
+}
 
 type ApiError = NotFound | BadRequest | IoError | Conflict
 
@@ -234,10 +239,10 @@ type Request {
   if_match: str
 }
 
+// 响应面只有 status 与 body：ETag 由运行时从 body 推导，handler 不写（SPEC §2.2 H7）。
 type Response {
   status: u64,
-  body: bytes,
-  etag: str
+  body: bytes
 }
 
 host BlobFs {
@@ -252,18 +257,13 @@ host Versioning {
   fn commit_soon(str, str) -> Unit
 }
 
-host Sys {
-  fn now_unix() -> i64
-  fn hash64(bytes) -> u64
-  fn u64_str(u64) -> str
-  fn log(str) -> Unit
-}
-
 boundary BlobApi @v1 {
   get(key: str) -> bytes with idempotency
     invariant "同一 key 的 GET 字节等于最近一次成功 PUT 的字节"
+
   put(key: str, body: bytes) -> ETag with idempotency
     invariant "PUT 前必须存在上一版本快照"
+
   list() -> bytes with idempotency
     invariant "清单来自目录，不来自任何注册表文件"
 }
@@ -272,37 +272,42 @@ boundary BlobApi @v1 {
 ### 4.3 `code/webapi/src/main.dlt`
 
 ```droplet
-entry handle(req: Request, fs: BlobFs, ver: Versioning, sys: Sys, root: str)
-  -> Response | ApiError
+// 示例服务入口：把 HTTP 请求映射到哑存储能力。
+entry handle(req: Request, fs: BlobFs, ver: Versioning, root: str)
+    -> Response | ApiError
   invariant "非 GET/PUT 的请求一律 405"
 {
   if req.path == "/health" {
-    return Response{status: 200, body: b"{\"ok\":true}", etag: ""}
+    return Response{status: 200, body: b"{\"ok\":true}"}
   }
+
   if req.path == "/v1/keys" {
     if req.method == "GET" {
       let body = fs.list_json(root)!
-      return Response{status: 200, body: body, etag: ""}
+      return Response{status: 200, body: body}
     }
     if req.method == "POST" {
       fs.create(root, req.key)!
-      return Response{status: 200, body: b"", etag: ""}
+      return Response{status: 200, body: b""}
     }
   }
+
   if req.path == "/v1/blob" {
     if req.method == "GET" {
       let body = fs.read(root, req.key)!
-      let tag = sys.u64_str(sys.hash64(body))
-      return Response{status: 200, body: body, etag: tag}
+      return Response{status: 200, body: body}
     }
     if req.method == "PUT" {
       fs.backup(root, req.key)
-      let etag = fs.write(root, req.key, req.body)!
-      ver.commit_soon(root)
-      return Response{status: 200, body: b"", etag: sys.u64_str(etag.hash)}
+      // write 返回的新版本 ETag 这里用不上：响应头里的 ETag 由运行时从 body 推导，
+      // 客户端要新版本号就 GET（v0.10，SPEC §2.2 H7）。
+      fs.write(root, req.key, req.body)!
+      ver.commit_soon(root, req.key)
+      return Response{status: 200, body: b""}
     }
   }
-  return Response{status: 405, body: b"", etag: ""}
+
+  return Response{status: 405, body: b""}
 }
 ```
 
@@ -312,6 +317,8 @@ entry handle(req: Request, fs: BlobFs, ver: Versioning, sys: Sys, root: str)
 ### 4.4 `code/lang/examples/shape.dlt`（D1 追加）
 
 ```droplet
+// D1 变体构造：sum 的值以前构造不出来，只能 match 零值。
+// 判据：droplet build examples/shape.dlt -o .build/shape && .build/shape 打印 wide
 host Sys {
   fn log(str) -> Unit
 }
@@ -419,7 +426,6 @@ static int dp_serve_handle(dp_arena* a, dp_str root, const dp_request* rq, dp_re
   out->content_type = dp_str_lit("application/json");
   out->status = (uint16_t)_r.u.ok.m_status;
   out->body = _r.u.ok.m_body;
-  out->etag = _r.u.ok.m_etag;
   return 0;
 }
 
@@ -496,11 +502,11 @@ typedef struct {
   dp_bytes body;
 } dp_request;
 
+/* ETag 不在这里：它由运行时从 body 推导（SPEC §2.2 H7）。 */
 typedef struct {
   uint16_t status;
   dp_str   content_type;
   dp_bytes body;
-  dp_str   etag;
 } dp_response;
 
 typedef struct {
@@ -687,7 +693,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now blobd
 | M1 | checker（E0/E1/E3/E11）+ `check` | 三个样例 0 错误；11 个反例各自命中预期 E 码且不级联 | 4–6 天 | **已完成** 2026-10-30（14 个 check 测试绿，错误按行列排序输出） |
 | M2 | codegen + `hello.dlt` 跑通 | `droplet build examples/hello.dlt && ./hello` 打印 `world` | 5–8 天 | **已完成** 2026-10-30（4 个 gen 测试绿，含 `-Werror` 端到端；30 个测试全过） |
 | M3 | `rt.c`（HTTP + blob + hash + spawn）+ `main.dlt` 编译 | `curl` 五个接口全通；412 / 404 / 400 / 413 各自命中；RSS 有基线数字 | 1.5–2 周 | **已完成** 2026-10-30（11 个 HTTP 端到端子测试绿，412/404/400/413/405 均命中；RSS 空转 1.83 MB、8 MB `PUT` 峰值 9.98 MB；`droplet contract` 可导出契约 JSON） |
-| M4 | 示例服务部署 + 契约验收 | 五接口 + 412 + 快照 + 一次版本化提交全通；连续运行 3 天无异常 | 2–3 天 | **进行中** 2026-10-30（12 项实况验收全通；长稳脚本 `soak.sh` 就位，45 s 高频替代跑 602 轮 0 失败；快照已改轮转 + 带 `seq`；§8.1 审计完成，`check` 与 `build` 已对齐（`E2`/`E1`，含参数与返回类型比对）；**连续 3 天长稳未跑**） |
+| M4 | 示例服务部署 + 契约验收 | 五接口 + 412 + 快照 + 一次版本化提交全通；连续运行 3 天无异常 | 2–3 天 | **进行中** 2026-10-30（13 项实况验收全通（v0.10 起多一项「405 空 body 不带 ETag」）；长稳脚本补了「自建实例启动即退出即报错」的护栏（端口残留时旧实例会接走请求，v0.10 实踩过）；快照已改轮转 + 带 `seq`；§8.1 审计完成，`check` 与 `build` 已对齐（`E2`/`E1`，含参数与返回类型比对）；**连续 3 天长稳未跑**） |
 
 M3 的内部拆分（按风险排序，实际按此执行）：
 
@@ -711,7 +717,8 @@ DP_COMMIT_DEBOUNCE=0`，数据目录是临时 git 仓库）：
 | --- | --- |
 | `GET /health`（无 token） | 200 |
 | `GET /v1/keys`（空） | 200 `[]` |
-| `PUT /v1/blob/demo` | 200 + `ETag` |
+| `PUT /v1/blob/demo` | 200 + 空 body（**响应不带 `ETag`**） |
+| `GET /v1/blob/demo` | 200 + `ETag`（运行时从 body 推导，handler 一个字也没写） |
 | `PUT` + 正确 `If-Match` | 200 |
 | `PUT` + 错 `If-Match` | 412（未进 handler，所以既无快照也无提交） |
 | `POST /v1/keys/second` | 200 + 空 body |
@@ -719,6 +726,7 @@ DP_COMMIT_DEBOUNCE=0`，数据目录是临时 git 仓库）：
 | `GET /v1/blob/missing` | 404 |
 | `GET /v1/blob/../evil` | 400 |
 | `DELETE /v1/blob/demo` | 405（handler 兜底） |
+| `DELETE /v1/blob/demo` 的响应头 | 无 `ETag`（空 body 没有表示，所以不推导） |
 | `PUT` 9 MiB | 413 |
 
 副作用核对：`.snapshots/` 出现 `demo.<unix>`；`git log` 两条 `snapshot demo`（对应两次成功的写，
@@ -751,6 +759,8 @@ M4 剩下的只有长稳观测，跑法：每 30 s 一次 `PUT`+`GET`，每小�
 | `dp_arena_reset` | 原型与定义齐全，**零调用点**（每请求新建 arena、用完整块 free，从不复用） | **已删**；新增 `TestRuntimeHasNoDeadFunctions`，把「运行时函数必须有调用点」变成回归测试 |
 | `true`/`false`、`!=` `<` `<=` `>` `>=` `&&` `||` `+` `-` `*` `/` `%` | 均可达，三个 `.dlt` 都没用到 | 属例子覆盖不足，不是死代码；不为它们硬凑样例 |
 | 契约 JSON 的 `envs` 分组 | checker 拒绝 env 后 `contract` 走不到导出那一步，字段永远为空 | **已删** `Doc.Envs` / `Env` / `envOf` 与对应断言 |
+| `Response` 的字段形状（缺 `status`、写了 `etag`、写了未知字段） | `check` 说 ok、`build` 报 `E-GEN`（三条样例之外才碰得到） | **登记为残留偏差**：这一类判定本来就长在 gen（§5.3 写的就是 `E-GEN`），所以「`check` 的 ok 等价于能构建」只对**能力表**成立 —— 见 D0-DEVIATIONS §2 |
+| `Sys.hash64` / `Sys.u64_str` | v0.10 起 `webapi` 不再声明 `host Sys`，两个能力在 `.dlt` 侧**零调用点**（运行时内部推 ETag 仍在用） | 保留能力项与 `rt.h` 原型；`hello.dlt` 还在用 `sys.log`。要删的是「能力项能不能被运行时内部消化」这条判据，D2 复评 |
 | `droplet help` 的 contract 描述 | 写着「boundary / env / 函数签名 / tag 表」，而 `envs` 字段早已删 | **已修**：帮助文本去掉 env |
 | `-o` 缺值 | `droplet build x.dlt -o` 静默回退到 `a.out`，人以为产物在指定位置 | **已修**：报「-o 需要一个输出路径」，`TestSplitBuildArgsMissingOut` 固定 |
 | `dump` 的 Intent 节点 | 规则名（invariant / requires）写进 `kind`，把节点类型覆盖掉，`parse` 输出里根本没有 `Intent` 节点 | **已修**：规则名改放 `rule`；新增「dump 不得出现 Unknown* 节点」两条测试（样例 + 全语法探针） |
@@ -783,11 +793,16 @@ SPEC §2.2 的 H7（重复书写预算）是补上去的，而 D0 的实现正�
 
 | 缺口 | 实测（2026-10-30） | 减法形式 | 归属 |
 | --- | --- | --- | --- |
-| `Response` 的 `etag` 字段可推导 | `etag: ""` ×4，共 5 处构造；唯一非空值是 `sys.u64_str(etag.hash)`，而 GET 路径的 tag 也是 `sys.u64_str(sys.hash64(body))` —— 同一个东西算了两遍 | 删掉 `etag` 字段，由运行时从 body 算。**不能靠“字段默认值”绕过**：§5.2 已写明“缺省值必须显式构造，零值不合法” | D1（动 HTTP 契约） |
+| `Response` 的 `etag` 字段可推导 | `etag: ""` ×4，共 5 处构造；唯一非空值是 `sys.u64_str(etag.hash)`，而 GET 路径的 tag 也是 `sys.u64_str(sys.hash64(body))` —— 同一个东西算了两遍 | 删掉 `etag` 字段，由运行时从 body 算。**不能靠“字段默认值”绕过**：§5.2 已写明“缺省值必须显式构造，零值不合法” | **已落地**（D1 v0.10：`dp_response` 少一个字段，`Response` 只剩 `status` + `body`；再写 `etag` 在生成期报错并给改法，未知的响应字段也一并拒绝） |
 | `entry X { fn f }` 双层外壳 | 2 处 `entry`（`hello.dlt` 的 `Demo`、`main.dlt` 的 `Serve`），每处只有 1 个 `fn`，这层从不承载内容 | 把签名直接挂在 `entry` 上，去掉内层 `fn` | **已落地**（D1 v0.9：`EntryDecl` 整个节点删掉，入口=带 `Entry` 标记的 `FnDecl`；将来的鉴权/超时预算写成签名上的 intent，不回头加壳） |
 | host 声明的参数名 | `fn log(msg: str)` 的 `msg` 既不影响语义，也不进报错文本（报错写的是“第 N 个参数”） | 从语法里删掉：`fn log(str) -> Unit` | **已落地**（v0.7，只改 parser 与样例） |
 | 末尾 `return Unit` | `hello.dlt` 11 行有效代码里的 1 行纯骨架；任一 Unit 函数都要写 | 规定 Unit 函数**不写** `return` | **已落地**（v0.7，只改 parser 与 gen） |
 | `boundary ... with idempotency` | 单个效果也要 `with` | 单效果用标记：`get(key: str) -> bytes idempotent` | D1 |
+| `Response` 的 `status` 重复写同一个常量 | **etag 归零后实测仍在**：`main.dlt` 里 `status: 200` 出现 5 次（超阈值 3） | 删不掉：它们重复的是**值**而不是书写位置。要动的是 handler 的返回形状 ——「成功即值」：`entry` 直接返回 `bytes | ApiError`，状态码与 `Content-Type` 由运行时包装，`Response` 只在需要非 200 的成功码时才出现 | D2（动返回形状） |
+| `Response` 的 `body` 重复写空字面量 | 同上，`body: b""` 出现 3 次（POST / PUT / 405 三处） | 同上一条：没有内容就是没有内容，不该要求手写一个空字节字面量 | D2（与上一行同批） |
+
+最后一行提醒一句：**H7 到 v0.10 仍未满足**（阈值 0 处，现存 8 处）。前三条减法删的都是书写位置，
+那 8 处删的是值本身 —— 书写层的预算已经抽干，剩下的是形状层。不把这两行从表里删掉就不能宣布 H7 已达标。
 
 **减法一律采取“必不写”，不用“可省略”。** 允许省略只是把“必写”变成“写不写都行”：手写字节没少、
 选择成本没少，还多出一种写法（公理 3）。要减就从语法里删掉那个位置。
@@ -803,12 +818,29 @@ SPEC §2.2 的 H7（重复书写预算）是补上去的，而 D0 的实现正�
 第三条（`entry` 壳）随 D1 落地，报错文本是 E0006「entry 直接写签名，不套 `{ fn … }`」并给改写提示；
 同批补的两条护栏是多入口报 E1、`entry` 缺函数体报 E0006，三条都实跑验证过，见 D0-DEVIATIONS §6 的 i / j / k 探针。
 
-硬证据：`droplet build -print-c` 在「旧样例 + 旧编译器」与「新样例 + 新编译器」下输出**逐字相同**
-（`hello.dlt` 与 `webapi` 各一份）；等价性本来也可以从结构上看出来 —— 能力调用走
+第四条账（`Response.etag`）随 D1 落地，v0.10。报错在**生成期**：
+`E-GEN: Response.etag 不用写：ETag 头由运行时从 body 推导（SPEC §2.2 H7），删掉这个字段`；
+同批补一条一直漏着的护栏 —— `Response` 里非 `status` / `body` / `content_type` 的字段以前被**静默丢弃**
+（声明了也不进响应，也不报错），现在报 `E-GEN: Response.retry_after 无法映射到响应：可写的只有 status / body /
+content_type`。两条分别由 `TestResponseEtagFieldRejected` 与 `TestUnknownResponseFieldRejected` 固化。
+`fs.write` 返回的新版本 `ETag` 在 `main.dlt` 里被 `!` 丢弃（`fs.write(root, req.key, req.body)!`）——
+丢弃返回值本来就是合法的（既有的 `fs.create(...)!` 就丢弃 `bool`），**存储层的版本事实不变**，
+变的只是「谁把它写进响应头」。
+
+硬证据：前三条减法各自落地前后，`droplet build -print-c` 在「旧样例 + 旧编译器」与「新样例 + 新编译器」
+下输出**逐字相同**（`hello.dlt` 与 `webapi` 各一份）；等价性本来也可以从结构上看出来 —— 能力调用走
 `internal/host` 的运行时原型（参数名不参与生成），`return Unit` 与 gen 的兜底
 `return ((dp_unit){0});` 是同一句。减法不改变语义，只改变要写的字节。
 
-「D1」的三条会动 AST 或 HTTP 契约，按里程碑走（`entry` 那条已于 v0.9 落地，剩 `etag` 与 `env`）。
+第四条不同，它是**唯一一条必须改变生成 C 的减法**（少一行 `out->etag`，`dp_response` 少一个字段，
+`rt_http.c` 多一处推导）—— 因为它删的不是书写层冗余，而是**同一件事的两次计算**。判据因此换成
+**HTTP 行为等价**：`GET /v1/blob/<key>` 的 `ETag` 与改造前逐字节相同（新旧都是同一个函数对同一份 body 求值），
+`If-Match` 的比对也走同一个函数，「GET 取 tag → PUT 带 tag」这条链一字未动。变的是三处书写位置：
+`PUT` 的成功响应不再带 tag（空 body 没有表示），`/health` 与 `/v1/keys` 的响应**开始**带 tag（旧代码在那两处
+写的是 `etag: ""`，等于不发头）。规则统一成一句：**有表示就有版本，没表示就没版本**。
+
+「D1」的三条会动 AST 或 HTTP 契约，按里程碑走（`entry` 那条已于 v0.9 落地，`etag` 那条已于 v0.10 落地，
+剩 `env`；`boundary` 的单效果标记也算 D1）。
 不修，H7 就只是一句口号 ——
 而它存在的理由正是“口号拦不住样板”。
 
@@ -818,21 +850,21 @@ H8 是 SPEC §2.2 里最新补的一条（单文件 ≤ 800 行、编译器 + �
 
 | 位置 | 行数 | 对照 H8 |
 | --- | --- | --- |
-| `internal/gen/`（4 个文件，最大 `c.go` 335） | 857 | ok |
+| `internal/gen/`（4 个文件，最大 `c.go` 335） | 860 | ok |
 | `internal/check/`（9 个文件，最大 `types.go` 224） | 1330 | ok |
 | `internal/parse/parse.go` | 661 | ok |
 | `internal/ast` | 374 | ok |
 | `internal/lex` | 311 | ok |
 | `internal/dump` | 258 | ok |
-| 其余（cmd / contract / host / token / runtime） | 774 | ok |
-| Go 非测试合计 | 4561 | — |
-| 内嵌运行时 C（4 个 `.c` + `rt.h`） | 1462（最大 `rt_http.c` 615） | ok |
-| **合计** | **6023** | 占 8000 的 75% |
+| 其余（cmd / contract / host / token / runtime） | 770 | ok |
+| Go 非测试合计 | 4564 | — |
+| 内嵌运行时 C（4 个 `.c` + `rt.h`） | 1470（最大 `rt_http.c` 622） | ok |
+| **合计** | **6034** | 占 8000 的 75% |
 
 另一个不打算消灭、只打算标价的数字：**新增一个 AST 节点要改 5 处** —— `ast`（结构体）→ `parse`（解析）→
 `check`（类型与签名）→ `gen`（生成 C）→ `dump`（`parse` 的输出）。这是管道结构的必然，不是缺陷；
 登记它只是为了在“加个语法”的决策时看得见价钱。目前只有 `dump` 有专用护栏（`Unknown*` 两条测试），
-`check` 与 `gen` 靠 77 个用例。
+`check` 与 `gen` 靠 79 个用例。
 
 处置（已完成 2026-10-30）：`check.go` 原 1188 行**同包拆 8 个文件**（不拆包）——
 `check.go`（编排与 `Result`，161）、`types.go`（类型 / 作用域 / 类型判定，225）、
@@ -851,7 +883,7 @@ H8 是 SPEC §2.2 里最新补的一条（单文件 ≤ 800 行、编译器 + �
 3. **诊断级**：7 个反例（E1 未定义类型 / E11 缺意图 / E2 能力参数谎报 / E3 不可序列化 /
    env 拒收 / match 未穷尽 / 变体带字段）的错误输出逐字相同，含行列号与消息。
 
-兜底是 77 个用例 + `accept.sh` 12 项 + `go vet`。
+兜底是 79 个用例 + `accept.sh` 13 项 + `go vet`。
 
 D1 追加（2026-10-30）：变体构造落地时 `gen/c.go` 从 798 涨到 826，**卡线变成破线**，
 按同一条处置拆成 4 个文件（`c.go` 338 顶层拼接与函数、`stmts.go` 122 语句、`exprs.go` 221 表达式、
@@ -874,6 +906,19 @@ D1 第二项（2026-10-30，v0.9）：`entry` 扁平化删掉了 `EntryDecl` 这
 无 E 码无行号），现在 parse 就报 `E0006: entry f 必须有函数体`。
 等价性证据同前：旧编译器跑旧语法、新编译器跑新语法，`hello` / `shape` / `webapi` 三份
 `build -print-c` 输出逐字相同；`contract` JSON 只有入口函数的 `pos` 变了（壳占的两行没了）。
+
+D1 第三项（2026-10-30，v0.10）：删 `Response.etag`。**这条减法让书写面变小、实现面变大** ——
+样例 86 → 80 行（`contract.dlt` 50 → 43：`Response` 少一个字段（多一行说明注释）、`host Sys` 整块不再需要；
+`main.dlt` 36 → 37：少 5 处 `etag`、少 GET 的 tag 计算、多两行解释为什么可以丢弃 `fs.write` 的返回值），
+而 gen 多两个拒绝分支（+3）、`rt_http.c` 多一处推导（+7）、`rt.h` 多两行说明（+1），合计 6023 → 6034。
+这不是把账赖掉了：H7 管的是**用户要手写的字节**，H8 管的是实现总量，两者本来就要分开结账；
+6034 仍占 8000 的 75%。真正的净收益是**少一处能算错的地方**：以前响应头的 tag 由 handler 算、
+`If-Match` 的比对由运行时算，两处必须用同一个函数才对得上（对不上就是静默的并发 bug）；现在响应侧
+只剩运行时一处推导。
+
+顺带删掉一条能力授权：`webapi` 的入口以前收 `sys: Sys`，v0.10 之后它在 handler 里零调用，
+按「能力是最小授权」应当从签名消失 —— 于是 `contract.dlt` 不再有 `host Sys` 块，
+`droplet contract` 的 `hosts` 从 3 项降到 2 项（`BlobFs` / `Versioning`，`doc_test.go` 同步）。
 
 ## 9. 风险与回退
 

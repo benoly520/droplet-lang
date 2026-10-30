@@ -24,6 +24,7 @@
 | 项 | SPEC | D0 实际 | 原因 | 补齐 |
 | --- | --- | --- | --- | --- |
 | 412 条件失败 | 错误是值（C1） | 运行时在**进 handler 之前**判定 | 以前 handler 表达不了（构造不出错误值）；D1 变体构造落地后，语言侧障碍已消失 | 现在可做：handler 返回 `ApiError.Conflict`，runtime 去掉自带的 If-Match 比对 |
+| `ETag` 由谁书写 | IMPL-PLAN §2 曾写「PUT 成功返回新 `ETag`」 | v0.10 起 ETag 由**运行时**按 `dp_sys_u64_str(dp_sys_hash64(body))` 从响应 body 推导：非空 body 就有头，空 body 就没有。`PUT` 的成功响应因此不带 tag（要新版本号请 `GET`），`/health` 与 `/v1/keys` 则**开始**带 tag | 同一份表示只能有一个版本号（SPEC §2.2 H7 第四条减法）；`If-Match` 的比对本来就在运行时，两处必须用同一个函数才对得上 —— 对不上就是静默的并发 bug | 已完成（行为变化，客户端视角见 IMPL-PLAN §2） |
 | keep-alive | 未限定 | 不做；每请求一连接，`Connection: close` | 手写 HTTP 最容易在这里响应错位；也省内存 | 不做 |
 | chunked | 未限定 | 拒绝，回 501 | 防请求走私；body 上限 8 MiB 够用 | 不做 |
 | 并发 | 未限定 | 单线程；读写各 30 s 超时（只靠 `SO_RCVTIMEO`/`SO_SNDTIMEO`），超时回 408 | H4 内存预算；超时防一条连接钉死服务 | 需要时多进程 + `SO_REUSEPORT` |
@@ -39,7 +40,7 @@
 | --- | --- | --- | --- | --- |
 | 动词 | `check` / `mem` / `bench` / `explore` / `trace` / `verify` | `parse` / `check` / `build` / `contract`（+ `help`） | 让服务跑起来所需的最小子集 | D1 |
 | 错误码 | `E0`–`E12` | `E1`（类型与匹配）、`E2`（能力与签名）、`E3`（边界序列化）、`E11` + 语法号 `E0003`–`E0009` + 生成期 `E-GEN` | 没实现的检查不报假错误；生成期只剩结构形状类报错 | 随特性 |
-| 增量编译 | 未限定 | 每次全量重编 | 样例只有 86 行（`contract.dlt` 50 + `main.dlt` 36） | 不做 |
+| 增量编译 | 未限定 | 每次全量重编 | 样例只有 80 行（`contract.dlt` 43 + `main.dlt` 37） | 不做 |
 | 契约 JSON | 含 `envs` 分组 | 已删该字段 | checker 拒绝 env → `contract` 走不到导出那一步，字段永远为空 | 随 env 一起回来 |
 
 ## 4. 一条跨阶段的老毛病：`check` 的保证比 `build` 弱
@@ -71,7 +72,14 @@
 还有一个同类但更阴的形状：**多个 `entry`**。以前 `check` 照样 ok，而 `EntryPoint` 取的是 map
 迭代顺序里遇到的任意一个 —— 同一份源码连跑 6 次，入口在 `f` 与 `g` 之间跳过。现在报 `E1`。
 
-**结论**：`droplet check` 的 `ok` 现在等价于「能构建」。gen 里那两处检查降为防御性兜底。
+**结论**：`droplet check` 的 `ok` 现在等价于「能构建」—— **只对能力表这一类成立**。
+
+还有一类留在 gen 里没收进来：**服务形态的响应字段形状**。三种写法 `check` 都说 ok、`build` 才报 `E-GEN`
+（§6 的 m / o / p 三条探针，v0.10 实跑）：`Response` 缺 `status`、写了 `etag`、写了非
+`status` / `body` / `content_type` 的字段。它们不像能力表那样有一份现成的表可查 —— 「响应面」目前是 `rt.h`
+里那个 struct 的形状，不是 checker 的概念。登记为残留偏差（见 §2 的 `ETag` 行与 IMPL-PLAN §8.1），
+补齐时机 D2。同批把「未知响应字段被**静默丢弃**」改成报错：以前 `Response` 里多声明一个字段
+既不进响应也不提示，而 `Request` 侧的同类越界一直是拒的 —— 两边不对称了一整个里程碑。
 
 ### 4.2 顺带收掉的影子表：`u64 → ETag` 的包装
 
@@ -96,6 +104,7 @@
   有一个入口），所以删位置而不是删写法：**旧形状在 parse 就报 `E0006` 并给改写提示**。
   壳没了，`EntryDecl` 这个 AST 节点也没了（入口 = 带 `Entry` 标记的 `FnDecl`，四处 switch 各少一个分支）；
   将来的鉴权 / 超时 / 重试预算写成签名上的 intent，不回头把壳加回来。
+- **`Response.etag` 字段**（D1 落地，v0.10）：响应面只剩 `status` / `body` / `content_type`，`etag` 这个书写位置从语法里删掉了 —— 不是「可以不写」，是**写了就报错**：`E-GEN: Response.etag 不用写：ETag 头由运行时从 body 推导（SPEC §2.2 H7），删掉这个字段`。`BlobFs.write` 与 `boundary put` 仍然返回 `ETag`（那是存储层的事实，运行时 ABI 未动），`main.dlt` 用 `!` 丢弃它的返回值 —— 丢弃返回值本来就是合法动作（既有的 `fs.create(...)!` 就丢弃 `bool`）。入口也不再收 `sys: Sys`：推导改造后 handler 里没有任何 `sys.*` 调用，能力是最小授权，于是 `contract.dlt` 不再有 `host Sys` 块，`droplet contract` 的 `hosts` 从 3 项降到 2 项。
 - **编译器用 Go 写**：SPEC 不规定实现语言；选型与理由在 IMPL-PLAN §7.1。
 - **产物是 C11 二进制**：SPEC 允许；`-print-c` 打印全文，`-keep-c` 保留 `<out>.c` 便于对照。
 
@@ -141,6 +150,19 @@ $B check .build/j.dlt
 printf 'entry a() -> Unit\n  invariant "x"\n' > .build/k.dlt
 $B check .build/k.dlt
 
+# Response 再写 etag：check 说 ok，build 才报 E-GEN（第四条减法的报错点，见 §4.1）
+printf 'type ApiError = NotFound\n\ntype Request { method: str }\n\ntype Response {\n  status: u64,\n  body: bytes,\n  etag: str\n}\n\nentry handle(req: Request, root: str) -> Response | ApiError\n  invariant "x"\n{\n  return Response{status: 405, body: b"", etag: "deadbeef"}\n}\n' > .build/m.dlt
+$B check .build/m.dlt   # 期望 ok: 4 项声明，1 个函数，入口 handle
+$B build .build/m.dlt -o .build/m   # 期望 E-GEN: Response.etag 不用写：ETag 头由运行时从 body 推导（SPEC §2.2 H7），删掉这个字段
+
+# 未知响应字段：以前被静默丢弃（既不进响应也不提示），现在拒绝
+printf 'type ApiError = NotFound\n\ntype Request { method: str }\n\ntype Response {\n  status: u64,\n  body: bytes,\n  retry_after: u64\n}\n\nentry handle(req: Request, root: str) -> Response | ApiError\n  invariant "x"\n{\n  return Response{status: 405, body: b"", retry_after: 1}\n}\n' > .build/o.dlt
+$B build .build/o.dlt -o .build/o   # 期望 E-GEN: Response.retry_after 无法映射到响应：可写的只有 status / body / content_type
+
+# 响应缺 status 字段：服务形态认不了它
+printf 'type ApiError = NotFound\n\ntype Request { method: str }\n\ntype Response {\n  body: bytes\n}\n\nentry handle(req: Request, root: str) -> Response | ApiError\n  invariant "x"\n{\n  return Response{body: b"hi"}\n}\n' > .build/p.dlt
+$B build .build/p.dlt -o .build/p   # 期望 E-GEN: 响应类型 Response 缺少 status 字段：运行时只按 status 映射状态码
+
 # 声明谎报参数类型：check 直接报 E2（以前要到 cc 才炸，无 E 码无行号）
 printf 'host Sys {\n  fn log(u64) -> Unit\n}\n\nentry f(sys: Sys) -> Unit\n  invariant "x"\n{\n  sys.log(1)\n}\n' > .build/l.dlt
 $B check .build/l.dlt   # 期望 E2: 能力 Sys.log 的第 1 个参数运行时是 str，声明为 u64
@@ -156,6 +178,6 @@ sed -n '/^var Caps = map/,/^}/p' code/lang/internal/host/host.go | grep -cE '^[[
 $B build code/webapi/src/contract.dlt code/webapi/src/main.dlt -o .build/q >/dev/null
 DP_ROOT=.build/nope .build/q ; echo "exit=$?"   # 期望打印原因 + exit=1
 
-# 12 项边界行为（含 412 / 405 / 413 / 501）
+# 13 项边界行为（含 412 / 405 / 413 / 501，以及 v0.10 起「405 的空 body 不带 ETag」）
 sh code/webapi/deploy/accept.sh
 ```
