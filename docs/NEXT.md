@@ -9,7 +9,7 @@
 
 ## 0. 现在的状态（截至 2026-10-30）
 
-- `origin/main` = `main` = `TBD_HASH`（v0.13，D3-B1 落地的那笔）。
+- `origin/main` = `main` = `8ddf479`（v0.13，D3-B1 落地的那笔）。
 - 本轮（v0.13）做的事：**D3-B1 落地 —— 路由搬进 `boundary`，预条件守卫由声明合成**。
   - `boundary` 方法尾部新增 `@<verb>("/path")` + `impl <fn>`；动词是 check 期校验的小写标识符，
     不占关键字（`precondition` / `without` 是上下文关键字，总数仍 14）。
