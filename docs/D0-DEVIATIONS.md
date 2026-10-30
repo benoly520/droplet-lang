@@ -29,8 +29,9 @@
 | chunked | 未限定 | 拒绝，回 501 | 防请求走私；body 上限 8 MiB 够用 | 不做 |
 | 并发 | 未限定 | 单线程；读写各 30 s 超时（只靠 `SO_RCVTIMEO`/`SO_SNDTIMEO`），超时回 408 | H4 内存预算；超时防一条连接钉死服务 | 需要时多进程 + `SO_REUSEPORT` |
 | host 能力 | 开放 effect 系统 | 写死 10 个（`Sys` 4 / `BlobFs` 5 / `Versioning` 1）；表外能力、参数个数、参数与返回类型不符在 `check` 就报 `E2`，表在 `internal/host`（check 与 gen 共用，含 ABI 类型与 `u64 → ETag` 的包装） | 只实现示例服务真正用到的 | 新增能力时扩表 + `rt.h` 加原型 |
-| boundary codegen | §7.4 生成 stub / handler / serializer | 只导出 JSON 契约（`droplet contract`） | 消费方手写客户端就够（§10） | D1 |
-| 存储 | schema 驱动查询 | 扁平文件 + `.snapshots/`；`APP_ROOT` 必须是已存在的目录，否则启动时直接退出 | 哑存储是刻意的最小面；缺目录不能让服务「起得来、写全 500」 | D2 |
+| boundary codegen | §7.4 生成 stub / handler / serializer | 只导出 JSON 契约（`droplet contract`）—— **gen 完全不读 `boundary`** | 消费方手写客户端就够（§10）；而路由事实源还不在语言侧（见下一行） | **D3**：方案见 IMPL-PLAN §8.5（待点头） |
+| 契约与真实 HTTP 面不一致 | 「一次声明同时产出对外契约」 | `boundary` 只声明 `get` / `put` / `list` 三条，示例服务实际有 **5 条路由**：`/health` 与 `POST /v1/keys` 在契约里不存在，导出的 JSON 因此是残缺事实（`accept.sh` 第 1、7 项打的就是这两条） | D0 没把路由从 `boundary` 合成，路由是 handler 里的字符串比较 —— 声明因此可以落后于实现且无人拦 | **D3 B1/B2**（§8.5.1 是证据表）；合流前不假装契约可信 |
+| 存储 | schema 驱动查询 | 扁平文件 + `.snapshots/`；`APP_ROOT` 必须是已存在的目录，否则启动时直接退出 | 哑存储是刻意的最小面；缺目录不能让服务「起得来、写全 500」 | **未排期**：schema 查询超出最小服务面，D3 也不含（D2 结的是响应面那笔账，与本行无关） |
 | 快照 | 未限定 | `<key>.<unix>.<seq>`，每 key 只留最近 `DP_SNAPSHOT_KEEP` 份（默认 8，0 = 不轮转） | 不带 `seq` 时同秒两次写会互相覆盖；不轮转 72 h 堆约 8640 个文件 | 已完成 |
 | 传输安全 | 未限定 | 无 TLS，只有静态 `Bearer` token | 部署形态要求反代终结 TLS（IMPL-PLAN §7.3） | 不做 |
 
