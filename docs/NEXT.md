@@ -30,7 +30,8 @@
   （H8 单文件 ≤ 800）。
 - 证据：`accept.sh` 14 项（13 项逐条不变，新增「412 empty body (bytes) = 0」）；
   `SOAK_SECONDS=60 SOAK_INTERVAL=3` 跑 20 轮，0 失败，1 线程、无残留子进程；
-  `go build ./... && go vet ./... && go test ./...` 全绿。
+  `go build ./... && go vet ./... && go test ./...` 全绿；CI 两档（Go 1.22 下限 / latest）均绿
+  （run `41130092087`）。**上一笔 v0.12 是红的**，原因与纪律见 §4「推之前跑全套」。
 - 自检输出变了：`ok: 11 项声明，5 个函数`（服务形态没有入口行）。
 - **3 天长稳仍未跑**（P0 不动）：D3 改了请求主链路（路由匹配 + 预条件守卫），60 s 只是冒烟。
 
@@ -145,6 +146,10 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 - 交接文档里的 **git 状态必须每次真跑一遍再写**（`git status --short`、
   `git log --oneline origin/main..main`）。上一轮凭印象写了「已提交、尚未推送」，
   实际那两条早在 origin 上；错的结论比没结论更贵，因为下一班会照着它决定推不推
+- **推之前跑全套 `go test ./...`，不是只跑改过的那几个包**：v0.12（`ed9b1e0`）只跑了
+  `./internal/check`，`internal/parse` 里 `TestParseWebapiContract` 的旧断言（`len(ApiError.Variants) == 4`，
+  而 D2 把变体加到了 6）把 main 红了整整两个提交（`ed9b1e0` → `e4a0896`），CI 两档一起红，
+  到 v0.13 才顺带修掉。同一份源码，`check` 局部的绿不蕴含 `./...` 的绿
 - 所有 `*_test.go` 用 **tab** 缩进，用空格写 `SearchReplace` 会匹配失败
 - 编辑文件与跑 `go vet` 不要放在同一批并行调用里，会读到旧文件
 - 做“拆分前后逐字相同”的对照时，`git worktree add .build/head HEAD` 后在 worktree 里用
