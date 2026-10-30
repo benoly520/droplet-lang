@@ -43,7 +43,6 @@ type Result struct {
 }
 
 // ---------- 检查器 ----------
-// ---------- 检查器 ----------
 
 type checker struct {
 	prog  *ast.Program
@@ -126,7 +125,6 @@ func Program(p *ast.Program) *Result {
 	return res
 }
 
-// ---------- 辅助 ----------
 // ---------- 辅助 ----------
 
 func (c *checker) errorf(pos token.Pos, code, format string, a ...any) {

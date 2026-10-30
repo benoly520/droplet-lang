@@ -1,6 +1,6 @@
 // Package check 对语法树做名字解析与类型检查。
 //
-// 本文件由 check.go 同包拆分而来，职责：// 第一遍：收集声明、填类型、注册函数签名。
+// 本文件由 check.go 同包拆分而来，职责：第一遍：收集声明、填类型、注册函数签名。
 package check
 
 import (
@@ -8,7 +8,6 @@ import (
 	"droplet/internal/token"
 )
 
-// ---------- 第一遍：声明 ----------
 // ---------- 第一遍：声明 ----------
 
 func (c *checker) declare() {

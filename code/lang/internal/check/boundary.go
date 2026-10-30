@@ -1,6 +1,6 @@
 // Package check 对语法树做名字解析与类型检查。
 //
-// 本文件由 check.go 同包拆分而来，职责：// boundary 方法检查：可序列化性与意图。
+// 本文件由 check.go 同包拆分而来，职责：boundary 方法检查：可序列化性与意图。
 package check
 
 import (

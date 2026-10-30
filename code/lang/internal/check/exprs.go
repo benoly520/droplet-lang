@@ -1,13 +1,12 @@
 // Package check 对语法树做名字解析与类型检查。
 //
-// 本文件由 check.go 同包拆分而来，职责：// 表达式类型推导。
+// 本文件由 check.go 同包拆分而来，职责：表达式类型推导。
 package check
 
 import (
 	"droplet/internal/ast"
 )
 
-// ---------- 表达式 ----------
 // ---------- 表达式 ----------
 
 // checkExpr 推导表达式类型，并把结果记入 exprTypes 供 codegen 使用。

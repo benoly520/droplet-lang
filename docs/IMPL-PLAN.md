@@ -819,15 +819,15 @@ H8 是 SPEC §2.2 里最新补的一条（单文件 ≤ 800 行、编译器 + �
 | 位置 | 行数 | 对照 H8 |
 | --- | --- | --- |
 | `internal/gen/`（4 个文件，最大 `c.go` 335） | 857 | ok |
-| `internal/check/`（9 个文件，最大 `types.go` 225） | 1335 | ok |
+| `internal/check/`（9 个文件，最大 `types.go` 224） | 1330 | ok |
 | `internal/parse/parse.go` | 661 | ok |
 | `internal/ast` | 374 | ok |
 | `internal/lex` | 311 | ok |
 | `internal/dump` | 258 | ok |
 | 其余（cmd / contract / host / token / runtime） | 774 | ok |
-| Go 非测试合计 | 4566 | — |
+| Go 非测试合计 | 4561 | — |
 | 内嵌运行时 C（4 个 `.c` + `rt.h`） | 1462（最大 `rt_http.c` 615） | ok |
-| **合计** | **6028** | 占 8000 的 75% |
+| **合计** | **6023** | 占 8000 的 75% |
 
 另一个不打算消灭、只打算标价的数字：**新增一个 AST 节点要改 5 处** —— `ast`（结构体）→ `parse`（解析）→
 `check`（类型与签名）→ `gen`（生成 C）→ `dump`（`parse` 的输出）。这是管道结构的必然，不是缺陷；

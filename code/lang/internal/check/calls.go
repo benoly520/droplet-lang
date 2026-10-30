@@ -1,6 +1,6 @@
 // Package check 对语法树做名字解析与类型检查。
 //
-// 本文件由 check.go 同包拆分而来，职责：// 调用与实参检查。
+// 本文件由 check.go 同包拆分而来，职责：调用与实参检查。
 package check
 
 import (
