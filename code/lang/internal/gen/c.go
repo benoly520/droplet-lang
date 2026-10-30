@@ -243,8 +243,11 @@ func (g *gen) zeroReturn() string {
 	if g.cur.Ret.Kind == check.KUnion {
 		return fmt.Sprintf("(%s){0}", g.fnRetType(g.cur))
 	}
-	if g.cur.Ret.Kind == check.KUnit {
+	switch g.cur.Ret.Kind {
+	case check.KUnit:
 		return "((dp_unit){0})"
+	case check.KBytes:
+		return "((dp_bytes){0})"
 	}
 	return "0"
 }

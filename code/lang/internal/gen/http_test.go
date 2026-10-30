@@ -14,8 +14,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"droplet/internal/check"
 )
 
 // startBlobd 编译 webapi 契约并拉起服务，返回 base URL 与清理函数。
@@ -192,6 +190,10 @@ func TestServiceEndToEnd(t *testing.T) {
 		if code != 412 {
 			t.Fatalf("错误 If-Match 应 412，得到 %d", code)
 		}
+		// D2：412 由运行时在进 handler 之前挡下，内容必须原样。
+		if code, got, _ := do(t, "GET", base+"/v1/blob/demo", "", nil); code != 200 || got != "hello2" {
+			t.Fatalf("412 后内容应不变，code=%d body=%q", code, got)
+		}
 	})
 
 	t.Run("404", func(t *testing.T) {
@@ -209,9 +211,14 @@ func TestServiceEndToEnd(t *testing.T) {
 	})
 
 	t.Run("405", func(t *testing.T) {
-		code, _, hdr := do(t, "DELETE", base+"/v1/blob/demo", "", nil)
+		code, body, hdr := do(t, "DELETE", base+"/v1/blob/demo", "", nil)
 		if code != 405 {
 			t.Fatalf("DELETE 应 405，得到 %d", code)
+		}
+		// D2：405 由 `ApiError.NotAllowed` 经标签表映射，不再由 handler 手写状态码；
+		// 错误响应没有 body（accept.sh 的「405 empty body」）。
+		if body != "" {
+			t.Fatalf("405 的 body 应为空，得到 %q", body)
 		}
 		if got := hdr.Get("ETag"); got != "" {
 			t.Fatalf("空 body 不该有 ETag，得到 %q", got)
@@ -229,78 +236,6 @@ func TestServiceEndToEnd(t *testing.T) {
 	})
 }
 
-// svcEnv 是服务形态必需的 env 声明：checker 要求补齐运行时五键（SPEC §5.7），
-// 内联探针都要带上它才能走到生成期。值本身不重要，这些探针不跑进程。
-const svcEnv = `env App {
-  port: u64 = 18999,
-  bind: str = "127.0.0.1",
-  root: str = "/tmp/dp-probe",
-  token: str = "",
-  max_body: u64 = 1024
-}
-
-`
-
-// genErrText 走完 parse → check → gen，返回生成期的报错（没有错误返回 ""）。
-func genErrText(t *testing.T, text string) string {
-	t.Helper()
-	prog := parseAll(t, source{"svc.dlt", text})
-	res := check.Program(prog)
-	if len(res.Errors) > 0 {
-		t.Fatalf("源码有 %d 个检查错误：%v", len(res.Errors), res.Errors)
-	}
-	_, err := C(prog, res)
-	if err == nil {
-		return ""
-	}
-	return err.Error()
-}
-
-// TestResponseEtagFieldRejected 锁住 v0.10 的第四条语法减法：ETag 由运行时从 body
-// 推导，所以 Response 里再写 etag 不是「可以忽略」，而是在生成期就报错并给改法。
-func TestResponseEtagFieldRejected(t *testing.T) {
-	got := genErrText(t, svcEnv+`type ApiError = NotFound
-
-type Request { method: str }
-
-type Response {
-  status: u64,
-  body: bytes,
-  etag: str
-}
-
-entry handle(req: Request) -> Response | ApiError
-  invariant "一律 405"
-{
-  return Response{status: 405, body: b"", etag: "x"}
-}`)
-	if !strings.Contains(got, "Response.etag 不用写") {
-		t.Fatalf("期望「Response.etag 不用写」，得到：%q", got)
-	}
-}
-
-// TestUnknownResponseFieldRejected：不在响应面上的字段一律拒绝，不能静默丢弃。
-func TestUnknownResponseFieldRejected(t *testing.T) {
-	got := genErrText(t, svcEnv+`type ApiError = NotFound
-
-type Request { method: str }
-
-type Response {
-  status: u64,
-  body: bytes,
-  retry_after: u64
-}
-
-entry handle(req: Request) -> Response | ApiError
-  invariant "一律 405"
-{
-  return Response{status: 405, body: b"", retry_after: 1}
-}`)
-	if !strings.Contains(got, "Response.retry_after 无法映射到响应") {
-		t.Fatalf("期望「Response.retry_after 无法映射到响应」，得到：%q", got)
-	}
-}
-
 // TestNotFoundMapsTo404 单独确认 404 不是 handler 里写死的。
 func TestNotFoundMapsTo404(t *testing.T) {
 	base, stop := startBlobd(t)
@@ -309,6 +244,38 @@ func TestNotFoundMapsTo404(t *testing.T) {
 	code, body, _ := do(t, "GET", base+"/v1/blob/absent", "", nil)
 	if code != 404 {
 		t.Fatalf("期望 404，得到 %d（body=%q）", code, body)
+	}
+}
+
+// TestPreconditionFailedDoesNotEnterHandler 锁定 D2 的边界：`If-Match` 仍由运行时把关
+// （安全边界，与 dp_valid_key 同级），412 时根本不进 handler —— 既没有快照，也没有提交。
+// 与 accept.sh 的「If-Match 不符 -> 412 / 无快照 / 无提交」是同一个判据。
+func TestPreconditionFailedDoesNotEnterHandler(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "data")
+	git := gitRepo(t, root)
+	base, stop := startBlobdIn(t, root,
+		"DP_COMMIT_CMD="+commitCmd(git),
+		"DP_COMMIT_DEBOUNCE=0",
+	)
+	defer stop()
+
+	if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", "v1", nil); code != 200 {
+		t.Fatalf("首次 PUT 返回 %d", code)
+	}
+	waitCommit(t, git, root)
+
+	code, body, _ := do(t, "PUT", base+"/v1/blob/demo", "v2", map[string]string{"If-Match": `"deadbeef"`})
+	if code != 412 {
+		t.Fatalf("错误 If-Match 应 412，得到 %d（body=%q）", code, body)
+	}
+	if got := snapshotFiles(t, root, "demo"); len(got) != 0 {
+		t.Fatalf("412 不该产生快照，得到 %v", got)
+	}
+	if code, got, _ := do(t, "GET", base+"/v1/blob/demo", "", nil); code != 200 || got != "v1" {
+		t.Fatalf("412 后内容应仍是 v1，code=%d body=%q", code, got)
+	}
+	if n := commitCount(t, git, root); n != 1 {
+		t.Fatalf("412 不该产生提交，提交数应为 1，得到 %d", n)
 	}
 }
 

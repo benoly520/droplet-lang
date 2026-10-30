@@ -128,6 +128,8 @@ static uint16_t status_for_tag(int tag) {
     case (int)DP_ERR_NOT_FOUND: return 404;
     case (int)DP_ERR_BAD_REQUEST: return 400;
     case (int)DP_ERR_CONFLICT: return 409;
+    case (int)DP_ERR_NOT_ALLOWED: return 405;
+    case (int)DP_ERR_PRECONDITION_FAILED: return 412;
     default: return 500;
   }
 }
@@ -494,7 +496,10 @@ static void handle_conn(int fd, dp_handler h, const dp_cfg* cfg) {
   memset(&resp, 0, sizeof resp);
   int rc = h(a, &rq, &resp);
   if (rc != 0) {
-    send_status(fd, status_for_tag(rc), "error");
+    /* tag 派生的错误只有状态码：响应面里没有可写的 body（D2 / R2），
+     * 405 的「空 body」是 accept.sh 的验收项，这里必须保持空。
+     * 要人类可读的错误文案，等 boundary 的错误表示（D3）。 */
+    send_response(fd, status_for_tag(rc), "application/json", (dp_bytes){0}, dp_str_lit(""));
     dp_arena_free(a);
     return;
   }

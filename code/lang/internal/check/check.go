@@ -84,6 +84,7 @@ func Program(p *ast.Program) *Result {
 	c.declare()
 	c.fillTypes()
 	c.declareFns()
+	c.markErrorTypes()
 	c.checkBodies()
 	c.checkEnvService()
 
@@ -150,6 +151,32 @@ func (c *checker) markError(t *Type) {
 	}
 	for _, v := range t.Variants {
 		c.errorVariant[v.Name] = true
+	}
+}
+
+// markErrorTypes 从签名结构上认错误类型：任何 `成功 | 错误…` 联合里非首项的 sum
+// 都是错误类型，它的变体从 100 起编号。
+//
+// 以前这件事只发生在 `!` 传播处，于是"错误类型"取决于程序里有没有用 `!`：
+// 只写 `return ApiError.NotAllowed` 而不传播的程序，变体会拿到 1.. 号，
+// 运行时按 100+ 映射就会静默变成 500。D2 让 handler 直接构造错误变体，
+// 所以把认领规则从"谁用过 `!`"改成"签名里写没写"。
+func (c *checker) markErrorTypes() {
+	mark := func(sig *FnSig) {
+		if sig == nil || sig.Ret == nil || sig.Ret.Kind != KUnion {
+			return
+		}
+		for _, it := range sig.Ret.Items[1:] {
+			c.markError(it)
+		}
+	}
+	for _, sig := range c.fns {
+		mark(sig)
+	}
+	for _, h := range c.hosts {
+		for _, sig := range h.Methods {
+			mark(sig)
+		}
 	}
 }
 

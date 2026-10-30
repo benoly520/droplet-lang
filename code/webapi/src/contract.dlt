@@ -3,7 +3,10 @@ type ETag {
   hash: u64
 }
 
-type ApiError = NotFound | BadRequest | IoError | Conflict
+// 错误变体的声明顺序就是 tag 顺序（checker 从 100 起编号），运行时按 tag 映射状态码：
+// NotFound→404、BadRequest→400、Conflict→409、NotAllowed→405、PreconditionFailed→412。
+// 改顺序就得同步改 rt.h 的 DP_ERR_*（由 gen 的 TestErrTagsMatchRuntime 把守）。
+type ApiError = NotFound | BadRequest | IoError | Conflict | NotAllowed | PreconditionFailed
 
 type Request {
   method: str,
@@ -11,12 +14,6 @@ type Request {
   key: str,
   body: bytes,
   if_match: str
-}
-
-// 响应面只有 status 与 body：ETag 由运行时从 body 推导，handler 不写（SPEC §2.2 H7）。
-type Response {
-  status: u64,
-  body: bytes
 }
 
 // 服务底座配置：键名与类型固定（运行时按这五个键服务），默认值就写在声明里。

@@ -20,8 +20,8 @@ code/webapi    用 .dlt 写的示例服务（boundary / entry / 路由）
 
 ```sh
 ./droplet build code/webapi/src/contract.dlt code/webapi/src/main.dlt -o blobd
-mkdir -p /tmp/blobd            # DP_ROOT 必须已存在，否则服务启动即退出
-DP_TOKEN=dev DP_ROOT=/tmp/blobd ./blobd
+mkdir -p /tmp/blobd            # APP_ROOT 必须已存在，否则服务启动即退出
+APP_TOKEN=dev APP_ROOT=/tmp/blobd ./blobd
 curl -H 'Authorization: Bearer dev' 'localhost:8787/v1/blob/demo'
 ```
 
@@ -55,7 +55,7 @@ curl -H 'Authorization: Bearer dev' 'localhost:8787/v1/blob/demo'
 
 约束：
 
-- 所有 `/v1/*` 需 `Authorization: Bearer <DP_TOKEN>`；`/health` 不校验，供探活用；
+- 所有 `/v1/*` 需 `Authorization: Bearer <APP_TOKEN>`；`/health` 不校验，供探活用；
 - `key` 只允许 `[a-z0-9_-]{1,32}`，其余 400（**这是安全边界**：防目录穿越，
   `../evil`、空串、超长、含 `/` 全部拒绝）；
 - 路由解析规则：`path` 为去掉 query 的路径。`/v1/<group>/<key>` 按**第三个斜杠**拆，
@@ -66,7 +66,7 @@ curl -H 'Authorization: Bearer dev' 'localhost:8787/v1/blob/demo'
 - `ETag` 不由 handler 书写（v0.10）：运行时按 `dp_sys_u64_str(dp_sys_hash64(body))` 从响应 body 推导，
   空 body 没有表示就不发这个头；`If-Match` 的比对走同一个函数（当前内容的 hash），所以 `GET` 拿到的
   tag 可以直接用于下一次 `PUT`，这条链与推导改造之前逐字节相同；
-- `PUT` body 上限 8 MiB（`DP_MAX_BODY` 可调），header 总量上限 8 KiB，单行 4 KiB，
+- `PUT` body 上限 8 MiB（`APP_MAX_BODY` 可调），header 总量上限 8 KiB，单行 4 KiB，
   读写超时各 30 s（超时回 408）；拒绝 `Transfer-Encoding`（防请求走私）；
 - 每请求一个 arena，请求结束即 `dp_arena_free`。
 
@@ -184,6 +184,8 @@ type         := 'str' | 'bytes' | 'u64' | 'i64' | 'bool' | 'Unit'
 | 跨 `boundary` 使用非序列化类型 | E3 | D0 只有基础类型，恒通过 |
 | `entry` / `boundary` 方法无 `example` 也无 `invariant` | E11 | 硬门禁 |
 | 多个 `entry` | E1 | 一个程序只能有一个入口；D1 之前会静默取 map 迭代顺序里的任意一个当 EntryPoint，生成哪个 `main` 由随机数决定 |
+| 服务形态的入口成功类型不是 `bytes` / `Unit` | E1 | v0.12（R1）：状态码不是能构造的值；写 `Response{status: 200, body: X}` 时报这条并提示「它就是 `X`」 |
+| 裸 `return` 用在返回类型不是 `Unit` / `bytes`（或其 `| 错误` 联合）的函数上 | E1 | v0.12（R3）：裸 `return` 是**该返回类型的单位值**，不是零值构造 |
 | 词法 / 语法错误 | E0 | 带行号列号 |
 
 **D0 不检查**：效果集内容、`cap` 上界、`idempotent` 一致性、`requires` 静态可判性（只解析）。
@@ -196,14 +198,25 @@ type         := 'str' | 'bytes' | 'u64' | 'i64' | 'bool' | 'Unit'
 ```
 0        成功值
 1..99    record / sum 的普通变体（按声明顺序）
-100+     进入过 `!` 传播的错误变体（NotFound=100, BadRequest=101, IoError=102, Conflict=103）
+100+     出现在返回类型 union 非首项的错误变体
+         （NotFound=100 … Conflict=103、NotAllowed=104、PreconditionFailed=105）
 ```
 
 规则：**同一个变体名在所有联合里共享同一 tag**。因此 `!` 只需复制 tag，不做映射表。
 反过来这也是一条硬规则：**变体名跨整个程序必须唯一** —— 同名会让两个 sum 拿到同一个 tag，
 `match` 就分不开它们，所以 `check` 在声明处就报 `E1: 变体名 X 已被 A.X 使用`（D1 起）。
 
+**v0.12（D2）改了「谁算错误」的口径**：以前只有用过 `!` 的变体才标 100+，于是
+`return ApiError.NotAllowed` 这种直接返回变体的写法会被当成普通变体（tag 1..）而**静默变 500**。
+现在按签名结构认：任何编码为 union 的返回类型，其**非首项一律是错误**（`check.markErrorTypes`，
+函数与 host 方法都算）。`rt.h` 的 `DP_ERR_*` 与声明顺序由 `TestErrTagsMatchRuntime` 钉死。
+
 ## 4. 样例（必须全绿）
+
+> §4.2 / §4.3 是 **D0 落地时的快照**，没有随后续里程碑重写：D1 把 `root: str` 参数换成 `cfg: App`
+> （SPEC §5.7），D2 删掉 `Response`、把入口返回类型改成 `bytes | ApiError`（SPEC §5.1.2）。
+> **当前样例以 `code/webapi/src/*.dlt` 为准**（88 行 = `contract.dlt` 51 + `main.dlt` 37），
+> 本节只作为管线说明的对照保留。
 
 ### 4.1 `code/lang/examples/hello.dlt`
 
@@ -412,6 +425,10 @@ int main(int argc, char** argv) {
 适配器，`main` 交给 `dp_serve`。适配器做两件事：把 `dp_request` 拆成 `Request` 记录、
 把 `Response` 记录抬回 `dp_response`。
 
+> 下面这段骨架是 **D0 快照**。v0.10 起不再抬 `etag`，v0.12（D2）起 `Response` 这个记录被删掉，
+> 成功分支只剩 `out->status = 200` 与（`bytes` 时）`out->body = _r.u.ok`；判定也从生成期
+> （`E-GEN`）搬到检查期（`E1`）。当前生成规则见 SPEC §5.1.2。
+
 ```c
 static int dp_serve_handle(dp_arena* a, dp_str root, const dp_request* rq, dp_response* out) {
   (void)root;
@@ -440,8 +457,8 @@ int main(void) {
 `E-GEN`），`root` 由配置注入，`Host` 参数消失（Host 是编译期能力集合，调用点直接生成
 `dp_blob_read(...)`）。**这是 `host` 的实现方式：不传值，直接内联调用。**
 
-服务形态的返回必须是 `Response | 错误` 且 `Response` 带 `status` 字段，否则报 `E-GEN`——
-运行时只认 `status`，不猜。
+服务形态的入口返回类型必须是 `bytes | 错误` 或 `Unit | 错误`，否则 `check` 报 `E1`（v0.12 起；
+以前是「必须是带 `status` 的 `Response | 错误`，否则 `E-GEN`」）。运行时只认 tag，不猜状态码。
 
 ### 5.4 语言子集与生成期的已知限制
 
@@ -460,7 +477,7 @@ int main(void) {
 
 ## 6. C 运行时 `code/lang/internal/runtime/assets/`
 
-> 下面与 `rt.h` 逐行一致，两边漂移时以 `rt.h` 为准并同步回本文。
+> 下面列出 `rt.h` 的全部对外声明（排版有压缩，内容与顺序一致）。两边漂移时以 `rt.h` 为准并同步回本文。
 > 实现切成四个文件：`rt_core.c`（arena / 字符串 / 日志 / hash）→ `rt_http.c`（HTTP）→
 > `rt_blob.c`（文件哑存储）→ `rt_ver.c`（版本化钩子）。
 
@@ -475,11 +492,12 @@ typedef struct { int _; } dp_unit;
 #define DP_ERR_BAD_REQUEST 101u
 #define DP_ERR_IO          102u
 #define DP_ERR_CONFLICT    103u
+#define DP_ERR_NOT_ALLOWED 104u
+#define DP_ERR_PRECONDITION_FAILED 105u
 
 /* ---- arena：按块分配，整块释放 ---- */
 typedef struct dp_arena dp_arena;
 dp_arena* dp_arena_new(size_t cap);
-void      dp_arena_reset(dp_arena* a);
 void*     dp_alloc(dp_arena* a, size_t n);
 void      dp_arena_free(dp_arena* a);
 
@@ -517,10 +535,10 @@ typedef struct {
   size_t   max_body;
 } dp_cfg;
 
-/* 返回 0 表示已填 out；100+ 表示错误 tag，由运行时映射状态码 */
-typedef int (*dp_handler)(dp_arena* a, dp_str root, const dp_request* rq, dp_response* out);
+/* 返回 0 表示已填 out；100+ 表示错误 tag，由运行时映射状态码。
+ * 参数里没有 root：配置由 `env` 声明驱动，生成的代码把加载好的值放进 dp_cfg（v0.11 起）。 */
+typedef int (*dp_handler)(dp_arena* a, const dp_request* rq, dp_response* out);
 
-dp_cfg dp_cfg_from_env(void);
 int    dp_serve(dp_handler h, const dp_cfg* cfg);
 
 /* ---- 文件哑存储 ---- */
@@ -545,8 +563,9 @@ void dp_ver_commit_soon(dp_str root, dp_str key);
 1. **HTTP/1.1 最小集**：单线程、一连接一请求、响应后关闭（不发 keep-alive）；只认
    `Content-Length`，出现 `Transfer-Encoding` 直接 501；header 总量 8192、单行 4096、
    响应头 512，读/写各 30 s 超时（超时回 408 后关连接，防单线程被半截 header 钉死）。
-2. **状态码映射**：`100→404`、`101→400`、`103→409`、其余错误 `500`；找不到路由由 handler
-   自己返回 405。
+2. **状态码映射**（`status_for_tag`，v0.12 起为完整表）：`100→404`、`101→400`、`102→500`、
+   `103→409`、`104→405`、`105→412`，其余错误 `500`。tag 派生的错误 **body 为空**；
+   运行时自身的协议错误（400/408/412/413/501）另走 `send_status`，带一句文本。
 3. **原子写**：写 `.tmp.<pid>.<seq>` → `fsync` → `rename`。
 4. **快照**：`<root>/.snapshots/<key>.<unix>.<seq>`，写前先备一份；每个 key 只留最近
    `DP_SNAPSHOT_KEEP` 份（默认 8，0 = 不轮转），按 `(unix, seq)` 从旧到新删。带 `seq`
@@ -554,10 +573,13 @@ void dp_ver_commit_soon(dp_str root, dp_str key);
 5. **版本化钩子**：防抖窗口内只起一个子进程；只把 `$DP_COMMIT_KEY` 这一个路径交给 git
    （扫全树会撞上正在 `rename` 的临时文件）；父进程不 `wait`，子进程由 `SIGCHLD=SIG_IGN`
    自动收割。防抖是 **leading edge**：窗口内的后续写不会单独提交，等下一次写触发。
-6. **配置全部走环境变量**：`DP_BIND`（默认 `0.0.0.0`）/ `DP_PORT`（8787）/ `DP_ROOT`
-   （`./data`）/ `DP_TOKEN`（空 = 不校验）/ `DP_MAX_BODY`（8 MiB）/ `DP_COMMIT_CMD`
-   （空 = 不提交）/ `DP_COMMIT_DEBOUNCE`（60）/ `DP_SNAPSHOT_KEEP`（8）。
-   `DP_ROOT` 必须是**已存在**的目录：启动时 `stat` 一次，不满足就打印原因并退出——
+6. **配置由源码里的 `env App { … }` 声明驱动**（v0.11 起，SPEC §5.7）：变量名由块名推出
+   （`App` + `root` → `APP_ROOT`），源码里不出现变量名。业务五键 `APP_BIND`（默认 `0.0.0.0`）/
+   `APP_PORT` / `APP_ROOT` / `APP_TOKEN`（空 = 不校验）/ `APP_MAX_BODY` 由生成的加载器读取，
+   **必填键缺失或整数键非数字即在启动瞬间退出**，没有静默回退。只剩三个运维钩子还带 `DP_`
+   前缀（已登记偏差）：`DP_COMMIT_CMD`（空 = 不提交）/ `DP_COMMIT_DEBOUNCE`（60）/
+   `DP_SNAPSHOT_KEEP`（8）。
+   `APP_ROOT` 必须是**已存在**的目录：启动时 `stat` 一次，不满足就打印原因并退出——
    不能起一个每个写请求都 500 的服务（`TestMissingRootFailsFast` 固定这一点）。
 7. **RSS 基线**（本机，`cc -std=c11 -O2`，产物 35 KB、其中 text+data 19.7 KB）：空转 1.83 MB；
    200 轮小 `PUT`+`GET` 峰值 1.91 MB；8 MB `PUT` 峰值 9.98 MB、8 MB `GET` 峰值 10.10 MB
@@ -626,8 +648,9 @@ C 写，`tsc` 用 TS 写。**没有人用 OCaml 写 Rust 程序。**
 没有 1.22 的 `range int`；import 只有 `strings` / `os` / `fmt` / `sort` / `path/filepath` / `bytes`。
 下限取 **1.22** 而不是更低，是因为**循环变量语义按 `go` 指令切换**：写 1.21 及以下会回到
 「整个循环共享一个变量」的旧语义，闭包捕获会出现查不出来的别名 bug。证据（Go 1.22.5 实测）：
-`go build` 通过、`go test ./...` 退出码 0、91 个用例全绿、`-print-c` 两次逐字相同、
-`check` 输出 `ok: 9 项声明，1 个函数，入口 handle`。生成侧两处 map 遍历（`sortedFnNames`、
+`go build` 通过、`go test ./...` 退出码 0、91 个用例全绿（v0.12 复测：95 个）、
+`-print-c` 两次逐字相同、`check` 输出 `ok: 9 项声明，1 个函数，入口 handle`
+（v0.12 删掉 `Response` → 8 项）。生成侧两处 map 遍历（`sortedFnNames`、
 `contract` 的 tag 表）都先排序，输出顺序不依赖 Go 版本。
 
 **不要在 `go.mod` 里补 `toolchain go1.24.0`** —— 那会让任何 1.22 环境在 `GOTOOLCHAIN=auto` 下去
@@ -669,11 +692,11 @@ droplet-lang/docs/
 
 构建：`go build ./cmd/droplet`。运行时由 `go:embed` 收进编译器，`droplet build` 把它释放到
 临时目录后交给 `cc -std=c11 -O2 -Wall -Wextra` 直编（是否 `-static` 由部署方决定）。
-当前 Web API 的构建与拉起（`DP_TOKEN` 空时跳过鉴权）：
+当前 Web API 的构建与拉起（`APP_TOKEN` 空时跳过鉴权）：
 
 ```sh
 droplet build code/webapi/src/contract.dlt code/webapi/src/main.dlt -o blobd
-DP_BIND=127.0.0.1 DP_PORT=8787 DP_ROOT=./data DP_TOKEN=secret ./blobd
+APP_BIND=127.0.0.1 APP_PORT=8787 APP_ROOT=./data APP_TOKEN=secret ./blobd
 ```
 
 ### 7.3 部署形态（M4）
@@ -692,10 +715,10 @@ sudo systemctl daemon-reload && sudo systemctl enable --now blobd
 
 要点：
 
-- 对外只暴露反代：`DP_BIND=127.0.0.1`，行级访问控制交给 nginx / caddy；
+- 对外只暴露反代：`APP_BIND=127.0.0.1`，行级访问控制交给 nginx / caddy；
 - 数据目录必须**先存在**（`install -d` 那一步）：服务启动时 `stat` 一次，缺目录直接退出，
   不会起一个每个写请求都 500 的进程；
-- `DP_TOKEN` 必填，否则 `/v1/*` 对所有人开放（`/health` 不需要）；
+- `APP_TOKEN` 必填，否则 `/v1/*` 对所有人开放（`/health` 不需要）；
 - 升级二进制：`systemctl stop blobd` → 拷新二进制 → `systemctl start blobd`；
   数据目录（含 `.snapshots`）不需迁移；
 - 回滚判据（与 SPEC 一致）：契约测试全通 + 长稳无异常，否则停服务、换回旧二进制。
@@ -727,7 +750,7 @@ M3 除了运行时，还交了两件不在原判据里但契约先行需要的�
 - `internal/gen/http_test.go`：把手工 `curl` 验证固化成能重跑的端到端测试（编译 → 拉进程 →
   发真请求 → 断言状态码与 body）。
 
-M4 的契约验收（`sh code/webapi/deploy/accept.sh`，`DP_BIND=127.0.0.1 DP_TOKEN=secret
+M4 的契约验收（`sh code/webapi/deploy/accept.sh`，`APP_BIND=127.0.0.1 APP_TOKEN=secret
 DP_COMMIT_DEBOUNCE=0`，数据目录是临时 git 仓库）：
 
 | 请求 | 结果 |
@@ -775,8 +798,8 @@ M4 剩下的只有长稳观测，跑法：每 30 s 一次 `PUT`+`GET`，每小�
 | `Sys.now_unix` | `.dlt` 无人调用，但 `rt_blob.c` 的快照名在用 | 保留；`rt.h` 注释改为「仓内唯一调用点是快照文件名的时间戳」 |
 | `dp_arena_reset` | 原型与定义齐全，**零调用点**（每请求新建 arena、用完整块 free，从不复用） | **已删**；新增 `TestRuntimeHasNoDeadFunctions`，把「运行时函数必须有调用点」变成回归测试 |
 | `true`/`false`、`!=` `<` `<=` `>` `>=` `&&` `\|\|` `+` `-` `*` `/` `%` | 均可达，三个 `.dlt` 都没用到 | 属例子覆盖不足，不是死代码；不为它们硬凑样例 |
-| 契约 JSON 的 `envs` 分组 | checker 拒绝 env 后 `contract` 走不到导出那一步，字段永远为空 | **已删** `Doc.Envs` / `Env` / `envOf` 与对应断言 |
-| `Response` 的字段形状（缺 `status`、写了 `etag`、写了未知字段） | `check` 说 ok、`build` 报 `E-GEN`（三条样例之外才碰得到） | **登记为残留偏差**：这一类判定本来就长在 gen（§5.3 写的就是 `E-GEN`），所以「`check` 的 ok 等价于能构建」只对**能力表**成立 —— 见 D0-DEVIATIONS §2 |
+| 契约 JSON 的 `envs` 分组 | checker 拒绝 env 后 `contract` 走不到导出那一步，字段永远为空 | **已删** `Doc.Envs` / `Env` / `envOf` 与对应断言（v0.11 `env` 落地后按原样恢复） |
+| `Response` 的字段形状（缺 `status`、写了 `etag`、写了未知字段） | `check` 说 ok、`build` 报 `E-GEN`（三条样例之外才碰得到） | **登记为残留偏差**：这一类判定本来就长在 gen（§5.3 写的就是 `E-GEN`），所以「`check` 的 ok 等价于能构建」只对**能力表**成立 —— 见 D0-DEVIATIONS §2。**v0.12（D2）已结**：`Response` 整个类型被删，这一类判定从结构上消失，成功形状改由 `check` 认 `bytes` / `Unit` |
 | `Sys.hash64` / `Sys.u64_str` | v0.10 起 `webapi` 不再声明 `host Sys`，两个能力在 `.dlt` 侧**零调用点**（运行时内部推 ETag 仍在用） | 保留能力项与 `rt.h` 原型；`hello.dlt` 还在用 `sys.log`。要删的是「能力项能不能被运行时内部消化」这条判据，D2 复评 |
 | `droplet help` 的 contract 描述 | 写着「boundary / env / 函数签名 / tag 表」，而 `envs` 字段早已删 | **已修**：帮助文本去掉 env |
 | `-o` 缺值 | `droplet build x.dlt -o` 静默回退到 `a.out`，人以为产物在指定位置 | **已修**：报「-o 需要一个输出路径」，`TestSplitBuildArgsMissingOut` 固定 |
@@ -814,12 +837,14 @@ SPEC §2.2 的 H7（重复书写预算）是补上去的，而 D0 的实现正�
 | `entry X { fn f }` 双层外壳 | 2 处 `entry`（`hello.dlt` 的 `Demo`、`main.dlt` 的 `Serve`），每处只有 1 个 `fn`，这层从不承载内容 | 把签名直接挂在 `entry` 上，去掉内层 `fn` | **已落地**（D1 v0.9：`EntryDecl` 整个节点删掉，入口=带 `Entry` 标记的 `FnDecl`；将来的鉴权/超时预算写成签名上的 intent，不回头加壳） |
 | host 声明的参数名 | `fn log(msg: str)` 的 `msg` 既不影响语义，也不进报错文本（报错写的是“第 N 个参数”） | 从语法里删掉：`fn log(str) -> Unit` | **已落地**（v0.7，只改 parser 与样例） |
 | 末尾 `return Unit` | `hello.dlt` 11 行有效代码里的 1 行纯骨架；任一 Unit 函数都要写 | 规定 Unit 函数**不写** `return` | **已落地**（v0.7，只改 parser 与 gen） |
-| `boundary ... with idempotency` | 单个效果也要 `with` | 单效果用标记：`get(key: str) -> bytes idempotent` | D1 |
-| `Response` 的 `status` 重复写同一个常量 | **etag 归零后实测仍在**：`main.dlt` 里 `status: 200` 出现 5 次（超阈值 3） | 删不掉：它们重复的是**值**而不是书写位置。要动的是 handler 的返回形状 ——「成功即值」：`entry` 直接返回 `bytes \| ApiError`，状态码与 `Content-Type` 由运行时包装，`Response` 只在需要非 200 的成功码时才出现 | D2（动返回形状） |
-| `Response` 的 `body` 重复写空字面量 | 同上，`body: b""` 出现 3 次（POST / PUT / 405 三处） | 同上一条：没有内容就是没有内容，不该要求手写一个空字节字面量 | D2（与上一行同批） |
+| `boundary ... with idempotency` | 单个效果也要 `with` | 单效果用标记：`get(key: str) -> bytes idempotent` | D3（与 412 合流同批） |
+| `Response` 的 `status` 重复写同一个常量 | **etag 归零后实测仍在**：`main.dlt` 里 `status: 200` 出现 5 次（超阈值 3） | 删不掉：它们重复的是**值**而不是书写位置。要动的是 handler 的返回形状 ——「成功即值」：`entry` 直接返回 `bytes \| ApiError`，状态码与 `Content-Type` 由运行时包装，`Response` 只在需要非 200 的成功码时才出现 | **已落地**（D2 v0.12：`Response` 整个类型被删，5 处 `status: 200` 全部消失 —— 成功恒 200，状态码只由错误变体的 tag 映射） |
+| `Response` 的 `body` 重复写空字面量 | 同上，`body: b""` 出现 3 次（POST / PUT / 405 三处） | 同上一条：没有内容就是没有内容，不该要求手写一个空字节字面量 | **已落地**（D2 v0.12：两处改成裸 `return`（R3 的单位值），一处改成 `return ApiError.NotAllowed`） |
 
-最后一行提醒一句：**H7 到 v0.10 仍未满足**（阈值 0 处，现存 8 处）。前三条减法删的都是书写位置，
-那 8 处删的是值本身 —— 书写层的预算已经抽干，剩下的是形状层。不把这两行从表里删掉就不能宣布 H7 已达标。
+**这两行在 v0.12 归零，H7 第一次真正达标。** v0.10 时表里还剩 8 处：前三条减法删的是书写位置，
+这 8 处删的是**值本身** —— 书写层的预算已经抽干，剩下的是形状层，所以必须动返回形状而不是加语法糖。
+复验命令（阈值 0）：
+`grep -c 'status: \|body: b""' code/webapi/src/main.dlt` 应为 0。
 
 **减法一律采取“必不写”，不用“可省略”。** 允许省略只是把“必写”变成“写不写都行”：手写字节没少、
 选择成本没少，还多出一种写法（公理 3）。要减就从语法里删掉那个位置。
@@ -840,9 +865,11 @@ SPEC §2.2 的 H7（重复书写预算）是补上去的，而 D0 的实现正�
 同批补一条一直漏着的护栏 —— `Response` 里非 `status` / `body` / `content_type` 的字段以前被**静默丢弃**
 （声明了也不进响应，也不报错），现在报 `E-GEN: Response.retry_after 无法映射到响应：可写的只有 status / body /
 content_type`。两条分别由 `TestResponseEtagFieldRejected` 与 `TestUnknownResponseFieldRejected` 固化。
-`fs.write` 返回的新版本 `ETag` 在 `main.dlt` 里被 `!` 丢弃（`fs.write(root, req.key, req.body)!`）——
-丢弃返回值本来就是合法的（既有的 `fs.create(...)!` 就丢弃 `bool`），**存储层的版本事实不变**，
-变的只是「谁把它写进响应头」。
+
+**D2（v0.12）把这三类连同 `Response` 一起删了**：记录不存在，就没有「缺 `status` / 写 `etag` /
+写未知字段」这三种写法；规则搬进 `check`（`E1`），由 `TestServiceSuccessMustBeValue` 固化，
+上面两个 `E-GEN` 用例随之删除。`fs.write` 返回的新版本 `ETag` 在 `main.dlt` 里仍被 `!` 丢弃 ——
+丢弃返回值本来就是合法的，**存储层的版本事实不变**，变的只是「谁把它写进响应头」。
 
 硬证据：前三条减法各自落地前后，`droplet build -print-c` 在「旧样例 + 旧编译器」与「新样例 + 新编译器」
 下输出**逐字相同**（`hello.dlt` 与 `webapi` 各一份）；等价性本来也可以从结构上看出来 —— 能力调用走
@@ -881,7 +908,8 @@ H8 是 SPEC §2.2 里最新补的一条（单文件 ≤ 800 行、编译器 + �
 另一个不打算消灭、只打算标价的数字：**新增一个 AST 节点要改 5 处** —— `ast`（结构体）→ `parse`（解析）→
 `check`（类型与签名）→ `gen`（生成 C）→ `dump`（`parse` 的输出）。这是管道结构的必然，不是缺陷；
 登记它只是为了在“加个语法”的决策时看得见价钱。目前只有 `dump` 有专用护栏（`Unknown*` 两条测试），
-`check` 与 `gen` 靠 91 个用例。
+`check` 与 `gen` 靠用例（v0.12 起 95 个，其中 `TestErrTagsMatchRuntime` 是 gen 侧第一条
+跨语言一致性护栏 —— 它盯的是 checker 的编号和 `rt.h` 的常量有没有对不上）。
 
 处置（已完成 2026-10-30）：`check.go` 原 1188 行**同包拆 8 个文件**（不拆包）——
 `check.go`（编排与 `Result`，161）、`types.go`（类型 / 作用域 / 类型判定，225）、
@@ -944,9 +972,32 @@ D1 第四项（2026-10-30，v0.11）：`env` 一等特性。**这条是加法，
 占 8000 的 **80%**，余量 1619 行 —— 从此「加特性」必须同时回答"它替掉了谁"，
 否则 §8.4 之后的 D3 会把余量吃干。
 
+D2（2026-10-30，v0.12）：删 `Response`。**计划估 +10 行，实际 +118 行**，差在注释与三处新规则
+（下面各条都带行数，合计即实测）：
+
+| 文件 | 变化 | 说明 |
+| --- | --- | --- |
+| `check/env.go` | +32 | `checkServiceResult`（R1）+ 错误提示 |
+| `check/check.go` | +27 | `markErrorTypes`：错误类型按签名认，不再靠 `!` |
+| `check/stmts.go` | +17 | `bareReturnable`（R3） |
+| `check/types.go` | +9 | `okType` |
+| `check/exprs.go` | −2 | 删掉 `!` 处的 `markError` 调用（规则搬走） |
+| `gen/stmts.go` | +32 | 裸 `return` 的单位值 + `isErrItem`（错误是值要进 `.tag`） |
+| `gen/main.go` | −8 | 删响应字段映射（原估 −18，实际仍要保留成功类型兜底） |
+| `gen/c.go` | +3 | 兜底 `return` 支持 `bytes` |
+| `rt.h` / `rt_http.c` | +8 | 两个 `DP_ERR_*`、405/412 映射、tag 派生错误改空 body |
+| **合计** | **+118** | 6381 → **6499，占 8000 的 81%**，余量 1501 |
+
+样例 91 → 88 行（`contract.dlt` 54 → 51：删 `Response` 3 行、`ApiError` 那行加两条注释抵掉一行；
+`main.dlt` 37 → 37：少 8 处字段但多了 4 行注释）。**H7 归零是本轮唯一真正到手的净收益**；
+H8 涨了 118 行，其中约 1/3 是注释（这个仓库的注释也是实现，不另算）。
+
 ---
 
-### 8.4 D2 方案：删掉 `Response`（响应面统一）· **待点头，未动代码**
+### 8.4 D2 方案：删掉 `Response`（响应面统一）· **已落地（v0.12）**
+
+> 本节保留为**决策记录**（为什么是这三条、反对意见是什么）。落地结果、实测行数与证据见
+> §8.3 的 D2 段、SPEC §5.1.2 与 D0-DEVIATIONS §2/§5。
 
 > 本节是决策材料，不是已生效的规范。点头后才写 SPEC、才动代码。
 
@@ -1013,6 +1064,10 @@ H7 的判据第一次可以写成 0 处而不是"8 处待还"。
 现状 6381（80%）→ 约 6391。`check/env.go` 145 + 20 = 165，未破 250 的单文件目标；
 若另起 `check/entry.go` 则两个文件都更小，二选一在动工时定。
 
+> **实际落地：+118，不是 +10**（6381 → 6499，81%）。估低了四处：三处新规则都带注释、
+> `markErrorTypes` 不在原计划里（错误类型改按签名认）、`gen/main.go` 仍要保留成功类型的兜底判定、
+> `gen/stmts.go` 要处理「返回错误变体」这条新路径。逐文件账见 §8.3 的 D2 表。
+
 #### 8.4.6 行为等价：两条最容易翻车，先写死
 
 `accept.sh` 13 项必须逐条不变。其中：
@@ -1040,23 +1095,28 @@ NEXT 上一轮写的是「412 可以改回错误是值了，同时删掉 `rt_htt
 - 代价：一段时期内同一语义存在两处（运行时 + 可选的语言侧表达）。登记 D0-DEVIATIONS，
   补齐时机写死为 **D3 合流**。
 
-#### 8.4.8 若点头，执行顺序
+#### 8.4.8 执行顺序（已完成，按实际结果记）
 
-1. SPEC：`Response` 从样例与 §3.4 消失；新增 R1/R2/R3；§2.2 的 H7 状态从"8 处欠账"改成"0 处，判据见 §8.4"。
+1. SPEC：`Response` 从样例消失；新增 §5.1.2 的 R1/R2/R3；§2.2 的 H7 状态从"8 处欠账"改成"0 处"。
+   （计划里写的 §3.4 是笔误 —— §3.4 是 Java 那一节，样例并不在那里。）
 2. 代码：`check` 加 R1/R3 → `gen` 删映射 → `rt` 加两项 status、错误 body 置空。
-3. 测试：`http_test.go` 里 3 个内联样例改用 `bytes | ApiError`；2 个 `E-GEN` 反例改成 R1 反例
-   （「成功类型必须是 bytes 或 Unit」）；新增 405/412 走 tag 的断言；总数约 91 → 97。
-4. 证据：`accept.sh` 13 项逐条过 → `SOAK_SECONDS=60` 重跑（D2 动了请求主链路）→ `-print-c` 不作为判据
-   （这次改的是"能构造什么"，不是书写冗余）。
-5. 文档：D0-DEVIATIONS 两条（201/204 未支持；412 双处并存）、NEXT §0、本节改为"已落地"。
+   额外多出两处：`markErrorTypes`（错误类型按签名认）与 `gen/stmts.go` 的 `isErrItem`
+   （`return ApiError.NotAllowed` 要写进联合的 `.tag`，不能写 `.u.ok` —— 第一次编译就炸在这里）。
+3. 测试：实际是 **91 → 95** 而不是 97：`check_test.go` 的 9 处服务样例改用 `bytes | ApiError`
+   （不是计划里说的 3 处内联样例）；2 个 `E-GEN` 反例 **删掉**，换成 4 个 check 级 R1/R3 用例；
+   新增 1 个 tag 表护栏（`TestErrTagsMatchRuntime`）与 1 个「412 不进 handler」集成用例；
+   `TestServiceEndToEnd` 的 405 补空 body 断言。
+4. 证据：`accept.sh` 13 项逐条过（405 仍空 body、412 仍无快照/无提交）→
+   `SOAK_SECONDS=60 SOAK_INTERVAL=0` 866 轮零失败、RSS 恒 1852 KB → `-print-c` 不作为判据。
+5. 文档：D0-DEVIATIONS（201/204 未支持；412 双处并存）、NEXT §0、本节改为"已落地"。
 
-#### 8.4.9 待点头（三件，互相独立）
+#### 8.4.9 三件待点头 → **三件都点头并落地**（2026-10-30）
 
-| # | 事 | 我的建议 | 反对意见（如果要点头前先听坏消息） |
+| # | 事 | 结果 | 反对意见与缓解 |
 | --- | --- | --- | --- |
-| 1 | 删 `Response`，成功类型限定 `bytes` / `Unit` | **同意** | 真实服务要 201/204/206 时会缺表达力；缓解：D0 用不上，D3 由 boundary 合成 |
-| 2 | R3：裸 `return` = 单位值 | **同意** | 它让 `return` 的含义依赖返回类型，是"两处语义"的种子；缓解：只有 `Unit`/`bytes` 两种，且 `return` 本来就已经是 Unit 函数的写法 |
-| 3 | 412：只加变体，不删运行时比对 | **同意** | 一段时期同一语义两处实现，可能漂移；缓解：D3 合流写死，且运行时的那条是超集（先挡） |
+| 1 | 删 `Response`，成功类型限定 `bytes` / `Unit` | **落地** | 真实服务要 201/204/206 时会缺表达力；已登记 D0-DEVIATIONS，缓解：D0 用不上，D3 由 boundary 合成 |
+| 2 | R3：裸 `return` = 单位值 | **落地** | 它让 `return` 的含义依赖返回类型，是"两处语义"的种子；缓解：只有 `Unit`/`bytes` 两种，且 `return` 本来就已经是 Unit 函数的写法 |
+| 3 | 412：只加变体，不删运行时比对 | **落地** | 一段时期同一语义两处实现，可能漂移；缓解：D3 合流写死，且运行时的那条是超集（先挡） |
 
 ---
 
@@ -1080,7 +1140,7 @@ M3 实测的 RSS：空服务（无请求）1.83 MB，符合 SPEC §9 的 H4（�
 ## 10. 与消费方的接入约定
 
 1. **服务只暴露 HTTP 契约**，消费方不需要知道 Droplet 存在，也不需要装任何 Droplet 工具；
-2. 消费方只配置两项：`base URL` 与服务端侧的 `DP_TOKEN`（消费方自己的配置名无所谓）；
+2. 消费方只配置两项：`base URL` 与服务端侧的 `APP_TOKEN`（消费方自己的配置名无所谓）；
 3. 服务端二进制独立部署，是否放进消费方仓库由部署方式决定（Docker / systemd / 直接跑均可）；
 4. 替换判据：契约测试全通 + 连续运行 3 天无异常，才允许下线旧实现；
 5. 旧实现可保留为对照，便于在 412 / 413 / 超时等边界行为上逐项比对。

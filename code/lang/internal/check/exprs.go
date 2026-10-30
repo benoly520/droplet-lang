@@ -120,9 +120,7 @@ func (c *checker) checkPropagate(n *ast.Propagate) *Type {
 		if !containsType(ret.Items[1:], e) {
 			c.errorf(n.Pos, "E1", "函数 %s 的返回类型 %s 缺少错误 %s，无法用 `!` 传播",
 				c.curFn.Name, ret, e)
-			continue
 		}
-		c.markError(e)
 	}
 	return success
 }

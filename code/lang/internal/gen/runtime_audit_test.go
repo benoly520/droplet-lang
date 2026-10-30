@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -62,6 +63,41 @@ func TestRuntimeHasNoDeadFunctions(t *testing.T) {
 		// 至少三次：rt.h 里的原型、rt_*.c 里的定义、一处调用。
 		if n := strings.Count(body, fn+"("); n < 3 {
 			t.Errorf("运行时函数 %s 只出现 %d 次（原型 + 定义），没有调用点", fn, n)
+		}
+	}
+}
+
+// TestErrTagsMatchRuntime 锁住「变体声明顺序 → tag → HTTP 状态码」这条唯一通道。
+// checker 按联合里的错误项从 100 编号，运行时按同一个号映射状态码；两边漂移时，
+// handler 返回的错误会静默变成 500 或别的状态码 —— 所以两处都在这里逐项钉死。
+func TestErrTagsMatchRuntime(t *testing.T) {
+	prog := parseAll(t, source{"contract.dlt", genSource(t, "../../../webapi/src/contract.dlt")})
+	res := check.Program(prog)
+	if len(res.Errors) > 0 {
+		t.Fatalf("契约有 %d 个检查错误：%v", len(res.Errors), res.Errors)
+	}
+	hdr, err := os.ReadFile("../runtime/assets/rt.h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct {
+		variant, macro string
+		tag            int
+	}{
+		{"NotFound", "DP_ERR_NOT_FOUND", 100},
+		{"BadRequest", "DP_ERR_BAD_REQUEST", 101},
+		{"IoError", "DP_ERR_IO", 102},
+		{"Conflict", "DP_ERR_CONFLICT", 103},
+		{"NotAllowed", "DP_ERR_NOT_ALLOWED", 104},
+		{"PreconditionFailed", "DP_ERR_PRECONDITION_FAILED", 105},
+	}
+	for _, w := range want {
+		if got := res.Tags[w.variant]; got != w.tag {
+			t.Errorf("变体 %s 的 tag 是 %d，期望 %d（声明顺序变了？）", w.variant, got, w.tag)
+		}
+		pat := "#define " + w.macro + " " + strconv.Itoa(w.tag) + "u"
+		if !strings.Contains(string(hdr), pat) {
+			t.Errorf("rt.h 缺少 %q", pat)
 		}
 	}
 }

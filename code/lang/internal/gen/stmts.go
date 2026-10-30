@@ -29,15 +29,21 @@ func (g *gen) stmt(s ast.Stmt) {
 	case *ast.Return:
 		if n.Value == nil {
 			if g.cur.Ret.Kind == check.KUnion {
-				g.emit("return (%s){ .tag = 0, .u.ok = ((dp_unit){0}) };", g.fnRetType(g.cur))
+				g.emit("return (%s){ .tag = 0, .u.ok = %s };", g.fnRetType(g.cur), okUnitLit(g.cur.Ret))
 			} else {
-				g.emit("return ((dp_unit){0});")
+				g.emit("return %s;", okUnitLit(g.cur.Ret))
 			}
 			return
 		}
 		val := g.expr(n.Value)
 		if g.cur.Ret.Kind == check.KUnion {
-			g.emit("return (%s){ .tag = 0, .u.ok = %s };", g.fnRetType(g.cur), val)
+			if isErrItem(g.cur.Ret, g.res.ExprTypes[n.Value]) {
+				// 直接构造错误变体（D2：`return ApiError.NotAllowed`）：值本身的
+				// `.tag` 就是运行时认的错误号，搬进联合的 tag 即可。
+				g.emit("return (%s){ .tag = (%s).tag };", g.fnRetType(g.cur), val)
+			} else {
+				g.emit("return (%s){ .tag = 0, .u.ok = %s };", g.fnRetType(g.cur), val)
+			}
 		} else {
 			g.emit("return %s;", val)
 		}
@@ -69,6 +75,32 @@ func (g *gen) stmt(s ast.Stmt) {
 			g.emit("(void)(%s);", val)
 		}
 	}
+}
+
+// isErrItem 判断 t 是不是 ret 这个联合里的错误成员（第 1 项及之后）。
+// 错误项是 sum：它的变体 tag 就是运行时要的状态码编号。
+func isErrItem(ret, t *check.Type) bool {
+	if ret == nil || ret.Kind != check.KUnion || t == nil || t.Kind != check.KSum {
+		return false
+	}
+	for _, it := range ret.Items[1:] {
+		if it.Kind == check.KSum && it.Name == t.Name {
+			return true
+		}
+	}
+	return false
+}
+
+// okUnitLit 是裸 `return` 的单位值（D2 / R3）：Unit 是「没有值」，bytes 是空 body。
+// 联合按成功成员取类型：`.u.ok` 的 C 类型就是它。
+func okUnitLit(t *check.Type) string {
+	if t != nil && t.Kind == check.KUnion {
+		t = t.Items[0]
+	}
+	if t != nil && t.Kind == check.KBytes {
+		return "((dp_bytes){0})"
+	}
+	return "((dp_unit){0})"
 }
 
 // nested 生成一个子块，自动增加缩进。

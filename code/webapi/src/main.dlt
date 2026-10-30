@@ -1,27 +1,27 @@
 // 示例服务入口：把 HTTP 请求映射到哑存储能力。
+// 成功即值：有体返回 bytes，无体就裸 `return`；状态码由错误变体经标签表映射，
+// handler 里不出现任何数字（SPEC §2.2 H7 / D2 的 R1–R3）。
 entry handle(req: Request, fs: BlobFs, ver: Versioning, cfg: App)
-    -> Response | ApiError
+    -> bytes | ApiError
   invariant "非 GET/PUT 的请求一律 405"
 {
   if req.path == "/health" {
-    return Response{status: 200, body: b"{\"ok\":true}"}
+    return b"{\"ok\":true}"
   }
 
   if req.path == "/v1/keys" {
     if req.method == "GET" {
-      let body = fs.list_json(cfg.root)!
-      return Response{status: 200, body: body}
+      return fs.list_json(cfg.root)!
     }
     if req.method == "POST" {
       fs.create(cfg.root, req.key)!
-      return Response{status: 200, body: b""}
+      return
     }
   }
 
   if req.path == "/v1/blob" {
     if req.method == "GET" {
-      let body = fs.read(cfg.root, req.key)!
-      return Response{status: 200, body: body}
+      return fs.read(cfg.root, req.key)!
     }
     if req.method == "PUT" {
       fs.backup(cfg.root, req.key)
@@ -29,9 +29,9 @@ entry handle(req: Request, fs: BlobFs, ver: Versioning, cfg: App)
       // 客户端要新版本号就 GET（v0.10，SPEC §2.2 H7）。
       fs.write(cfg.root, req.key, req.body)!
       ver.commit_soon(cfg.root, req.key)
-      return Response{status: 200, body: b""}
+      return
     }
   }
 
-  return Response{status: 405, body: b""}
+  return ApiError.NotAllowed
 }

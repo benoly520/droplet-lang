@@ -72,6 +72,9 @@ func (c *checker) checkEnvService() {
 		// 没有「起服务」这一步，所以也不要求底座五键。
 		return
 	}
+	if entry.IsService {
+		c.checkServiceResult(entry)
+	}
 	if c.env == nil {
 		// 非服务程序没有配置面：hello / shape 这类命令行程序继续走 argv，不要求 env。
 		if entry.IsService {
@@ -118,6 +121,35 @@ func (c *checker) checkEnvService() {
 			"entry %s 的参数 %s: %s 在服务形态里无法绑定：只接受 Request、host 能力与 env 类型",
 			entry.Name, entry.ParamNames[i], p.Name)
 	}
+}
+
+// checkServiceResult 限制服务入口的结果形状（D2 的 R1）：成功只有「有体的 bytes」与
+// 「无体的 Unit」两种，错误只能是联合里的错误项。
+//
+// 以前这里放的是 `Response{status, body}` 记录：状态码在 handler 里手写，`check` 说 ok、
+// `build` 才发现字段形状不对（D0-DEVIATIONS §2）。删掉记录之后，状态码只在
+// 变体 → 状态码的映射表里出现，也就不存在「能构造出一个运行时不懂的响应」。
+func (c *checker) checkServiceResult(sig *FnSig) {
+	ret := sig.Ret
+	if ret == nil || ret.Kind == KInvalid {
+		return
+	}
+	if ret.Kind != KUnion {
+		c.errorf(entryNodePos(sig), "E1",
+			"entry %s 用于服务时必须返回 `bytes | 错误` 或 `Unit | 错误`，得到 %s", sig.Name, ret)
+		return
+	}
+	ok := okType(ret)
+	switch ok.Kind {
+	case KBytes, KUnit, KInvalid:
+		return
+	}
+	hint := ""
+	if ok.Kind == KRecord && ok.FieldsByName["status"] != nil {
+		hint = "；你写的 `Response{status: 200, body: X}` 在本语言里就是 `X`：状态码不是能构造的值，是标签表的投影"
+	}
+	c.errorf(entryNodePos(sig), "E1",
+		"entry %s 的成功类型必须是 bytes 或 Unit，得到 %s%s", sig.Name, ok, hint)
 }
 
 // entrySig 取入口签名；没有入口（纯契约程序）返回 nil。

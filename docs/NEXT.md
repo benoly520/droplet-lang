@@ -9,26 +9,27 @@
 
 ## 0. 现在的状态（截至 2026-10-30）
 
-- `origin/main` = `main` = `8fdde01`，工作区干净（`git status --short` 空、
-  `git log --oneline origin/main..main` 空）。
-- 本轮（v0.11）做的事：**`env` 一等特性落地**，D1 四项至此全部完成。新文件 `check/env.go`（145 行）：
-  `env` 块注册为带 `IsEnv` 标记的 record；源码里**不许构造** env 值（配置只能来自启动环境）；
-  服务入口必须声明 `env` 块并补齐 `port/bind/root/token/max_body` 五键；命令行程序声明 `env` 报「无人消费」。
-  生成器加配置加载器（必填键缺失或值非法 → 启动即失败），环境变量前缀由块名推出（`App` → `APP`），
-  **源码里永不出现环境变量名**；`droplet contract` 增 `envs` 分组。
-  样例 80 → 91 行（`contract.dlt` 43 → 54 的行全是那个 `env App` 块；`main.dlt` 37 未变）。
-- 规模：Go 非测试 4566 → 4927（+361，其中 `check/env.go` 145、`gen/main.go` 的加载器与接线约 120），
-  内嵌运行时 1470 → 1454（-16），合计 6034 → **6381，占 H8 的 8000 的 80%**。
-  **余量只剩 1619 行** —— §8.3 那条「加语法与拆文件同一条提交」的纪律，从现在起是硬要求。
-- 用例：`grep -c '^func Test'` = **91**（上一轮 79；本轮 +10 checker +2 生成期集成）。
-  验收 `accept.sh` 仍是 13 项，结论未变。
-- **基线已修绿（2026-10-30）**：`TestParseWebapiMain` 一直断言 `handle` 有 5 个参数，
-  而样例从 v0.10 起就是 4 个（`git blame` 证明断言来自初始提交）—— 也就是说
-  「91 个用例全绿」这个结论至少两轮不成立，实际是 90 绿 1 红。已改成断言参数**名字**
-  （`req,fs,ver,cfg`），只数个数的写法正是它漏两次的原因。同一条提交把 `go` 指令 1.24 → 1.22
-  （理由见 IMPL-PLAN §7.1），Go 1.22.5 实测 `go test ./...` 退出码 0。
-- **本轮没跑长稳**，而 `env` 改了启动路径（配置加载先于监听）。所以 §2 P0 的门禁比之前更硬：
-  下一次改动落地前，至少要重跑一次 `SOAK_SECONDS=60`，3 天口径仍挂在 P0。
+- `origin/main` = `main` = `56251e6`（D2 之前的提交），工作区见本轮提交后更新。
+- 本轮（v0.12）做的事：**D2 落地 —— 删掉 `Response`，响应面统一为「成功即值」**。
+  - 入口成功类型只能是 `bytes`（有体）或 `Unit`（无体），签名回到 `-> bytes | ApiError`；
+    `Response{status: 200, body: X}` 在 `check` 就报 `E1`，并提示「它在语言里就是 `X`」。
+  - 状态码只在「错误变体 → 状态码」的表里出现：新增 `NotAllowed`(104→405)、
+    `PreconditionFailed`(105→412)，成功恒 200（`Unit` 成功 = 200 + `Content-Length: 0`）。
+  - **R3 是唯一新增的语义**：裸 `return` = 该返回类型的单位值（`bytes` → 空 body）。
+  - checker 认错误类型的规则从"谁用过 `!`"改成"签名里写没写"（联合里非首项的 sum），
+    否则只 `return ApiError.NotAllowed` 而不传播的程序会拿到 1.. 号、静默变 500。
+  - `rt.h` 的 `DP_ERR_*` 与契约声明顺序由 `TestErrTagsMatchRuntime` 钉死（两边漂移 = 静默 500）。
+  - **412 只做一半**：变体加了，但运行时 `If-Match` 比对**没删**（安全边界，与 `dp_valid_key` 同级），
+    D3 由 `boundary` 合流。tag 派生的错误响应现在一律空 body（405 的验收项）。
+- 规模：Go 非测试 4927 → 5037、内嵌运行时 1454 → 1462，合计 6381 → **6499，占 H8 的 8000 的 81%**。
+  **余量 1501 行。** 样例 91 → 88 行（`contract.dlt` 54 → 51、`main.dlt` 37 未变）。
+  H7 的两笔账第一次归零（`status: 200` 5→0、`body: b""` 3→0）。
+- 用例：`grep -c '^func Test'` = **95**（上一轮 91；本轮 −2 个 `E-GEN` 反例、+4 个 check 级 R1/R3、
+  +1 个 tag 表护栏、+1 个 412 不进 handler 的集成用例）。
+- 证据：`accept.sh` 13 项逐条不变（405 仍空 body、412 仍无快照无提交）；
+  `SOAK_SECONDS=60 SOAK_INTERVAL=0` 跑 866 轮，0 失败，RSS 恒 1852 KB、1 线程、无残留子进程。
+- 自检输出变了：`ok: 8 项声明`（`Response` 被删，少了一项）。
+- **3 天长稳仍未跑**（P0 不动）：D2 改了请求主链路（错误响应改由 tag 派生），60 s 只是冒烟。
 
 
 ## 1. 新机器五分钟上手
@@ -37,7 +38,7 @@
 go version                                    # 需 ≥ 1.22（code/lang/go.mod 声明的最低版本，2026-10-30 由 1.24 下调）
 mkdir -p .build                               # 编译产物放这里，目录不会自动建
 cd code/lang && go build -o ../../.build/droplet ./cmd/droplet
-go test ./...                                 # 判据是退出码 0，不是"数 ok 行"（见 §4）；共 91 个用例
+go test ./...                                 # 判据是退出码 0，不是"数 ok 行"（见 §4）；共 95 个用例
 ```
 
 还需要 `cc`（gcc 或 clang，编译器以 `-std=c11` 调用它）。
@@ -56,7 +57,7 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 
 ```sh
 .build/droplet check code/webapi/src/contract.dlt code/webapi/src/main.dlt
-# 实测输出：ok: 9 项声明，1 个函数，入口 handle（env App 块算一项，v0.11 起是 9）
+# 实测输出：ok: 8 项声明，1 个函数，入口 handle（env App 块算一项；v0.12 删掉 Response 后少一项）
 # （v0.9 之后入口就是那个函数本身，不再有外层的壳名）
 ```
 
@@ -72,22 +73,30 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
   新实例的 bind 顶掉，而请求照样有响应（来自旧二进制）—— 这种「0 失败」是假的。
   `sample.log` 的 rss 列为 0 就是这个形状；v0.10 起脚本自己会拦（启动即退出 → 报错并退出 1）
 
-### P1 · D2 设计项（三条合成一条，**全部待点头**，方案见 IMPL-PLAN §8.4）
+### P1 · 下一件：D3 设计（`boundary` 合成，才谈得上合流）
 
-- **删掉 `Response`，成功即值**（`entry -> bytes | ApiError`；无体用裸 `return`；状态码只在
-  `tag → status` 表里写一次）。这条同时吃掉下面两条，所以合成一批、只重跑一次长稳。
-- **H7 欠 8 处**：`main.dlt` 里 `status: 200` ×5、`body: b""` ×3。D2 之后应为 0。
-  注意 **3 处 `b""` 不是靠"成功即值"消掉的**，靠的是「裸 `return` = 单位值」这条新规则 —— 它才是 D2 里
-  唯一新增的语义，也是唯一需要认真反对的一条（见 §8.4 待点头表）。
-- **`Response` 的字段形状长在 gen**：`check` 说 ok 而 `build` 报 `E-GEN` 的三类（缺 `status` /
-  写 `etag` / 未知字段）。**原计划的"搬进 checker"不做了** —— 那是给同一套映射补一份并行实现。
-  删掉 `Response` 之后这三类在结构上不存在，check 与 build 不可能再分歧。
-- **412 只做一半**：加 `PreconditionFailed` 变体与 412 映射（该补的 D0 缺口），**但运行时里那段
-  `If-Match` 比对不删**。理由是安全边界（与 `dp_valid_key` 同级）：它由运行时把守时，handler 忘写
-  不会丢保护；搬到 handler 后忘一次就是静默丢更新。语言侧的正解是 `boundary ... with idempotency`
-  合成这条检查（D3），不是交还给人。**这一条与上一班的建议相反，请重点看 §8.4 的理由再点头。**
-- 批完之后要付的账：`accept.sh` 13 项必须逐条不变（其中两条最容易翻车：405 的**空 body**、
-  412 的**无快照无提交**）、重跑 `SOAK_SECONDS=60`、`README`/`SPEC` 的 H7 状态更新。
+- **同一语义现在有两处**：运行时 `If-Match` 比对 + 语言侧 `PreconditionFailed`。D3 让
+  `boundary … with idempotency`（或预条件声明）**合成**这条检查，然后才删运行时那份。
+  在合成能力存在之前删，等于把保护降级成约定（IMPL-PLAN §8.4.7 的三条理由）。
+- **201 / 204 / 206 仍无法表达**：成功恒 200。正解同样是 `boundary` 的成功形状合成状态码
+  （与错误变体共用同一张 tag → status 表），不是把 `Response` 加回来。
+- 这是**设计项**：先写方案（像 §8.4 那样带证据表与反对意见），点头后再动代码。
+- 判据不变：`accept.sh` 13 项 + 长稳；合流那一轮必须重跑 3 天口径。
+
+### P2 · 意图表达式：先拍板组合子，再动 `E10`
+
+- SPEC §5.10 列了约 7 个封闭组合子（`all/any/sum`、`unique`、`monotonic`、`conserved`、
+  `once/stable/refines`），**尚未拍板**；`E10`（intent 抓不到 mutation 即硬错）因此还是空的。
+- 前置缺口：表达式不导出（`exprOf` 只认字面量），要先把 `fmt` 打印器补上，
+  否则 `E10` 的报错指不到具体子表达式。
+- 顺序：词汇 → 打印器 → `E10` → 把 `require`/`example` 接进检查。
+
+### P3 · 工具链前向对照（只能在装了新 Go 的机器上跑）
+
+- 沙盒只有 Go 1.22.5；CI 的 `latest` 档覆盖 build / vet / test，但**不跑 `-print-c` 逐字节对照**。
+- 要补的证据：`GOTOOLCHAIN=go1.24.0`（或更新）编出的 `droplet`，对
+  `hello.dlt` / `shape.dlt` / `webapi`（contract + main）各生成一份 C，与 1.22 版 `diff` 无输出。
+- 为什么值得跑：`go` 指令已降到 1.22，但"1.24 与 1.22 生成的 C 相同"这件事目前只有 1.22 侧的证据。
 
 ## 3. 上一班拍板的结果（2026-10-30）
 
@@ -95,15 +104,15 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
    **已落地**：`8fdde01`，D1 四项全完成。
 2. **不起 72 h 长稳**：本机不保证这几天不关机，P0 保持挂着；自测继续用
    `SOAK_SECONDS=60 sh code/webapi/deploy/soak.sh`（跑前先确认端口没被残留实例占）。
-3. `.build/verify_d0.sh` **不入库**：D0-DEVIATIONS §6 的 13 条探针继续按文档手跑；
+3. `.build/verify_d0.sh` **不入库**：D0-DEVIATIONS §6 的探针继续按文档手跑；
    要变成可重跑的护栏，得先解决它跟 `accept.sh` / `soak.sh` 抢实例的问题。
-4. （2026-10-30 追加）**D2 合成一批做**，方案与三件待点头写在 IMPL-PLAN §8.4；
-   本轮只落文档、没动代码。
+4. （2026-10-30 追加）**D2 三件合成一批**：删 `Response` / 裸 `return` = 单位值 /
+   412 只加变体不删运行时 —— **已落地（v0.12）**，方案与证据在 IMPL-PLAN §8.4。
 
 ## 4. 坑（踩过的，别再踩）
 
 - `pkill -f blobd` 会把自己的命令行一起匹配掉，用 `pkill -x blobd`
-- `DP_ROOT` 目录必须已存在，否则 `dp_serve` 打印「数据目录不可用」并 `return 1`
+- `APP_ROOT` 目录必须已存在，否则 `dp_serve` 打印「数据目录不可用」并 `return 1`
 - `.build/` 在 `.gitignore` 第 7 行，里面的脚本**不入库**：
   `verify.sh`（= IMPL-PLAN §6 的抽取）、`quickstart.sh`（= README Quick start 的抽取）、
   `audit.sh`（运行时 `dp_*` 调用点计数）。本轮（2026-10-30）`verify.sh` 已不在，
@@ -148,6 +157,14 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
   整条探针碎成一地（本轮 `patch_dev_etag.py` 第一版就是这样，重写后才对）
 - 改「用例数 / 验收项数」这种散在多处的小数字，先 `grep -rn` 全仓再改：本轮 77 → 79、12 → 13
   合计 7 处（README×2、IMPL-PLAN×3、NEXT×1、D0-DEVIATIONS×1），漏一处就是一份自相矛盾的文档
+- **入口返回联合里的「错误是值」需要生成器分两路**：`return ApiError.NotAllowed` 不是成功值，
+  不能写进 `.u.ok`（C 会报 `incompatible types`），要写进联合的 `.tag`。判据是表达式类型是不是
+  当前返回联合里的错误成员（`isErrItem`）。D2 第一次编译就是踩在这里
+- **412 与 405 不是同一条路**：405 现在由 handler 的 tag 派生（空 body），412 仍由运行时在进
+  handler 之前发出（文本 body）。写测试时别把「tag 派生 = 空 body」推广到 412
+- 批量改 `check_test.go` 里的服务样例：先换签名（`-> Response | ApiError` → `-> bytes | ApiError`），
+  再换构造（`return Response{…}` → `return b""`），最后删 `Response` 类型声明 —— 顺序倒了会
+  留下「签名是 bytes、函数体还返回 Response」的中间态，`expectOne` 会因此报 2 条错而不是 1 条
 
 ## 5. 文档地图
 

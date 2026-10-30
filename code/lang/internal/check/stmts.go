@@ -54,6 +54,23 @@ func (c *checker) checkFn(fn *ast.FnDecl) {
 	c.scope, c.curFn = prevScope, prevFn
 }
 
+// bareReturnable 判断裸 `return` 是否合法（D2 的 R3）：只有返回类型的单位值能这样写。
+// `Unit` 的单位值是"没有值"，`bytes` 的是空 body；它不是可构造的零值 ——
+// §5.2「零值不合法」说的是别的地方（声明与构造），这里只是"不写字"。
+// 联合按成功成员判定：错误由 `!` 传播，裸 `return` 永远落在成功分支上。
+func bareReturnable(t *Type) bool {
+	if t == nil {
+		return true
+	}
+	switch t.Kind {
+	case KUnit, KBytes, KInvalid:
+		return true
+	case KUnion:
+		return bareReturnable(okType(t))
+	}
+	return false
+}
+
 func (c *checker) checkBlock(b *ast.Block) {
 	if b == nil {
 		return
@@ -88,7 +105,7 @@ func (c *checker) checkStmt(s ast.Stmt) {
 
 	case *ast.Return:
 		if n.Value == nil {
-			if !isUnit(c.curFn.Ret) {
+			if !bareReturnable(c.curFn.Ret) {
 				c.errorf(n.Pos, "E1", "函数 %s 返回 %s，不能空 return", c.curFn.Name, c.curFn.Ret)
 			}
 			return

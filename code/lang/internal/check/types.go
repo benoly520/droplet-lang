@@ -163,6 +163,15 @@ func isUnit(t *Type) bool {
 	return t != nil && (t.Kind == KUnit || t.Kind == KInvalid)
 }
 
+// okType 取出返回类型的成功成员：联合取第 0 项，其余就是它本身。
+// 服务入口的「成功即值」规则（D2 / R1）与裸 `return` 的单位值（R3）都按它判定。
+func okType(t *Type) *Type {
+	if t != nil && t.Kind == KUnion && len(t.Items) > 0 {
+		return t.Items[0]
+	}
+	return t
+}
+
 func assignable(from, to *Type) bool {
 	if from == nil || to == nil {
 		return true

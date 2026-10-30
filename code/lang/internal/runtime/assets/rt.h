@@ -34,13 +34,16 @@ typedef struct {
 /* ---- 错误 tag 常量 ----
  *
  * 必须与契约里错误变体的声明顺序一致：
- *   type ApiError = NotFound | BadRequest | IoError | Conflict
- * checker 从 100 起按声明顺序编号，改顺序就得同步改这里。
+ *   type ApiError = NotFound | BadRequest | IoError | Conflict | NotAllowed | PreconditionFailed
+ * checker 从 100 起按声明顺序编号（联合里的错误项，不看有没有用过 `!`），
+ * 改顺序就得同步改这里；gen 的 TestErrTagsMatchRuntime 把这条对钉死。
  */
 #define DP_ERR_NOT_FOUND 100u
 #define DP_ERR_BAD_REQUEST 101u
 #define DP_ERR_IO 102u
 #define DP_ERR_CONFLICT 103u
+#define DP_ERR_NOT_ALLOWED 104u
+#define DP_ERR_PRECONDITION_FAILED 105u
 
 /* ---- arena：按块分配，整块释放 ---- */
 typedef struct dp_arena dp_arena;

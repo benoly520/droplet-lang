@@ -92,19 +92,21 @@ var requestFields = map[string]string{
 }
 
 // serviceMain 生成 HTTP 服务形态：entry 函数成为请求处理器，main 交给 dp_serve。
+//
+// 成功即值（D2 / R1）：成功类型是 bytes（有体）或 Unit（无体），成功恒 200；
+// 状态码只在「错误变体 → 状态码」的表里出现（rt_http.c 的 status_for_tag），
+// 于是 handler 里没有可写的状态码，也没有可构造的响应记录。
 func (g *gen) serviceMain(sig *check.FnSig, reqIdx int) {
 	reqType := sig.Params[reqIdx]
-	if sig.Ret == nil || sig.Ret.Kind != check.KUnion {
-		g.failf(token.Pos{}, "entry %s 用于服务时必须返回 Response | 错误", sig.Name)
+	if sig.Ret == nil || sig.Ret.Kind != check.KUnion || len(sig.Ret.Items) < 2 {
+		g.failf(token.Pos{}, "entry %s 用于服务时必须返回 `bytes | 错误` 或 `Unit | 错误`", sig.Name)
 		return
 	}
-	respType := sig.Ret.Items[0]
-	if respType.Kind != check.KRecord {
-		g.failf(token.Pos{}, "entry %s 的成功返回值必须是 record，得到 %s", sig.Name, respType.Name)
-		return
-	}
-	if respType.FieldsByName["status"] == nil {
-		g.failf(token.Pos{}, "响应类型 %s 缺少 status 字段：运行时只按 status 映射状态码", respType.Name)
+	// check 已经限定过（check/env.go 的 checkServiceResult），这里是兜底：
+	// 生成期再判一次，保证「生成器不会发出它自己不懂的响应」。
+	ok := sig.Ret.Items[0]
+	if ok.Kind != check.KBytes && ok.Kind != check.KUnit {
+		g.failf(token.Pos{}, "entry %s 的成功类型必须是 bytes 或 Unit，得到 %s", sig.Name, ok.Name)
 		return
 	}
 
@@ -145,21 +147,11 @@ func (g *gen) serviceMain(sig *check.FnSig, reqIdx int) {
 
 	g.line("  dp_R_%s _r = dp_f_%s(%s);", sig.Name, sig.Name, strings.Join(args, ", "))
 	g.line("  if (_r.tag != 0) { return (int)_r.tag; }")
+	g.line("  out->status = 200;")
 	g.line("  out->content_type = dp_str_lit(\"application/json\");")
-	for _, f := range respType.Fields {
-		switch f.Name {
-		case "status":
-			g.line("  out->status = (uint16_t)_r.u.ok.m_status;")
-		case "body":
-			g.line("  out->body = _r.u.ok.m_body;")
-		case "content_type":
-			g.line("  out->content_type = _r.u.ok.m_content_type;")
-		case "etag":
-			// v0.10 的第四条语法减法：ETag 由运行时从 body 推导（见 rt_http.c）。
-			g.failf(token.Pos{}, "Response.etag 不用写：ETag 头由运行时从 body 推导（SPEC §2.2 H7），删掉这个字段")
-		default:
-			g.failf(token.Pos{}, "Response.%s 无法映射到响应：可写的只有 status / body / content_type", f.Name)
-		}
+	if ok.Kind == check.KBytes {
+		// Unit 成功 = 200 + Content-Length: 0：out->body 已是零值。
+		g.line("  out->body = _r.u.ok;")
 	}
 	g.line("  return 0;")
 	g.line("}")
