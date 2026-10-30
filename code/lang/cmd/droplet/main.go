@@ -27,7 +27,7 @@ const usageText = `droplet - Droplet 语言工具链
   droplet check <file.dlt>...            类型与错误检查
   droplet build <file.dlt>... -o <out>   生成 C、调用 cc，产出可执行文件
                                          -print-c 只输出 C；-keep-c 保留 <out>.c
-  droplet contract <file.dlt>...         导出契约 JSON（boundary / env / 函数签名 / tag 表）
+  droplet contract <file.dlt>...         导出契约 JSON（boundary / 函数签名 / tag 表）
   droplet help                           显示本帮助
 `
 
@@ -95,7 +95,10 @@ func cmdContract(files []string) {
 
 // cmdBuild 生成 C 源码，释放内嵌运行时，再调用系统 cc 产出可执行文件。
 func cmdBuild(args []string) {
-	opts := splitBuildArgs(args)
+	opts, err := splitBuildArgs(args)
+	if err != nil {
+		fail(err)
+	}
 	out := opts.out
 	if out == "" {
 		out = "a.out"
@@ -157,15 +160,18 @@ type buildOpts struct {
 }
 
 // splitBuildArgs 拆出 -o 与其值，其余视为输入文件。
-func splitBuildArgs(args []string) buildOpts {
+//
+// 缺值的 -o 直接报错：静默回退到 a.out 会让人以为产物在指定的位置上。
+func splitBuildArgs(args []string) (buildOpts, error) {
 	var o buildOpts
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-o":
-			if i+1 < len(args) {
-				o.out = args[i+1]
-				i++
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+				return o, fmt.Errorf("-o 需要一个输出路径")
 			}
+			o.out = args[i+1]
+			i++
 		case "-print-c":
 			o.printC = true
 		case "-keep-c":
@@ -174,7 +180,7 @@ func splitBuildArgs(args []string) buildOpts {
 			o.files = append(o.files, args[i])
 		}
 	}
-	return o
+	return o, nil
 }
 
 // reportCheck 打印全部检查错误并以非零码退出。

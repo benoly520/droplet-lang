@@ -18,8 +18,9 @@ code/webapi    用 .dlt 写的示例服务（boundary / entry / 路由）
 
 闭环验收：
 
-```
+```sh
 ./droplet build code/webapi/src/contract.dlt code/webapi/src/main.dlt -o blobd
+mkdir -p /tmp/blobd            # DP_ROOT 必须已存在，否则服务启动即退出
 DP_TOKEN=dev DP_ROOT=/tmp/blobd ./blobd
 curl -H 'Authorization: Bearer dev' 'localhost:8787/v1/blob/demo'
 ```
@@ -416,7 +417,7 @@ int main(void) {
 | `match` 匹配不到有意义的变体 | 语法与 codegen 都对（分支之间必须有逗号），但 D0 没有构造 sum 值的途径：裸变体名被 `E1` 拒、`{...}` 只收 record，因此只能匹配到零值 | D1 补变体构造语法 |
 | 带字段的错误变体 | 报 `E1`；错误只保留 tag（运行时按 tag 映射状态码，字段无处安放） | 确有需要时再扩 |
 | record 字段按值嵌入 | 被引用类型必须在源文件里先出现；循环引用不支持 | D1 再考虑指针化 |
-| host 能力白名单 | `Sys` / `BlobFs` / `Versioning` 共 10 个能力已全部接通；表外能力与参数个数不符在 `check` 就报 `E2`（表在 `internal/host`，与 gen 共用） | 无（新增能力时扩表 + `rt.h` 加原型） |
+| host 能力白名单 | `Sys` / `BlobFs` / `Versioning` 共 10 个能力已全部接通；表外能力、参数个数、参数与返回类型不符都在 `check` 就报 `E2`（表在 `internal/host`，含运行时 ABI 类型与返回值包装，与 gen 共用） | 无（新增能力时扩表 + `rt.h` 加原型） |
 | 无 `entry` 的程序 | 生成立即返回 0 的 `main`，并引用全部函数避免 `-Wunused-function` | 无需补 |
 | `If-Match` / 412 归运行时 | checker 不接受裸变体名（`return Conflict` 报 `E1`），handler 表达不了“条件失败”，412 由运行时在进 handler 前判定 | 语言能表达条件失败时，换成错误变体参与 |
 | 提交是 leading-edge 防抖 | 窗口内的后续写不单独提交，要等下一次写才带上；若进程之后再无写入，最后一次写只落盘、不进历史 | 要“每次写都进历史”就把 `DP_COMMIT_DEBOUNCE` 设 0 |
@@ -595,7 +596,7 @@ droplet-lang/code/lang/
   internal/ast/ast.go
   internal/parse/parse.go
   internal/check/check.go        # 两遍式检查，导出类型/Tag/Sigs 供 codegen 复用
-  internal/host/host.go          # host 能力表：名字 + 参数个数 + 生成 C 调用的方式
+  internal/host/host.go          # host 能力表：名字 + 参数/返回的 ABI 类型 + 生成 C 调用的方式
   internal/dump/dump.go          # AST → JSON（M0 的验收出口）
   internal/gen/c.go              # AST → C11
   internal/gen/http_test.go      # 端到端：编出服务、拉进程、发真请求
@@ -654,7 +655,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now blobd
 | M1 | checker（E0/E1/E3/E11）+ `check` | 三个样例 0 错误；11 个反例各自命中预期 E 码且不级联 | 4–6 天 | **已完成** 2026-10-30（14 个 check 测试绿，错误按行列排序输出） |
 | M2 | codegen + `hello.dlt` 跑通 | `droplet build examples/hello.dlt && ./hello` 打印 `world` | 5–8 天 | **已完成** 2026-10-30（4 个 gen 测试绿，含 `-Werror` 端到端；30 个测试全过） |
 | M3 | `rt.c`（HTTP + blob + hash + spawn）+ `main.dlt` 编译 | `curl` 五个接口全通；412 / 404 / 400 / 413 各自命中；RSS 有基线数字 | 1.5–2 周 | **已完成** 2026-10-30（11 个 HTTP 端到端子测试绿，412/404/400/413/405 均命中；RSS 空转 1.83 MB、8 MB `PUT` 峰值 9.98 MB；`droplet contract` 可导出契约 JSON） |
-| M4 | 示例服务部署 + 契约验收 | 五接口 + 412 + 快照 + 一次版本化提交全通；连续运行 3 天无异常 | 2–3 天 | **进行中** 2026-10-30（12 项实况验收全通；长稳脚本 `soak.sh` 就位，45 s 高频替代跑 602 轮 0 失败；快照已改轮转 + 带 `seq`；§8.1 审计完成，`check` 与 `build` 已对齐（`E2`/`E1`）；**连续 3 天长稳未跑**） |
+| M4 | 示例服务部署 + 契约验收 | 五接口 + 412 + 快照 + 一次版本化提交全通；连续运行 3 天无异常 | 2–3 天 | **进行中** 2026-10-30（12 项实况验收全通；长稳脚本 `soak.sh` 就位，45 s 高频替代跑 602 轮 0 失败；快照已改轮转 + 带 `seq`；§8.1 审计完成，`check` 与 `build` 已对齐（`E2`/`E1`，含参数与返回类型比对）；**连续 3 天长稳未跑**） |
 
 M3 的内部拆分（按风险排序，实际按此执行）：
 
@@ -715,8 +716,12 @@ M4 剩下的只有长稳观测，跑法：每 30 s 一次 `PUT`+`GET`，每小�
 | `match` | 能 check、能 build、能跑（分支之间必须有逗号） | 保留；但 D0 无构造 sum 值的途径，只能匹配零值 → 记入 §5.4 |
 | `Sys.getenv` | 能力表 / `rt.h` / `rt_core.c` / `contract.dlt` 四处齐全，**零调用点** | **已删**：`dp_sys_getenv` 23 行 + 能力项 + 契约声明 + `EnvError` |
 | `Sys.now_unix` | `.dlt` 无人调用，但 `rt_blob.c` 的快照名在用 | 保留；`rt.h` 注释改为「仓内唯一调用点是快照文件名的时间戳」 |
+| `dp_arena_reset` | 原型与定义齐全，**零调用点**（每请求新建 arena、用完整块 free，从不复用） | **已删**；新增 `TestRuntimeHasNoDeadFunctions`，把「运行时函数必须有调用点」变成回归测试 |
 | `true`/`false`、`!=` `<` `<=` `>` `>=` `&&` `||` `+` `-` `*` `/` `%` | 均可达，三个 `.dlt` 都没用到 | 属例子覆盖不足，不是死代码；不为它们硬凑样例 |
 | 契约 JSON 的 `envs` 分组 | checker 拒绝 env 后 `contract` 走不到导出那一步，字段永远为空 | **已删** `Doc.Envs` / `Env` / `envOf` 与对应断言 |
+| `droplet help` 的 contract 描述 | 写着「boundary / env / 函数签名 / tag 表」，而 `envs` 字段早已删 | **已修**：帮助文本去掉 env |
+| `-o` 缺值 | `droplet build x.dlt -o` 静默回退到 `a.out`，人以为产物在指定位置 | **已修**：报「-o 需要一个输出路径」，`TestSplitBuildArgsMissingOut` 固定 |
+| `dump` 的 Intent 节点 | 规则名（invariant / requires）写进 `kind`，把节点类型覆盖掉，`parse` 输出里根本没有 `Intent` 节点 | **已修**：规则名改放 `rule`；新增「dump 不得出现 Unknown* 节点」两条测试（样例 + 全语法探针） |
 
 删完后的能力表是 10 个（`Sys` 4 + `BlobFs` 5 + `Versioning` 1）。
 
@@ -724,10 +729,12 @@ M4 剩下的只有长稳观测，跑法：每 30 s 一次 `PUT`+`GET`，每小�
 （`sys.nope`）、带字段变体（`Err { code: u64 }`）都是这个形状，根因只有一个——能力表
 `hostCaps` 长在 `internal/gen/c.go` 里，checker 看不见它。
 
-**已修（2026-10-30）**：能力表搬到 `internal/host/host.go`（名字 + 参数个数 + 生成 C 调用的
-方式），check 与 gen 共用一份：
+**已修（2026-10-30）**：能力表搬到 `internal/host/host.go`（名字 + 参数/返回的 ABI 类型 +
+生成 C 调用的方式），check 与 gen 共用一份：
 
 - 表外能力、参数个数不符 → `check` 报 `E2`（"运行时不提供能力 Sys.nope"）；
+- 参数或返回的类型与运行时原型不符 → `check` 报 `E2`（以前要等 cc 报
+  `incompatible type for argument`，既没有 E 码也没有 `.dlt` 行号）；
 - 带字段的变体 → `check` 报 `E1`（"错误只按 tag 映射到状态码"）；
 - `internal/host/host_test.go` 锁住「能力表每一项都能在 rt.h 找到原型」与「恰好 10 项」。
 
@@ -747,7 +754,7 @@ M4 剩下的只有长稳观测，跑法：每 30 s 一次 `PUT`+`GET`，每小�
 | RSS 远超 3 MB | M3 基线 > 8 MB | 记录实际值，按 SPEC §9 回砍（先砍 keep-alive 缓冲与日志） |
 | 快照无限累积 | 按 `soak.sh` 默认口径跑 72 h，`.snapshots/` 会累积约 8640 个文件（每 30 s 一次写） | 已采纳：每 key 只留最近 `DP_SNAPSHOT_KEEP`（默认 8）；要全量历史就设 0 |
 | 语言子集被需求拉动膨胀 | 出现「再加一个语法就能写」的请求 | 记入 `docs/D0-DEVIATIONS.md`（2026-10-30 已建立），M4 之后再议 |
-| `check` 放行而 `build` 报 `E-GEN` | 代理把 `droplet check` 当作唯一 gate，把不可构建的候选当成通过 | **已修**：能力表搬到 `internal/host`，`check` 报 `E2`/`E1`；gen 只留兜底 |
+| `check` 放行而 `build` 报 `E-GEN` | 代理把 `droplet check` 当作唯一 gate，把不可构建的候选当成通过 | **已修**：能力表搬到 `internal/host`（含参数/返回的 ABI 类型），`check` 报 `E2`/`E1`；gen 只留兜底 |
 | C 后端迟迟跑不通 | M2 超过 2 周 | 暂停语言进度，先用既有实现顶着（可用性优先） |
 
 M3 实测的 RSS：空服务（无请求）1.83 MB，符合 SPEC §9 的 H4（≤ 3 MB）；8 MB body 的 `PUT`

@@ -22,7 +22,7 @@ func TestCapsExistInRuntimeHeader(t *testing.T) {
 	}
 
 	for name, c := range Caps {
-		call := c.Emit(make([]string, c.Arity), "_e")
+		call := c.Emit(make([]string, c.Arity()), "_e")
 		fn := call
 		if i := strings.Index(call, "("); i > 0 {
 			fn = call[:i]
@@ -33,5 +33,44 @@ func TestCapsExistInRuntimeHeader(t *testing.T) {
 		if !strings.Contains(hdr, fn+"(") {
 			t.Errorf("能力 %s 生成的调用 %s 在 rt.h 里没有原型", name, fn)
 		}
+	}
+}
+
+// TestEmitKeepsArguments 兜住 Emit 的两个易错点：漏掉参数、包装与返回类型脱节。
+func TestEmitKeepsArguments(t *testing.T) {
+	argv := []string{"A0", "A1", "A2"}
+	for name, c := range Caps {
+		call := c.Emit(argv[:c.Arity()], "_e")
+		for i := 0; i < c.Arity(); i++ {
+			if !strings.Contains(call, argv[i]) {
+				t.Errorf("%s 的生成代码 %q 漏掉了第 %d 个参数", name, call, i+1)
+			}
+		}
+		if (c.RetName != "") != (c.Wrap != nil) {
+			t.Errorf("%s：RetName=%q 与“是否有 Wrap”必须同时成立", name, c.RetName)
+		}
+		if c.Arity() != len(c.Params) {
+			t.Errorf("%s：Arity() 与 Params 长度不一致", name)
+		}
+	}
+}
+
+// TestTyString 运行时类型名会直接出现在 E2 的报错里，写错会误导用户。
+func TestTyString(t *testing.T) {
+	for ty, want := range map[Ty]string{
+		Str: "str", Bytes: "bytes", U64: "u64", I64: "i64", Bool: "bool", Unit: "Unit",
+	} {
+		if got := ty.String(); got != want {
+			t.Errorf("Ty(%d).String() = %q，期望 %q", ty, got, want)
+		}
+	}
+}
+
+func TestLookup(t *testing.T) {
+	if _, ok := Lookup("Sys.log"); !ok {
+		t.Error("Sys.log 应在表里")
+	}
+	if _, ok := Lookup("Sys.nope"); ok {
+		t.Error("Sys.nope 不应在表里")
 	}
 }

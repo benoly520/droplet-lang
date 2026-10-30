@@ -28,7 +28,7 @@
 | keep-alive | 未限定 | 不做；每请求一连接，`Connection: close` | 手写 HTTP 最容易在这里响应错位；也省内存 | 不做 |
 | chunked | 未限定 | 拒绝，回 501 | 防请求走私；body 上限 8 MiB 够用 | 不做 |
 | 并发 | 未限定 | 单线程；读写各 30 s 超时（只靠 `SO_RCVTIMEO`/`SO_SNDTIMEO`），超时回 408 | H4 内存预算；超时防一条连接钉死服务 | 需要时多进程 + `SO_REUSEPORT` |
-| host 能力 | 开放 effect 系统 | 写死 10 个（`Sys` 4 / `BlobFs` 5 / `Versioning` 1）；表外能力与参数个数不符在 `check` 就报 `E2`，表在 `internal/host`（check 与 gen 共用） | 只实现示例服务真正用到的 | 新增能力时扩表 + `rt.h` 加原型 |
+| host 能力 | 开放 effect 系统 | 写死 10 个（`Sys` 4 / `BlobFs` 5 / `Versioning` 1）；表外能力、参数个数、参数与返回类型不符在 `check` 就报 `E2`，表在 `internal/host`（check 与 gen 共用，含 ABI 类型与 `u64 → ETag` 的包装） | 只实现示例服务真正用到的 | 新增能力时扩表 + `rt.h` 加原型 |
 | 带字段的变体 | 支持 | 语法是 `Err { code: u64 }`，`check` 报 `E1`（错误只按 tag 映射，字段无处安放） | 运行时只按 tag 映射状态码 | 确有需要时 |
 | boundary codegen | §7.4 生成 stub / handler / serializer | 只导出 JSON 契约（`droplet contract`） | 消费方手写客户端就够（§10） | D1 |
 | 存储 | schema 驱动查询 | 扁平文件 + `.snapshots/`；`DP_ROOT` 必须是已存在的目录，否则启动时直接退出 | 哑存储是刻意的最小面；缺目录不能让服务「起得来、写全 500」 | D2 |
@@ -40,47 +40,45 @@
 | 项 | SPEC | D0 实际 | 原因 | 补齐 |
 | --- | --- | --- | --- | --- |
 | 动词 | `check` / `mem` / `bench` / `explore` / `trace` / `verify` | `parse` / `check` / `build` / `contract`（+ `help`） | 让服务跑起来所需的最小子集 | D1 |
-| 错误码 | `E0`–`E12` | `E1`（类型与匹配）、`E2`（能力）、`E3`（边界序列化）、`E11` + 语法号 `E0003`–`E0009` + 生成期 `E-GEN` | 没实现的检查不报假错误；生成期只剩结构形状类报错 | 随特性 |
+| 错误码 | `E0`–`E12` | `E1`（类型与匹配）、`E2`（能力与签名）、`E3`（边界序列化）、`E11` + 语法号 `E0003`–`E0009` + 生成期 `E-GEN` | 没实现的检查不报假错误；生成期只剩结构形状类报错 | 随特性 |
 | 增量编译 | 未限定 | 每次全量重编 | 样例只有 91 行（`contract.dlt` 53 + `main.dlt` 38） | 不做 |
 | 契约 JSON | 含 `envs` 分组 | 已删该字段 | checker 拒绝 env → `contract` 走不到导出那一步，字段永远为空 | 随 env 一起回来 |
 
 ## 4. 一条跨阶段的老毛病：`check` 的保证比 `build` 弱
 
-### 4.1 已修：`check` 的保证与 `build` 对齐了
+### 4.1 已修：四类构造在 `check` 阶段就拦下
 
-审计时撞到三次同一个形状 —— **`check` 说 ok，`build` 才报错**：
+审计时撞到四次同一个形状 —— **`check` 说 ok，`build` 才报错**：
 
 | 构造 | 修之前的 `check` | 修之前的 `build` | 现在 |
 | --- | --- | --- | --- |
 | `sys.nope(1)`（表外能力） | ok | `E-GEN: 运行时不提供能力 Sys.nope` | `check` 报 `E2` |
+| `host Sys { fn log(x: u64) }` + `sys.log(1)` | ok | cc 报 `incompatible type for argument 1 of 'dp_sys_log'`（无 E 码、无行号） | `check` 报 `E2` |
 | `type Bad = Err { code: u64 }` | ok | `E-GEN: M2 不支持带字段的…变体` | `check` 报 `E1` |
 | `env App { port: u64 }` | ok | ok，配置被**静默丢弃** | `check` 报 `E1` |
 
-原因只有一个：能力表以前长在 `internal/gen/c.go`，checker 看不见它。
+原因只有一个：能力表以前长在 `internal/gen/c.go`，checker 看不见它；而表里也只记了参数
+**个数**，类型完全以 `.dlt` 里那份 `host` 声明为准，声明谎报也照单全收。
 
 修法：能力表搬到 [`internal/host/host.go`](../code/lang/internal/host/host.go)，一份表同时
-描述「参数个数」与「怎么生成 C 调用」，check 与 gen 都从它取。于是：
+描述「参数与返回的运行时 ABI 类型」与「怎么生成 C 调用」，check 与 gen 都从它取。于是：
 
-- 表外能力、参数个数不符 → `E2`（效果与能力，SPEC §14 的码意义）；
+- 表外能力、参数个数不符、参数或返回类型与运行时原型不符 → `E2`（效果与能力，SPEC §14 的
+  码意义）；参数写成 record 也是 `E2`（record 传不进 C 原型）；
 - 带字段的变体 → `E1`（类型与匹配）；
 - `internal/host/host_test.go` 锁住两件事：能力表恰好 10 项；每一项生成的 `dp_*` 调用都能在
   `rt.h` 找到原型。
 
 **结论**：`droplet check` 的 `ok` 现在等价于「能构建」。gen 里那两处检查降为防御性兜底。
 
-### 4.2 还没补完的一条：声明可以「报错参数类型」
+### 4.2 顺带收掉的影子表：`u64 → ETag` 的包装
 
-能力表只记参数**个数**，不记参数**类型**；类型来自 `.dlt` 里那份 `host` 声明。所以：
+`BlobFs.write` 的运行时原型返回 `uint64_t`，语言侧是 record `ETag`。包装代码以前在
+`internal/gen/c.go` 里另立一张 `hostWraps` 表，还带一个「按类型名判断要不要包」的猜测。
 
-| 情况 | 现在的结果 |
-| --- | --- |
-| 声明与调用一致、但与 runtime 原型不符 | `check` ok，`build` 在 cc 那一层报 `error: incompatible type for argument 1 of 'dp_sys_log'`——**没有 E 码、也没有 `.dlt` 行号** |
-| 调用与声明不符 | `check` 报 `E1`（如 `log 的第 1 个参数应为 str，得到 u64`）——这条是对齐的 |
-
-例子：`host Sys { fn log(x: u64) -> Unit }` + `sys.log(1)`，check 返回 `ok`，build 吐上面那条 cc 错。
-
-补齐方向：给 `host.Cap` 加上参数/返回的**运行时类型**（`dp_str` / `dp_bytes` / `u64` …），
-checker 拿声明对一遍，把 cc 错误变成 `E2`。属于 D1。
+现在它是能力的一项数据：`Cap.RetName`（语言侧成功类型名，空则同 `Ret`）与 `Cap.Wrap`
+（`nil` 表示直接赋值）。checker 用 `RetName` 比对返回类型，gen 只负责 `if hc.Wrap != nil`。
+两条信息住在一起，不会再出现「check 认的类型和 gen 包的类型不是同一个」的漂移。
 
 ## 5. 已不算偏差
 
@@ -109,16 +107,16 @@ $B check .build/c.dlt
 printf 'type Bad = Err { code: u64 }\n\nentry E {\n  fn f() -> u64 | Bad\n  invariant "x"\n  {\n    return 1\n  }\n}\n' > .build/f.dlt
 $B check .build/f.dlt
 
-# 声明"报错参数类型"的漏网：check ok，cc 才报错（§4.2）
+# 声明谎报参数类型：check 直接报 E2（以前要到 cc 才炸，无 E 码无行号）
 printf 'host Sys {\n  fn log(x: u64) -> Unit\n}\n\nentry E {\n  fn f(sys: Sys) -> Unit\n  invariant "x"\n  {\n    sys.log(1)\n    return Unit\n  }\n}\n' > .build/l.dlt
-$B check .build/l.dlt && $B build .build/l.dlt -o .build/l
+$B check .build/l.dlt   # 期望 E2: 能力 Sys.log 的第 1 个参数运行时是 str，声明为 u64
 
 # 契约与生成物
 $B contract code/webapi/src/contract.dlt code/webapi/src/main.dlt | head -40
 $B build -print-c code/lang/examples/hello.dlt | head -5
 
 # 能力表在这里，共 10 条
-sed -n '/^var Caps = map/,/^}/p' code/lang/internal/host/host.go | grep -c ':'
+sed -n '/^var Caps = map/,/^}/p' code/lang/internal/host/host.go | grep -cE '^[[:space:]]+"[A-Za-z]+\.[a-z0-9_]+": \{'
 
 # 数据目录缺失 → 启动即退出（不是起得来再 500）
 $B build code/webapi/src/contract.dlt code/webapi/src/main.dlt -o .build/q >/dev/null

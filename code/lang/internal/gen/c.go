@@ -470,19 +470,6 @@ func (g *gen) call(n *ast.Call) string {
 	return tmp
 }
 
-// hostWraps 把运行时返回值转成语言层面的类型（如 u64 → ETag）。
-var hostWraps = map[string]func(expr string, okType *check.Type) string{
-	"BlobFs.write": wrapETag,
-}
-
-// wrapETag 把 dp_blob_write 的 u64 包成契约里的 ETag。
-func wrapETag(expr string, okType *check.Type) string {
-	if okType != nil && okType.Kind == check.KRecord && okType.Name == "ETag" {
-		return "((dp_T_ETag){ .m_hash = " + expr + " })"
-	}
-	return expr
-}
-
 // hostCall 把能力调用内联成运行时函数，参数顺序按运行时原型调整。
 //
 // 联合返回的能力不直接给出值，而是包成一个临时的 tag/err 结构，
@@ -502,8 +489,8 @@ func (g *gen) hostCall(sel *ast.Select, args []ast.Expr) string {
 		g.failf(sel.Pos, "运行时不提供能力 %s", key)
 		return "0"
 	}
-	if len(args) != hc.Arity {
-		g.failf(sel.Pos, "能力 %s 需要 %d 个参数，得到 %d", key, hc.Arity, len(args))
+	if len(args) != hc.Arity() {
+		g.failf(sel.Pos, "能力 %s 需要 %d 个参数，得到 %d", key, hc.Arity(), len(args))
 		return "0"
 	}
 
@@ -521,8 +508,8 @@ func (g *gen) hostCall(sel *ast.Select, args []ast.Expr) string {
 	errTmp := g.newTmp()
 	tmp := g.newTmp()
 	value := hc.Emit(argv, errTmp)
-	if wrap, ok := hostWraps[key]; ok {
-		value = wrap(value, okType)
+	if hc.Wrap != nil {
+		value = hc.Wrap(value)
 	}
 	g.emit("struct { uint16_t tag; union { %s ok; dp_error err; } u; } %s = {0};", cType(okType), tmp)
 	g.emit("{ int %s = 0; %s.u.ok = %s; if (%s != 0) { %s.tag = (uint16_t)%s; %s.u.err.tag = (uint16_t)%s; } }",

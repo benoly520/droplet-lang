@@ -144,7 +144,9 @@ func methods(in []*ast.BndMethod) []any {
 func intents(in []ast.Intent) []any {
 	out := make([]any, 0, len(in))
 	for _, it := range in {
-		out = append(out, obj("Intent", it.Pos, "kind", it.Kind, "text", it.Text,
+		// 字段名不能叫 kind：obj 已经用 kind 存节点类型，再写一次会把它覆盖成
+		// invariant / requires 这类规则名。
+		out = append(out, obj("Intent", it.Pos, "rule", it.Kind, "text", it.Text,
 			"names", it.Names, "expr", expr(it.Expr)))
 	}
 	return out

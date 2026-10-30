@@ -237,6 +237,55 @@ entry E {
 	expectOne(t, res, "E2", "需要 1 个参数，声明了 2")
 }
 
+func TestHostCapabilityParamType(t *testing.T) {
+	// 声明谎报参数类型：以前 check 返回 ok，要等 cc 报 incompatible type。
+	res := checkSrc(t, `host Sys { fn log(x: u64) -> Unit }
+
+entry E {
+  fn f(sys: Sys) -> Unit
+    invariant "无"
+  {
+    sys.log(1)
+    return Unit
+  }
+}`)
+	expectOne(t, res, "E2", "Sys.log 的第 1 个参数运行时是 str，声明为 u64")
+}
+
+func TestHostCapabilityRetType(t *testing.T) {
+	res := checkSrc(t, `host Sys { fn now_unix() -> str }
+
+entry E {
+  fn f(sys: Sys) -> Unit
+    invariant "无"
+  {
+    let t = sys.now_unix()
+    return Unit
+  }
+}`)
+	expectOne(t, res, "E2", "Sys.now_unix 运行时返回 i64，声明为 str")
+}
+
+func TestHostCapabilityRecordParam(t *testing.T) {
+	// 能力参数只能是标量：record 传不进运行时原型。
+	res := checkSrc(t, `type ETag {
+  hash: u64
+}
+
+host BlobFs {
+  fn read(root: ETag, key: str) -> bytes
+}
+
+entry E {
+  fn f(fs: BlobFs) -> Unit
+    invariant "无"
+  {
+    return Unit
+  }
+}`)
+	expectOne(t, res, "E2", "BlobFs.read 的第 1 个参数不能是 ETag")
+}
+
 func TestVariantWithFieldsRejected(t *testing.T) {
 	res := checkSrc(t, `type Bad = Err { code: u64 }
 

@@ -42,11 +42,10 @@ typedef struct {
 #define DP_ERR_IO 102u
 #define DP_ERR_CONFLICT 103u
 
-/* ---- arena：按块分配，reset 后整块复用 ---- */
+/* ---- arena：按块分配，整块释放 ---- */
 typedef struct dp_arena dp_arena;
 
 dp_arena* dp_arena_new(size_t cap);
-void      dp_arena_reset(dp_arena* a);
 void*     dp_alloc(dp_arena* a, size_t n);
 void      dp_arena_free(dp_arena* a);
 

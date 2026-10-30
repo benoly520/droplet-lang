@@ -72,18 +72,6 @@ void* dp_alloc(dp_arena* a, size_t n) {
   return p;
 }
 
-void dp_arena_reset(dp_arena* a) {
-  dp_block* b = a->head->next;
-  while (b) {
-    dp_block* n = b->next;
-    free(b);
-    b = n;
-  }
-  a->head->next = NULL;
-  a->head->used = 0;
-  a->tail = a->head;
-}
-
 void dp_arena_free(dp_arena* a) {
   if (!a) {
     return;
