@@ -49,6 +49,10 @@ func (c *checker) checkFn(fn *ast.FnDecl) {
 	}
 	c.curFn = sig
 
+	// 意图表达式和函数体用同一个 scope：参数可见，所以 `requires x > 0` 能查类型；
+	// E10 的两条静态判定也在这一步（见 intents.go）。
+	c.checkIntents("函数 "+fn.Name, fn.Intents)
+
 	c.checkBlock(fn.Body)
 
 	c.scope, c.curFn = prevScope, prevFn

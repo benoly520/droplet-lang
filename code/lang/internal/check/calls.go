@@ -11,6 +11,7 @@ import (
 // ---------- 调用与实参 ----------
 func (c *checker) checkCall(n *ast.Call) *Type {
 	var sig *FnSig
+	calleeName := "" // 只有具名函数才有前置条件可查（host 能力是外部的）
 
 	switch callee := n.Callee.(type) {
 	case *ast.Ident:
@@ -20,6 +21,7 @@ func (c *checker) checkCall(n *ast.Call) *Type {
 			c.checkArgs(n.Pos, n.Args, nil)
 			return tInval
 		}
+		calleeName = callee.Name
 
 	case *ast.Select:
 		ht := c.checkExpr(callee.Target)
@@ -46,6 +48,9 @@ func (c *checker) checkCall(n *ast.Call) *Type {
 	}
 
 	c.checkArgs(n.Pos, n.Args, sig)
+	if calleeName != "" {
+		c.checkRequiresAtCall(n, calleeName, sig)
+	}
 	return sig.Ret
 }
 

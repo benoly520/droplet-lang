@@ -110,6 +110,12 @@ func (c *checker) checkPropagate(n *ast.Propagate) *Type {
 	success := it.Items[0]
 	errs := it.Items[1:]
 
+	if c.curFn == nil {
+		// boundary 方法的意图里没有函数体可返回，`!` 无处可去。
+		c.errorf(n.Pos, "E1", "意图表达式里不能用 `!`：它没有可传播的错误返回")
+		return tInval
+	}
+
 	ret := c.curFn.Ret
 	if ret.Kind != KUnion {
 		c.errorf(n.Pos, "E1", "`!` 所在函数 %s 返回 %s，不是联合，无法传播错误",

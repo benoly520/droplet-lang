@@ -29,6 +29,17 @@ func (c *checker) checkBoundary(b *ast.BoundaryDecl) {
 		if !c.serializable(rt, map[*Type]bool{}) {
 			c.errorf(m.Pos, "E3", "返回类型 %s 不可跨边界序列化", rt)
 		}
+
+		// 意图表达式和参数在同一个 scope 里查（`requires key > 0` 要看得见 key）。
+		// boundary 方法没有函数体，curFn 留 nil —— 意图里的 `!` 因此会被单独拒掉。
+		prevScope, prevFn := c.scope, c.curFn
+		c.scope = newScope(nil)
+		for _, p := range m.Params {
+			c.scope.define(p.Name, c.resolve(p.Type))
+		}
+		c.curFn = nil
+		c.checkIntents("boundary 方法 "+m.Name, m.Intents)
+		c.scope, c.curFn = prevScope, prevFn
 	}
 }
 
