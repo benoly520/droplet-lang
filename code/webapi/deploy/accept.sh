@@ -28,6 +28,14 @@ export APP_BIND=127.0.0.1 APP_PORT=18799 APP_ROOT="$B/data" APP_TOKEN=secret
 SRV=$!
 trap 'kill $SRV 2>/dev/null || true' EXIT
 sleep 0.4
+# 端口被上一轮残留实例占着时新实例会立刻退出，而请求照样有响应（来自旧二进制）——
+# 整张表都会"绿"，但它测的不是这一版代码（v0.13 实踩：`| head` 触发 SIGPIPE 杀掉脚本，
+# trap 没跑，残留实例留着）。所以先确认它活着，再谈结果。
+if ! kill -0 "$SRV" 2>/dev/null; then
+  echo "accept: 自建实例启动即退出（多半是端口 18799 被占），srv.log：" >&2
+  cat "$B/srv.log" >&2
+  exit 1
+fi
 
 U=http://127.0.0.1:18799
 A='Authorization: Bearer secret'
@@ -37,6 +45,9 @@ code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 tag()  { curl -s -o /dev/null -D - "$@" | tr -d '\r' \
   | awk -F': ' 'tolower($1)=="etag"{t=$2} END{print (t==""?"(none)":t)}'; }
 row() { printf '%-34s %s\n' "$1" "$2"; }
+# 某响应头的值；(none) 表示运行时没发这个头。204 按 RFC 7230 §3.3.2 不得带 Content-Length。
+hdr() { h=$1; shift; curl -s -o /dev/null -D - "$@" | tr -d '\r' \
+  | awk -F': ' -v k="$h" 'tolower($1)==k{v=$2} END{print (v==""?"(none)":v)}'; }
 
 row 'GET  /health (无 token)'      "$(code "$U/health")"
 row 'GET  /v1/keys (空)'           "$(code -H "$A" "$U/v1/keys")"
@@ -48,8 +59,13 @@ row 'PUT  If-Match 命中'           "$(code -X PUT -H "$A" -H "If-Match: $ETAG"
 row 'PUT  If-Match 不符 -> 412'    "$(code -X PUT -H "$A" -H 'If-Match: deadbeef' --data-binary 'x' "$U/v1/blob/demo")"
 # D3：412 由生成的守卫挡在 handler 之前，body 必须是 0 字节（错误不携带体）。
 row '412 empty body (bytes)'       "$(curl -s -o /dev/null -w '%{size_download}' -X PUT -H "$A" -H 'If-Match: deadbeef' --data-binary 'x' "$U/v1/blob/demo")"
+# B3：@no_content 投 204，且 204 不得带 Content-Length（RFC 7230 §3.3.2）。
+row '204 no Content-Length'        "$(hdr content-length -X PUT -H "$A" --data-binary 'hello3' "$U/v1/blob/demo")"
+row '204 body (bytes)'             "$(curl -s -o /dev/null -w '%{size_download}' -X PUT -H "$A" --data-binary 'hello4' "$U/v1/blob/demo")"
 row 'POST /v1/keys/second'         "$(code -X POST -H "$A" "$U/v1/keys/second")"
 row 'GET  /v1/keys (两个)'         "$(curl -s -H "$A" "$U/v1/keys")"
+# @created 投 201；仍是"有表示就有版本"的规则：空 body 不发 ETag。
+row '201 头 Content-Length: 0'     "$(hdr content-length -X POST -H "$A" "$U/v1/keys/third")"
 row 'GET  /v1/blob/missing -> 404' "$(code -H "$A" "$U/v1/blob/missing")"
 row 'GET  /v1/blob/../evil -> 400' "$(code -H "$A" --path-as-is "$U/v1/blob/../evil")"
 row 'DELETE /v1/blob/demo -> 405'  "$(code -X DELETE -H "$A" "$U/v1/blob/demo")"

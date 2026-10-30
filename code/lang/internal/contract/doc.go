@@ -41,6 +41,7 @@ type Method struct {
 	Verb         string   `json:"verb,omitempty"`
 	Path         string   `json:"path,omitempty"`
 	Impl         string   `json:"impl,omitempty"`
+	Success      int      `json:"success,omitempty"` // 成功码：200 省略（只有 201/204 才写出来）
 	Precondition bool     `json:"precondition,omitempty"`
 	Intents      []Intent `json:"intents"`
 	Pos          string   `json:"pos"`
@@ -168,6 +169,7 @@ func boundaryOf(n *ast.BoundaryDecl) Boundary {
 			Verb:         strings.ToUpper(m.Verb),
 			Path:         m.Path,
 			Impl:         m.Impl,
+			Success:      m.Status,
 			Precondition: m.Precondition,
 			Intents:      intentsOf(m.Intents),
 			Pos:          posOf(m.Pos),

@@ -209,3 +209,76 @@ fn h(key: str) -> bytes {
 }`)
 	expectOne(t, res, "E1", "必须返回 `bytes | 错误`")
 }
+
+// ---------- B3：成功码投影（@created / @no_content）----------
+
+func TestCreatedOnWriteAccepted(t *testing.T) {
+	// 成功码是声明的投影：写 @created，路由表里就是 201，源码里没有数字。
+	res := checkSrc(t, fullEnv+`type ApiError = Conflict
+
+boundary Api @v1 {
+  create(key: str) -> Unit @post("/v1/x") @created impl h with idempotency
+    without precondition: "创建没有既有版本可比"
+    invariant "x"
+}
+
+fn h(key: str, cfg: App) -> Unit | ApiError {
+  return
+}`)
+	if len(res.Errors) != 0 {
+		t.Fatalf("期望 0 个错误，实际：%v", res.Errors)
+	}
+	if len(res.Routes) != 1 || res.Routes[0].Status != 201 {
+		t.Fatalf("路由表里的成功码应是 201，得到 %+v", res.Routes)
+	}
+}
+
+func TestNoContentNeedsUnit(t *testing.T) {
+	// 204 的定义是「没有表示」：有 body 的声明投不出这个码。
+	res := checkSrc(t, fullEnv+`type ApiError = NotFound
+
+boundary Api @v1 {
+  put(key: str, body: bytes) -> bytes @put("/v1/x") @no_content impl h with idempotency, precondition
+    invariant "x"
+}
+
+fn h(key: str, body: bytes, cfg: App) -> bytes | ApiError {
+  return b""
+}`)
+	expectOne(t, res, "E1", "204 不能有 body")
+}
+
+func TestStatusOnReadRejected(t *testing.T) {
+	// 读路由成功恒 200：@created / @no_content 都是写给"改变了什么"的。
+	res := checkSrc(t, fullEnv+`type ApiError = NotFound
+
+boundary Api @v1 {
+  get(key: str) -> bytes @get("/v1/x") @created impl h with idempotency
+    invariant "x"
+}
+
+fn h(key: str, cfg: App) -> bytes | ApiError {
+  return b""
+}`)
+	expectOne(t, res, "E1", "只有写路由能投影成功码")
+}
+
+func TestDefaultSuccessIs200(t *testing.T) {
+	// 没写注解就是 200：不新增"必须表态成功码"的门禁，沉默在这里有唯一自然值。
+	res := checkSrc(t, fullEnv+`type ApiError = NotFound
+
+boundary Api @v1 {
+  get(key: str) -> bytes @get("/v1/x") impl h with idempotency
+    invariant "x"
+}
+
+fn h(key: str, cfg: App) -> bytes | ApiError {
+  return b""
+}`)
+	if len(res.Errors) != 0 {
+		t.Fatalf("期望 0 个错误，实际：%v", res.Errors)
+	}
+	if len(res.Routes) != 1 || res.Routes[0].Status != 200 {
+		t.Fatalf("默认成功码应是 200，得到 %+v", res.Routes)
+	}
+}

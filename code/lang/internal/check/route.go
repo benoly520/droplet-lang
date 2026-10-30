@@ -18,6 +18,7 @@ type Route struct {
 	Path         string   // 路由路径
 	Fn           string   // 实现函数名（生成 dp_f_<Fn>）
 	Slots        []string // 从请求里取值的前 N 个参数名（key / body），顺序即签名顺序
+	Status       int      // 成功码：200（默认）/ 201（@created）/ 204（@no_content）
 	Precondition bool     // 进 handler 之前比对 If-Match
 	Ret          *Type    // 成功类型：bytes 或 Unit
 	Method       string   // boundary 方法名（报错与契约用）
@@ -102,6 +103,16 @@ func (c *checker) checkRouting() {
 				"只有写路由能声明 precondition：%s 不改变状态，预条件没有意义", key)
 		}
 
+		// ---- 成功码投影（B3）：只给写路由投，且只有两个码可投 ----
+		status := m.Status
+		if status == 0 {
+			status = 200
+		}
+		if m.Status != 0 && !isWriteVerb(m.Verb) {
+			c.errorf(m.Pos, "E1",
+				"只有写路由能投影成功码：%s 不改变状态，成功恒 200（@created / @no_content 都是写给改变的）", key)
+		}
+
 		// ---- 成功类型（R1）：只有 bytes 与 Unit 能过 HTTP ----
 		rt := c.resolve(m.Ret)
 		if rt.Kind != KBytes && rt.Kind != KUnit && rt.Kind != KInvalid {
@@ -112,6 +123,13 @@ func (c *checker) checkRouting() {
 			c.errorf(m.Pos, "E1",
 				"路由 %s 的成功类型必须是 bytes 或 Unit（得到 %s）%s", key, rt, hint)
 			continue
+		}
+
+		// 204 的定义就是「没有表示」：有 body 的声明投不出这个码。
+		if status == 204 && rt.Kind != KUnit {
+			c.errorf(m.Pos, "E1",
+				"路由 %s 投影 204（No Content），但成功类型是 %s：204 不能有 body，把成功类型写成 Unit，或改用 @created",
+				key, rt)
 		}
 
 		// ---- 实现函数：参数前缀与返回类型都要对上 ----
@@ -173,7 +191,7 @@ func (c *checker) checkRouting() {
 			continue
 		}
 		c.routes = append(c.routes, Route{
-			Verb: verb, Path: m.Path, Fn: m.Impl, Slots: slots,
+			Verb: verb, Path: m.Path, Fn: m.Impl, Slots: slots, Status: status,
 			Precondition: m.Precondition, Ret: rt, Method: m.Name, Pos: m.Pos,
 		})
 	}

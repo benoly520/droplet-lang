@@ -130,13 +130,21 @@ func TestServiceEndToEnd(t *testing.T) {
 
 	var etag string
 	t.Run("put", func(t *testing.T) {
-		code, _, hdr := do(t, "PUT", base+"/v1/blob/demo", "hello", nil)
-		if code != 200 {
-			t.Fatalf("PUT 返回 %d", code)
+		code, body, hdr := do(t, "PUT", base+"/v1/blob/demo", "hello", nil)
+		// put 声明了 @no_content：成功码是声明投影出来的 204，不是 200。
+		if code != 204 {
+			t.Fatalf("PUT 应 204，返回 %d", code)
+		}
+		if body != "" {
+			t.Fatalf("204 不该有 body，得到 %q", body)
 		}
 		// ETag 由运行时从 body 推导：PUT 的响应体是空的，没有表示就没有版本（v0.10）
 		if got := hdr.Get("ETag"); got != "" {
 			t.Fatalf("PUT 空 body 不该带 ETag，得到 %q", got)
+		}
+		// RFC 7230 §3.3.2：204 不得带 Content-Length。
+		if got := hdr.Get("Content-Length"); got != "" {
+			t.Fatalf("204 不该带 Content-Length，得到 %q", got)
 		}
 	})
 
@@ -160,11 +168,15 @@ func TestServiceEndToEnd(t *testing.T) {
 	})
 
 	t.Run("create", func(t *testing.T) {
-		code, _, _ := do(t, "POST", base+"/v1/keys/fresh", "", nil)
-		if code != 200 {
-			t.Fatalf("POST 返回 %d", code)
+		code, body, hdr := do(t, "POST", base+"/v1/keys/fresh", "", nil)
+		// create 声明了 @created：201，但成功类型是 Unit，所以没有表示、没有 ETag。
+		if code != 201 {
+			t.Fatalf("POST 应 201，返回 %d", code)
 		}
-		code, body, _ := do(t, "GET", base+"/v1/keys", "", nil)
+		if body != "" || hdr.Get("ETag") != "" {
+			t.Fatalf("201 空 body 不该带 body/ETag，得到 body=%q etag=%q", body, hdr.Get("ETag"))
+		}
+		code, body, _ = do(t, "GET", base+"/v1/keys", "", nil)
 		if code != 200 || body != `["demo","fresh"]` {
 			t.Fatalf("列表 code=%d body=%q", code, body)
 		}
@@ -172,8 +184,8 @@ func TestServiceEndToEnd(t *testing.T) {
 
 	t.Run("if-match-ok", func(t *testing.T) {
 		code, _, _ := do(t, "PUT", base+"/v1/blob/demo", "hello2", map[string]string{"If-Match": etag})
-		if code != 200 {
-			t.Fatalf("正确 If-Match 应 200，得到 %d", code)
+		if code != 204 {
+			t.Fatalf("正确 If-Match 应 204，得到 %d", code)
 		}
 	})
 
@@ -266,7 +278,7 @@ func TestPreconditionFailedDoesNotEnterHandler(t *testing.T) {
 	)
 	defer stop()
 
-	if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", "v1", nil); code != 200 {
+	if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", "v1", nil); code != 204 {
 		t.Fatalf("首次 PUT 返回 %d", code)
 	}
 	waitCommit(t, git, root)
@@ -314,7 +326,7 @@ func TestSnapshotOnPut(t *testing.T) {
 	base, stop := startBlobdIn(t, root)
 	defer stop()
 
-	if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", "v1", nil); code != 200 {
+	if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", "v1", nil); code != 204 {
 		t.Fatalf("首次 PUT 返回 %d", code)
 	}
 	// 没有旧版本可备份，就不该凭空造快照
@@ -322,7 +334,7 @@ func TestSnapshotOnPut(t *testing.T) {
 		t.Fatalf("首次 PUT 不该产生快照，得到 %v", got)
 	}
 
-	if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", "v2", nil); code != 200 {
+	if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", "v2", nil); code != 204 {
 		t.Fatalf("第二次 PUT 返回 %d", code)
 	}
 	snaps := snapshotFiles(t, root, "demo")
@@ -349,7 +361,7 @@ func TestSnapshotNoOverwrite(t *testing.T) {
 
 	for i := 1; i <= 6; i++ {
 		body := fmt.Sprintf("v%d", i)
-		if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", body, nil); code != 200 {
+		if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", body, nil); code != 204 {
 			t.Fatalf("第 %d 次 PUT 返回 %d", i, code)
 		}
 	}
@@ -367,7 +379,7 @@ func TestSnapshotRotation(t *testing.T) {
 
 	for i := 1; i <= 6; i++ {
 		body := fmt.Sprintf("v%d", i)
-		if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", body, nil); code != 200 {
+		if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", body, nil); code != 204 {
 			t.Fatalf("第 %d 次 PUT 返回 %d", i, code)
 		}
 	}
@@ -400,7 +412,7 @@ func TestVersioningCommit(t *testing.T) {
 	)
 	defer stop()
 
-	if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", "v1", nil); code != 200 {
+	if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", "v1", nil); code != 204 {
 		t.Fatalf("PUT 返回 %d", code)
 	}
 	waitCommit(t, git, root)
@@ -425,7 +437,7 @@ func TestVersioningDebounce(t *testing.T) {
 	defer stop()
 
 	for _, v := range []string{"v1", "v2", "v3"} {
-		if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", v, nil); code != 200 {
+		if code, _, _ := do(t, "PUT", base+"/v1/blob/demo", v, nil); code != 204 {
 			t.Fatalf("PUT %s 返回 %d", v, code)
 		}
 	}
@@ -586,5 +598,37 @@ func TestPreconditionGuardIsSynthesized(t *testing.T) {
 	}
 	if strings.Contains(c[post:], "dp_precondition_check") {
 		t.Fatal("POST 路由声明了 without precondition，却仍有守卫")
+	}
+}
+
+// TestSuccessStatusProjected 锁住 B3：成功码由声明投影进生成的 dispatcher，
+// 且 204 分支既不设 Content-Type 也不写 body —— 204 的语义是「没有表示」。
+func TestSuccessStatusProjected(t *testing.T) {
+	prog := parseAll(t,
+		source{"contract.dlt", genSource(t, "../../../webapi/src/contract.dlt")},
+		source{"main.dlt", genSource(t, "../../../webapi/src/main.dlt")})
+	res := check.Program(prog)
+	if len(res.Errors) > 0 {
+		t.Fatalf("检查未通过：%v", res.Errors)
+	}
+	c, err := C(prog, res)
+	if err != nil {
+		t.Fatalf("生成失败：%v", err)
+	}
+	if n := strings.Count(c, "out->status = 204;"); n != 1 {
+		t.Fatalf("应恰好一条 204 路由，得到 %d", n)
+	}
+	if n := strings.Count(c, "out->status = 201;"); n != 1 {
+		t.Fatalf("应恰好一条 201 路由，得到 %d", n)
+	}
+	// 204 的块里不该出现 content_type 或 body 赋值。
+	start := strings.Index(c, "out->status = 204;")
+	end := strings.Index(c[start:], "return 0;")
+	if end < 0 {
+		t.Fatal("204 分支没有 return 0")
+	}
+	block := c[start : start+end]
+	if strings.Contains(block, "content_type") || strings.Contains(block, "out->body") {
+		t.Fatalf("204 分支不该有表示：%s", block)
 	}
 }

@@ -35,11 +35,11 @@
 | 快照 | 未限定 | `<key>.<unix>.<seq>`，每 key 只留最近 `DP_SNAPSHOT_KEEP` 份（默认 8，0 = 不轮转） | 不带 `seq` 时同秒两次写会互相覆盖；不轮转 72 h 堆约 8640 个文件 | 已完成 |
 | 传输安全 | 未限定 | 无 TLS，只有静态 `Bearer` token | 部署形态要求反代终结 TLS（IMPL-PLAN §7.3） | 不做 |
 
-**D2 起（v0.12）生效的偏差**：`Response` 类型被删掉之后，成功响应恒为 200
-（`Unit` 成功 = 200 + `Content-Length: 0`），**201 / 204 等暂时无法表达**。
-以前 `Response{status: 201}` 是能写的。D3 没有做这件事：它只把「路由」搬进声明，
-成功码的投影要另一张注解（`@created` / `@no_content`），按批准拆成 B3 单独一批；
-**206 需要 Range 解析，明确不在范围**。另外，tag 派生的错误响应一律**空 body**
+**成功码现状（v0.14 / D3-B3 之后）**：默认 200（`Unit` 成功 = 200 + `Content-Length: 0`），
+写路由可以用 `@created`（201）与 `@no_content`（204）投影别的码 —— 数字不进源码，
+源码里写的是"产出了新东西"或"没有表示"。`@no_content` 只能投在 `Unit` 成功类型上，
+读路由写这两个注解报 `E1`。**206（Partial Content）仍不支持**：它需要 Range 解析与
+分段表示，属于另一件事，明确不在范围。另外，tag 派生的错误响应一律**空 body**
 （405 与 412 因此都不带文本），要人类可读的错误文案需要新的错误表示（未排期）。
 
 ## 3. 工具链
@@ -48,7 +48,8 @@
 | --- | --- | --- | --- | --- |
 | 动词 | `check` / `mem` / `bench` / `explore` / `trace` / `verify` | `parse` / `check` / `build` / `contract`（+ `help`） | 让服务跑起来所需的最小子集 | D1 |
 | 错误码 | `E0`–`E12` | `E1`（类型与匹配）、`E2`（能力与签名）、`E3`（边界序列化）、`E11` + 语法号 `E0003`–`E0009` + 生成期 `E-GEN` | 没实现的检查不报假错误；生成期只剩结构形状类报错 | 随特性 |
-| 增量编译 | 未限定 | 每次全量重编 | 样例只有 92 行（`contract.dlt` 61 + `main.dlt` 31） | 不做 |
+| 增量编译 | 未限定 | 每次全量重编 | 样例只有 95 行（`contract.dlt` 64 + `main.dlt` 31） | 不做 |
+| 成功码 | 未限定（HTTP 面） | **已完成（v0.14）**：`@created` / `@no_content` 投影 201 / 204，默认 200；契约 JSON 导出 `success`（200 省略） | 以前只能恒 200（D2 删 `Response` 的代价）；恢复表达力的方式是声明上的注解，不是把状态码写回 handler | 已完成；206 不在范围 |
 | 契约 JSON | 含 `envs` 分组 | **已完成（v0.11）**：导出 `envs`（键名 / 类型 / 变量名 / 必填） | 曾因 checker 拒绝 env 而删掉该字段，`env` 落地后随之一并回来（`doc_test.go` 有断言） | 已完成 |
 
 ## 4. 一条跨阶段的老毛病：`check` 的保证比 `build` 弱
@@ -196,6 +197,14 @@ $B check .build/p.dlt   # 期望 E1: 写路由 put 必须显式表态预条件
 printf 'boundary Api @v1 {\n  get(key: str) -> bytes @get("/v1/x")\n    invariant "x"\n}\n' > .build/o.dlt
 $B check .build/o.dlt   # 期望 E1「却没有实现」（另有一条 env 缺失：路由让它成了服务形态）
 
-# 14 项边界行为（含 412 / 412 空 body / 405 / 413 / 501，以及 v0.10 起「405 的空 body 不带 ETag」）
+# @no_content 投在有 body 的路由上：期望 E1「204 不能有 body」
+printf 'env App {\n  port: u64 = 1,\n  bind: str = "127.0.0.1",\n  root: str = "/tmp",\n  token: str = "",\n  max_body: u64 = 1024\n}\n\ntype ApiError = NotFound\n\nboundary Api @v1 {\n  put(key: str, body: bytes) -> bytes @put("/v1/x") @no_content impl h with idempotency, precondition\n    invariant "x"\n}\n\nfn h(key: str, body: bytes, cfg: App) -> bytes | ApiError {\n  return b""\n}\n' > .build/r.dlt
+$B check .build/r.dlt
+
+# 成功码写进契约：期望恰好两条 "success"（put 204、create 201；其余方法省略，默认 200）
+$B contract code/webapi/src/contract.dlt code/webapi/src/main.dlt | grep -c '"success"'   # 期望 2
+
+# 17 项边界行为（含 412 / 412 空 body / 204 无 Content-Length / 201 / 405 / 413 / 501，
+# 以及 v0.10 起「405 的空 body 不带 ETag」）
 sh code/webapi/deploy/accept.sh
 ```

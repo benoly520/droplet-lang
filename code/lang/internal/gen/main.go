@@ -126,11 +126,13 @@ func (g *gen) serviceMain() {
 		}
 		g.line("    dp_R_%s _r = dp_f_%s(%s);", r.Fn, r.Fn, strings.Join(args, ", "))
 		g.line("    if (_r.tag != 0) { return (int)_r.tag; }")
-		g.line("    out->status = 200;")
-		g.line("    out->content_type = dp_str_lit(\"application/json\");")
-		if r.Ret != nil && r.Ret.Kind == check.KBytes {
-			// Unit 成功 = 200 + Content-Length: 0：out->body 已是零值。
-			g.line("    out->body = _r.u.ok;")
+		g.line("    out->status = %d;", r.Status)
+		if r.Status != 204 {
+			// 204 没有表示：不发 Content-Type，也不写 body（运行时也不发 Content-Length）。
+			g.line("    out->content_type = dp_str_lit(\"application/json\");")
+			if r.Ret != nil && r.Ret.Kind == check.KBytes {
+				g.line("    out->body = _r.u.ok;")
+			}
 		}
 		g.line("    return 0;")
 		g.line("  }")

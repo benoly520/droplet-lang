@@ -60,6 +60,17 @@ func TestWebapiContract(t *testing.T) {
 	if get.Verb != "GET" || get.Path != "/v1/blob" || get.Precondition || get.Impl != "blob_get" {
 		t.Fatalf("get 的路由没导出：%+v", get)
 	}
+	// 成功码也要进契约（B3）：默认 200 省略，写了注解才有值。
+	if get.Success != 0 {
+		t.Fatalf("没写成功码注解的方法不该导出 success：%+v", get)
+	}
+	status := map[string]int{}
+	for _, m := range b.Methods {
+		status[m.Name] = m.Success
+	}
+	if status["put"] != 204 || status["create"] != 201 {
+		t.Fatalf("成功码没导出：%v", status)
+	}
 	if len(get.Params) != 1 || get.Params[0].Name != "key" || get.Params[0].Type != "str" {
 		t.Fatalf("get 参数导出错：%+v", get.Params)
 	}

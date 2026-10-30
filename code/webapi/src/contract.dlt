@@ -37,6 +37,9 @@ host Versioning {
 // 写路由必须显式表态预条件：`with precondition`（进 handler 之前比对 If-Match），
 // 或 `without precondition: "理由"` —— 沉默等于默认不做并发保护，这与「错误不可丢弃」
 // 是同一条纪律：不放行"忘了写"。
+//
+// 成功码同样是投影：默认 200，`@created` → 201，`@no_content` → 204（数字永远不进源码，
+// 与错误变体 → 状态码共用同一条纪律）。204 没有表示，所以它只能投在没有 body 的成功类型上。
 boundary BlobApi @v1 {
   health() -> bytes
     @get("/health") impl health
@@ -47,7 +50,7 @@ boundary BlobApi @v1 {
     invariant "同一 key 的 GET 字节等于最近一次成功 PUT 的字节"
 
   put(key: str, body: bytes) -> Unit
-    @put("/v1/blob") impl blob_put with idempotency, precondition
+    @put("/v1/blob") @no_content impl blob_put with idempotency, precondition
     invariant "PUT 前必须存在上一版本快照"
 
   list() -> bytes
@@ -55,7 +58,7 @@ boundary BlobApi @v1 {
     invariant "清单来自目录，不来自任何注册表文件"
 
   create(key: str) -> Unit
-    @post("/v1/keys") impl keys_create with idempotency
+    @post("/v1/keys") @created impl keys_create with idempotency
     without precondition: "创建新 key 没有既有版本可比；同 key 重复创建由 create 自己报 409"
     invariant "POST 只在 key 不存在时成功"
 }

@@ -142,10 +142,13 @@ static void send_response(int fd, uint16_t status, const char* ct, dp_bytes body
   if (n < 0) {
     return;
   }
-  if (ct && n < (int)sizeof head) {
+  /* 204 没有表示：RFC 7230 明令不得带 Content-Length，Content-Type 也没有意义。
+   * 这条判断放在运行时而不是生成代码里 —— 它是状态码的定义，不是某条路由的选择。 */
+  int no_body = (status == 204u) || (status >= 100u && status < 200u);
+  if (!no_body && ct && n < (int)sizeof head) {
     n += snprintf(head + n, sizeof head - (size_t)n, "Content-Type: %s\r\n", ct);
   }
-  if (n < (int)sizeof head) {
+  if (!no_body && n < (int)sizeof head) {
     n += snprintf(head + n, sizeof head - (size_t)n, "Content-Length: %zu\r\n", body.n);
   }
   if (etag_safe(etag) && n < (int)sizeof head) {

@@ -86,6 +86,10 @@ func TestParseWebapiContract(t *testing.T) {
 	if !put.Idempotent || !put.Precondition || put.NoPrecondition {
 		t.Fatalf("put 的 idempotency / precondition 没解析：%+v", put)
 	}
+	// B3：成功码是声明的投影 —— put 写 @no_content（204），create 写 @created（201）。
+	if put.Status != 204 {
+		t.Fatalf("put 的成功码应为 204，得到 %d", put.Status)
+	}
 	// 读路由不该带 precondition，写路由必须显式表态（这里用 without 声明）。
 	var gotGet, gotCreate bool
 	for _, m := range prog.Items {
@@ -98,7 +102,7 @@ func TestParseWebapiContract(t *testing.T) {
 			case "get":
 				gotGet = x.Verb == "get" && !x.Precondition && !x.NoPrecondition
 			case "create":
-				gotCreate = x.Verb == "post" && x.NoPrecondition && x.NoPreconditionReason != ""
+				gotCreate = x.Verb == "post" && x.NoPrecondition && x.NoPreconditionReason != "" && x.Status == 201
 			}
 		}
 	}
@@ -304,5 +308,49 @@ func TestEntryNeedsBody(t *testing.T) {
 	_, err := File("t.dlt", "entry f() -> Unit\n  invariant \"x\"\n")
 	if err == nil || !strings.Contains(err.Error(), "必须有函数体") {
 		t.Fatalf("entry 缺函数体应报错，得到 %v", err)
+	}
+}
+
+// 成功码注解（B3）：@created / @no_content 是普通标识符后面不带括号，
+// 解析只负责落到 AST，合法性（能不能投、投给谁）留给 check。
+func TestParseSuccessAnnotations(t *testing.T) {
+	src := `boundary Api @v1 {
+  make(key: str) -> Unit @post("/v1/x") @created impl h with idempotency
+    invariant "x"
+
+  drop(key: str) -> Unit @delete("/v1/x") @no_content impl h with idempotency
+    invariant "y"
+}`
+	prog, err := File("t.dlt", src)
+	if err != nil {
+		t.Fatalf("解析失败：%v", err)
+	}
+	b := prog.Items[0].(*ast.BoundaryDecl)
+	if b.Methods[0].Status != 201 || b.Methods[1].Status != 204 {
+		t.Fatalf("成功码没解析出来：%d / %d", b.Methods[0].Status, b.Methods[1].Status)
+	}
+}
+
+func TestParseTwoSuccessAnnotationsRejected(t *testing.T) {
+	src := `boundary Api @v1 {
+  make(key: str) -> Unit @post("/v1/x") @created @no_content impl h
+    invariant "x"
+}`
+	if _, err := File("t.dlt", src); err == nil {
+		t.Fatal("两个成功码注解应当报错")
+	} else if !strings.Contains(err.Error(), "只能写一次") {
+		t.Errorf("错误信息缺少说明：%v", err)
+	}
+}
+
+func TestParseUnknownAnnotationRejected(t *testing.T) {
+	src := `boundary Api @v1 {
+  make(key: str) -> Unit @post("/v1/x") @accepted impl h
+    invariant "x"
+}`
+	if _, err := File("t.dlt", src); err == nil {
+		t.Fatal("不认识的注解应当报错")
+	} else if !strings.Contains(err.Error(), "@created") {
+		t.Errorf("错误信息应当列出可用注解：%v", err)
 	}
 }

@@ -105,7 +105,8 @@ while [ "$(date +%s)" -lt "$END" ]; do
 
   code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H "$A" \
     --data-binary "$BODY" "$U/v1/blob/$KEY" 2>/dev/null) || code=000
-  [ "$code" = 200 ] || fail "$KEY" "PUT=$code"
+  # put 声明了 @no_content（B3）：每轮的成功码就是 204，不是 200。
+  [ "$code" = 204 ] || fail "$KEY" "PUT=$code"
 
   got=$(curl -s -H "$A" "$U/v1/blob/$KEY" 2>/dev/null) || got=''
   [ "$got" = "$BODY" ] || fail "$KEY" "GET 内容不符"

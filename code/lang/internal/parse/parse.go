@@ -349,16 +349,37 @@ func (p *Parser) parseBoundary() ast.Item {
 		p.expect(token.Arrow, "->")
 		m.Ret = p.parseType()
 
-		// 路由（D3）：@get("/v1/blob")。动词不走关键字表（get 仍是普通标识符），
-		// 合法性在 check 里判 —— 词法层不该知道 HTTP 有哪些动词。
-		if p.at(token.At) {
-			p.advance()
-			verb := p.expectIdent("HTTP 动词（get / put / post / delete）")
-			p.expect(token.LParen, "(")
-			path := p.expect(token.Str, "路由路径（字符串字面量）")
-			p.expect(token.RParen, ")")
-			m.Verb = verb.Text
-			m.Path = path.Text
+		// 注解（D3）：@get("/v1/blob") 是路由，@created / @no_content 是成功码投影。
+		// 动词与成功码都不走关键字表（get / created 仍是普通标识符），
+		// 合法性在 check 里判 —— 词法层不该知道 HTTP 有哪些动词、哪些成功码能用。
+		for p.at(token.At) {
+			atPos := p.advance().Pos
+			name := p.expectIdent("路由动词或成功码注解（get / put / post / delete / created / no_content）")
+			if p.at(token.LParen) {
+				p.advance()
+				path := p.expect(token.Str, "路由路径（字符串字面量）")
+				p.expect(token.RParen, ")")
+				if m.Verb != "" {
+					p.fail(atPos, "E0003: 方法 %s 只能有一条路由（已有 @%s(%q)）", m.Name, m.Verb, m.Path)
+				}
+				m.Verb = name.Text
+				m.Path = path.Text
+				continue
+			}
+			// 无括号的注解：成功码投影。数字不进源码 —— 写 @created 而不是 201。
+			status := 0
+			switch name.Text {
+			case "created":
+				status = 201
+			case "no_content":
+				status = 204
+			default:
+				p.fail(name.Pos, "E0003: 不认识注解 @%s：只接受 @<动词>(\"/path\")、@created 与 @no_content", name.Text)
+			}
+			if m.Status != 0 {
+				p.fail(atPos, "E0003: 方法 %s 的成功码只能写一次", m.Name)
+			}
+			m.Status = status
 		}
 
 		// 实现：impl blob_put。`impl` 是普通标识符，只在方法头这个位置成立。
