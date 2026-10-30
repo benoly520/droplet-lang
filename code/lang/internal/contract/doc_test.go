@@ -201,3 +201,29 @@ func TestNilResult(t *testing.T) {
 		t.Fatalf("env 应照旧导出，得到 %+v", doc.Envs)
 	}
 }
+
+// TestIntentExprExport 锁定 requires / example 的表达式导出：契约消费方要看到
+// 规范形（括号按需、转义按词法表），而不是一段无法定位的原文。
+func TestIntentExprExport(t *testing.T) {
+	const src = `boundary Api @v1 {
+  probe(x: u64) -> bool requires x > 0 && (x + 1) < 10 example check(x!)
+}`
+	prog, err := parse.File("intent.dlt", src)
+	if err != nil {
+		t.Fatalf("解析失败：%v", err)
+	}
+	doc := Build(prog, nil)
+	if len(doc.Boundaries) != 1 || len(doc.Boundaries[0].Methods) != 1 {
+		t.Fatalf("boundary 导出错：%+v", doc.Boundaries)
+	}
+	intents := doc.Boundaries[0].Methods[0].Intents
+	if len(intents) != 2 {
+		t.Fatalf("期望 2 条意图，得到 %d", len(intents))
+	}
+	if intents[0].Kind != "requires" || intents[0].Expr != "x > 0 && (x + 1) < 10" {
+		t.Fatalf("requires 表达式导出错：%+v", intents[0])
+	}
+	if intents[1].Kind != "example" || intents[1].Expr != "check(x!)" {
+		t.Fatalf("example 表达式导出错：%+v", intents[1])
+	}
+}

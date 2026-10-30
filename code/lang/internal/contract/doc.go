@@ -12,6 +12,7 @@ import (
 
 	"droplet/internal/ast"
 	"droplet/internal/check"
+	"droplet/internal/print"
 	"droplet/internal/token"
 )
 
@@ -83,11 +84,12 @@ type Function struct {
 }
 
 // Intent 保留意图声明的原文，不做语义解释。
-// Text 是字符串原文，Names 是 `effects a, b` 里的标识符；
-// requires / example 的表达式暂不导出（没有表达式打印器）。
+// Text 是字符串原文，Names 是 `effects a, b` 里的标识符，
+// Expr 是 requires / example 表达式打印出的规范形（括号按需、转义按词法表）。
 type Intent struct {
 	Kind  string   `json:"kind"`
 	Text  string   `json:"text,omitempty"`
+	Expr  string   `json:"expr,omitempty"`
 	Names []string `json:"names,omitempty"`
 }
 
@@ -217,7 +219,12 @@ func fieldsOf(params []ast.Param) []Field {
 func intentsOf(items []ast.Intent) []Intent {
 	out := make([]Intent, 0, len(items))
 	for _, it := range items {
-		out = append(out, Intent{Kind: it.Kind, Text: it.Text, Names: it.Names})
+		out = append(out, Intent{
+			Kind:  it.Kind,
+			Text:  it.Text,
+			Expr:  print.Expr(it.Expr),
+			Names: it.Names,
+		})
 	}
 	return out
 }
