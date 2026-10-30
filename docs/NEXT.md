@@ -9,20 +9,20 @@
 
 ## 0. 现在的状态（截至 2026-10-30）
 
-- 本地 `main` = `5c69477`（`feat(lang): D1 变体构造`），本轮文档在它上面再压一条。
-  **`origin/main` 已经在 `90ccef3`** —— `b646400`（check.go 拆 8 文件 + 两条语法减法）与
-  `90ccef3` 都已推送；上一轮本文件写的「已提交、尚未推送」是错的（当时没真跑
-  `git log origin/main..main` 就下了结论），这轮的推送状态以那条命令为准。
-- `5c69477` 做的事：sum 变体能构造值了 —— 零字段 `T.V`、带载荷 `T.V { f: v }`，
-  `match` 能绑字段（`Square { side } => …`）；带字段的错误变体不再是偏差。
-  两条配套硬规则：**裸变体名仍然非法**（构造点必须看得见类型），
-  **变体名跨程序唯一**（tag 按名字全局分配，撞名在声明处报 `E1`）。
-  顺带按 H8 把 `gen/c.go`（798 → 826 破线）同包拆成 4 个文件。
-- 本轮已实测：`gofmt -l` 无输出、`go vet ./...` 无输出、**72 个用例全绿**、
-  `accept.sh` 12 项全通、`examples/shape.dlt` 编出来跑出 `wide`、
-  **`-print-c` / `contract` / `parse` 三份输出与拆分前逐字相同**（既有样例都不构造变体）
-- 上一轮的 60 s 压缩长稳（`SOAK_SECONDS=60 sh soak.sh`）退出码 0；本轮没重跑长稳，
-  因为它只动编译器的语法侧，`code/lang/internal/runtime/` 一个字节都没改
+- 本地 `main` = `012c0ea`（`chore(lang)`），本文件这条 docs(next) 再压在上面 ——
+  **共 5 条未推送，`origin/main` 仍在 `90ccef3`**（`git log --oneline origin/main..main` 实测）：
+  `5c69477` 变体构造 → `f71c50b` docs(next) → `d49e6a0` entry 扁平化 → `012c0ea` 注释清理 → docs(next)。
+- `d49e6a0` 做的事：入口从 `entry Name { fn f(…) }` 改成 `entry f(…)` —— 那层壳从不承载内容，
+  按 H7 删的是语法位置而不是写法：旧形状在 parse 就报 `E0006` 并给改写提示。
+  `EntryDecl` 这个 AST 节点整个删掉（入口 = 带 `Entry` 标记的 `FnDecl`），
+  `check`/`gen`/`contract`/`dump` 各少一个分支。顺带补两条漏着的护栏：多入口报 `E1`
+  （以前静默按 map 迭代顺序挑 EntryPoint）、`entry` 缺函数体报 `E0006`（以前拖到 `cc` 才炸）。
+- `012c0ea`：清掉上一轮 `check.go` 拆分留下的重复注释（纯注释，`-print-c` 逐字相同）。
+- 本轮已实测：`gofmt -l` 无输出、`go vet ./...` 无输出、**77 个用例全绿**、`accept.sh` 12 项全通、
+  `hello` 打出 `world`、`shape` 打出 `wide`、**旧编译器跑旧语法 / 新编译器跑新语法的三份 `-print-c` 逐字相同**
+  （hello 23 / shape 47 / blobd 133 行），`contract` JSON 只有入口的 `pos` 变了
+- 60 s 压缩长稳（`SOAK_SECONDS=60 sh soak.sh`）本轮重跑过，退出码 0（2 轮 0 失败、无残留）；
+  3 天长稳仍没做 —— 它需要一台常开的机器（见 §2 P0）
 
 ## 1. 新机器五分钟上手
 
@@ -30,7 +30,7 @@
 go version                                    # 需 ≥ 1.24（code/lang/go.mod 声明的最低版本）
 mkdir -p .build                               # 编译产物放这里，目录不会自动建
 cd code/lang && go build -o ../../.build/droplet ./cmd/droplet
-go test ./...                                 # 期望全部包 ok（共 72 个用例）
+go test ./...                                 # 期望全部包 ok（共 77 个用例）
 ```
 
 还需要 `cc`（gcc 或 clang，编译器以 `-std=c11` 调用它）。
@@ -50,7 +50,7 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 ```sh
 .build/droplet check code/webapi/src/contract.dlt code/webapi/src/main.dlt
 # 实测输出：ok: 9 项声明，1 个函数，入口 handle
-# （EntryPoint 报的是 entry 里的函数名，不是 entry 名 Serve）
+# （v0.9 之后入口就是那个函数本身，不再有外层的壳名）
 ```
 
 ## 2. 待办
@@ -64,21 +64,19 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 
 ### P1 · D1 设计项（**需要点头**）
 
-- **`entry` 扁平化**：2 个 `entry`（`Demo` / `Serve`）各带 1 个永不承载内容的 `fn` 外壳
 - **删 `Response.etag`**：它可由 body 推导（GET 路径已经在算同一个 hash），现为 5 处构造里 4 处写 `""`
 - **`env` 一等特性**：现在 `check` 直接拒（`E1`），配置走环境变量
-- 三条都是 H7 基线里剩下未还的账，见 [IMPL-PLAN §8.2](IMPL-PLAN.md)；判据是 H7 实测归零 +
-  72 用例与 `accept.sh` 全通 + 旧写法报错带改写提示
-- 已定顺序：`entry` 扁平化 → 删 `Response.etag` → `env`（先删冗余语法位置，
-  `env` 放最后因为它要跟 `contract` 的 `envs` 分组一起回来）
+- 两条都是 H7 基线里剩下未还的账，见 [IMPL-PLAN §8.2](IMPL-PLAN.md)；判据是 H7 实测归零 +
+  77 用例与 `accept.sh` 全通 + 旧写法报错带改写提示
+- 已定顺序：删 `Response.etag` → `env`（`env` 放最后因为它要跟 `contract` 的 `envs` 分组一起回来）
 - **新解锁的一条**：412 条件失败可以改回「错误是值」了 —— handler 返回 `ApiError.Conflict`，
   同时删掉 `rt_http.c` 里自带的 If-Match 比对。以前它在语言侧表达不出来（构造不出错误值），
   变体构造落地后障碍消失。这条动了 HTTP 语义与运行时，**要单独点头**，也意味着要重跑长稳
 
 ## 3. 等你拍板的两件事
 
-1. 现在本地攒了 2 条未推送（D1 变体构造 + 本轮文档）：`git push`，
-   还是继续攒到 D1 第二项（`entry` 扁平化）？
+1. 现在本地攒了 5 条未推送（变体构造 + docs(next) + entry 扁平化 + 注释清理 + docs(next)）：`git push`，
+   还是继续攒到 D1 第三项（删 `Response.etag`）？
 2. `.build/verify.sh` 要不要提升为入库脚本 `code/webapi/deploy/verify-docs.sh`
    （它把 IMPL-PLAN §6 的复核命令整段跑一遍，现在只在被 gitignore 的目录里）？
 
@@ -106,6 +104,19 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 - 语法侧再加构造类特性前先估行数：`gen/c.go` 曾因变体构造从 798 涨到 826，**破 H8 的 800 线**，
   只能同包拆文件（见 IMPL-PLAN §8.3 的 D1 追加）。拆分与加语法可以放同一条提交，
   但 `-print-c` 逐字相同的证据要在拆分完成、既有样例仍不使用新语法时取
+- **同一个文件不要混用编辑工具与外部脚本**：`gen/c.go` 上轮已由 python 拆成 4 个文件，
+  本轮又用 `SearchReplace` 改它 —— 编辑器递上去的是**拆分前的旧缓冲区**，826 行的整份版本被写回，
+  表现为一堆 `redeclared`。恢复用 `git checkout -- <file>`，之后这个文件一律用脚本改到底
+- 批量改写 `*_test.go` 里的 raw string 时，别把「闭合行」定成**整行恰好是 `}`**：
+  `…})` 这种收尾会被跳过，脚本一路扫到 Go 函数自己的 `}`，把 `expectOne(…)` 与函数尾一起吃掉
+  （本轮坏了 6 个文件）。要用 `startswith(col + "}")` + 把余下内容当尾巴接回，
+  并加两条断言：body 内恰好一个 `fn`、末行必须以 `}` 结尾
+- 同一份文档里「先改写旧探针、再插入新探针」的顺序不能倒，且**给旧写法留样本**：
+  D0-DEVIATIONS §6 的 i.dlt 就是要用 `entry Demo { fn … }` 被 E0006 拒掉，它不能被自己的批量改写误伤；
+  本轮第一条脚本因为一个锚点 `count == 0` 直接 abort，整个文件未写入（幸好 raise 得早，没写出半改状态）
+- **后台 / 非交互 shell 里的 `go` 不是同一个**：它会解析到 `/usr/bin/go`（1.22），
+  `go build` 直接报 `go.mod requires go >= 1.24（GOTOOLCHAIN=local）`。跑长稳、跑后台任务先
+  `export PATH=/home/monom/sdk/go1.24/bin:$PATH`
 
 ## 5. 文档地图
 
