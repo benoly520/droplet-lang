@@ -87,8 +87,6 @@ type FnSig struct {
 	Ret        *Type
 	Host       string // 所属 host 名；普通函数为空
 	IsEntry    bool
-	IsService  bool // 服务形态：带 Request 参数且返回 Response | 错误
-	ReqIdx     int  // Request 参数在 Params 里的下标，非服务形态为 -1
 	Decl       *ast.FnDecl
 }
 

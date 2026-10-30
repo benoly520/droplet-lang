@@ -43,12 +43,22 @@ func TestWebapiContract(t *testing.T) {
 	if b.Name != "BlobApi" || b.Version != 1 {
 		t.Fatalf("boundary 身份错：%s @v%d", b.Name, b.Version)
 	}
-	if len(b.Methods) != 3 {
-		t.Fatalf("期望 3 个方法，得到 %d", len(b.Methods))
+	// D3：契约里现在是 5 条路由（含以前根本没声明的 /health 与 POST /v1/keys）。
+	if len(b.Methods) != 5 {
+		t.Fatalf("期望 5 个方法，得到 %d", len(b.Methods))
 	}
-	get := b.Methods[0]
+	var get Method
+	for _, m := range b.Methods {
+		if m.Name == "get" {
+			get = m
+		}
+	}
 	if get.Name != "get" || get.Ret != "bytes" || !get.Idempotent {
 		t.Fatalf("get 方法导出错：%+v", get)
+	}
+	// 路由三件事必须进契约：动词、路径、预条件。
+	if get.Verb != "GET" || get.Path != "/v1/blob" || get.Precondition || get.Impl != "blob_get" {
+		t.Fatalf("get 的路由没导出：%+v", get)
 	}
 	if len(get.Params) != 1 || get.Params[0].Name != "key" || get.Params[0].Type != "str" {
 		t.Fatalf("get 参数导出错：%+v", get.Params)
@@ -57,20 +67,24 @@ func TestWebapiContract(t *testing.T) {
 		t.Fatalf("get 意图导出错：%+v", get.Intents)
 	}
 
-	var entry *Function
+	// 服务形态没有入口函数（D3）：入口是路由表，函数只是实现。
 	for i := range doc.Functions {
 		if doc.Functions[i].Entry {
-			entry = &doc.Functions[i]
+			t.Fatalf("服务形态不该导出 entry：%+v", doc.Functions[i])
 		}
 	}
-	if entry == nil || entry.Name != "handle" {
-		t.Fatalf("没找到入口函数 handle：%+v", doc.Functions)
+	// 实现函数的 host 组要照样导出：blob_get 要 BlobFs，str / App 都不是 host。
+	var impl *Function
+	for i := range doc.Functions {
+		if doc.Functions[i].Name == "blob_get" {
+			impl = &doc.Functions[i]
+		}
 	}
-	// 参数里的 BlobFs / Versioning 是 host 组，str 不是。v0.10 起入口不再要 Sys：
-	// 它原本只为算 ETag 而存在，而 ETag 现在由运行时从 body 推导。
-	if len(entry.Hosts) != 2 || entry.Hosts[0] != "BlobFs" ||
-		entry.Hosts[1] != "Versioning" {
-		t.Fatalf("host 列表错：%v", entry.Hosts)
+	if impl == nil {
+		t.Fatal("契约里找不到实现函数 blob_get")
+	}
+	if len(impl.Hosts) != 1 || impl.Hosts[0] != "BlobFs" {
+		t.Fatalf("host 列表错：%v", impl.Hosts)
 	}
 }
 
@@ -163,7 +177,7 @@ entry f() -> Unit
 
 // TestNilResult 允许只给语法树：此时没有 tag 表，但签名照旧导出。
 func TestNilResult(t *testing.T) {
-	prog, _ := load(t, "../../../webapi/src/contract.dlt")
+	prog, _ := load(t, "../../../webapi/src/contract.dlt", "../../../webapi/src/main.dlt")
 	doc := Build(prog, nil)
 	if len(doc.Tags) != 0 {
 		t.Fatalf("res 为 nil 时不该有 tag，得到 %d 条", len(doc.Tags))

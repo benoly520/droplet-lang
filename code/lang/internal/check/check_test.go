@@ -54,8 +54,22 @@ func TestWebapiPasses(t *testing.T) {
 	if len(res.Errors) != 0 {
 		t.Fatalf("示例服务应有 0 个错误，实际：%v", res.Errors)
 	}
-	if res.EntryPoint != "handle" {
-		t.Errorf("入口为 %q，期望 handle", res.EntryPoint)
+	// 服务形态没有 entry：入口就是 boundary 合成的路由表（D3），
+	// 五条路由与运行时实际服务的一致（契约不再是残缺事实）。
+	if res.EntryPoint != "" {
+		t.Errorf("服务形态不该有 entry，得到 %q", res.EntryPoint)
+	}
+	want := map[string]bool{
+		"GET /health": true, "GET /v1/blob": true, "PUT /v1/blob": true,
+		"GET /v1/keys": true, "POST /v1/keys": true,
+	}
+	if len(res.Routes) != len(want) {
+		t.Fatalf("路由数 %d，期望 %d：%+v", len(res.Routes), len(want), res.Routes)
+	}
+	for _, r := range res.Routes {
+		if !want[r.Verb+" "+r.Path] {
+			t.Errorf("多出路由 %s %s", r.Verb, r.Path)
+		}
 	}
 }
 
@@ -414,24 +428,37 @@ const fullEnv = `env App {
 
 `
 
+// svcTypes 是服务形态的最小骨架（D3 起服务形态由 boundary 的路由表定义）：
+// 一条 GET 路由 + 它的实现。路由必须显式写 @动词("/路径") 与 impl。
 const svcTypes = `type ApiError = NotFound
 
-type Request { method: str }
+boundary Api @v1 {
+  get(key: str) -> bytes @get("/v1/x") impl h_get with idempotency
+    invariant "同一 key 读到同一份字节"
+}
+
+fn h_get(key: str) -> bytes | ApiError {
+  return b""
+}
 
 `
 
 func TestEnvAccepted(t *testing.T) {
-	// 正例：补齐五键 + 入口拿 cfg，零错误，且配置面进了 Result.Env 供生成器与契约用。
-	res := checkSrc(t, fullEnv+svcTypes+`entry handle(req: Request, cfg: App) -> bytes | ApiError
-  invariant "一律 405"
-{
-  return b""
-}`)
+	// 正例：补齐五键 + 一条路由，零错误；配置面与路由表都要进 Result，
+	// 因为生成器与契约导出读的是同一张表（D3）。
+	res := checkSrc(t, fullEnv+svcTypes)
 	if len(res.Errors) != 0 {
 		t.Fatalf("期望 0 个错误，实际：%v", res.Errors)
 	}
 	if res.Env == nil || len(res.Env.Keys) != 5 || res.Env.Prefix != "APP" {
 		t.Fatalf("Result.Env 不完整：%+v", res.Env)
+	}
+	if len(res.Routes) != 1 || res.Routes[0].Verb != "GET" || res.Routes[0].Path != "/v1/x" ||
+		res.Routes[0].Fn != "h_get" {
+		t.Fatalf("Result.Routes 不对：%+v", res.Routes)
+	}
+	if len(res.Routes[0].Slots) != 1 || res.Routes[0].Slots[0] != "key" {
+		t.Fatalf("路由的参数绑定不对：%+v", res.Routes[0])
 	}
 }
 
@@ -447,11 +474,7 @@ func TestEnvOnCliEntryRejected(t *testing.T) {
 
 func TestServiceRequiresEnv(t *testing.T) {
 	// 以前服务可以从内置默认值起服务（token 缺失 = 不鉴权），现在不行。
-	res := checkSrc(t, svcTypes+`entry handle(req: Request) -> bytes | ApiError
-  invariant "一律 405"
-{
-  return b""
-}`)
+	res := checkSrc(t, svcTypes)
 	expectOne(t, res, "E1", "服务必须声明 env 块")
 }
 
@@ -463,11 +486,7 @@ func TestEnvMissingRuntimeKey(t *testing.T) {
   max_body: u64 = 1024
 }
 
-`+svcTypes+`entry handle(req: Request, cfg: App) -> bytes | ApiError
-  invariant "一律 405"
-{
-  return b""
-}`)
+`+svcTypes)
 	expectOne(t, res, "E1", "缺配置键 root")
 }
 
@@ -481,11 +500,7 @@ func TestEnvBadKeyType(t *testing.T) {
   banner: bytes
 }
 
-`+svcTypes+`entry handle(req: Request, cfg: App) -> bytes | ApiError
-  invariant "一律 405"
-{
-  return b""
-}`)
+`+svcTypes)
 	expectOne(t, res, "E1", "只接受 u64 与 str")
 }
 
@@ -498,11 +513,7 @@ func TestEnvDefaultShapeMismatch(t *testing.T) {
   max_body: u64 = 1024
 }
 
-`+svcTypes+`entry handle(req: Request, cfg: App) -> bytes | ApiError
-  invariant "一律 405"
-{
-  return b""
-}`)
+`+svcTypes)
 	expectOne(t, res, "E1", "默认值却是 字符串字面量")
 }
 
@@ -516,23 +527,13 @@ func TestEnvRuntimeKeyType(t *testing.T) {
   max_body: u64 = 1024
 }
 
-`+svcTypes+`entry handle(req: Request, cfg: App) -> bytes | ApiError
-  invariant "一律 405"
-{
-  return b""
-}`)
+`+svcTypes)
 	expectOne(t, res, "E1", "配置键 port 必须是 u64")
 }
 
 func TestEnvNotConstructible(t *testing.T) {
 	// 配置的值来自启动环境：源码里能写 App{…} 就等于把部署事实硬编码进二进制。
-	res := checkSrc(t, fullEnv+svcTypes+`entry handle(req: Request) -> bytes | ApiError
-  invariant "一律 405"
-{
-  return b""
-}
-
-fn mk() -> App
+	res := checkSrc(t, fullEnv+svcTypes+`fn mk() -> App
   invariant "无"
 {
   return App{port: 1, bind: "x", root: "/tmp", token: "", max_body: 2}
@@ -545,65 +546,11 @@ func TestEnvTwoBlocksRejected(t *testing.T) {
   port: u64 = 1
 }
 
-`+svcTypes+`entry handle(req: Request, cfg: App) -> bytes | ApiError
-  invariant "一律 405"
-{
-  return b""
-}`)
+`+svcTypes)
 	expectOne(t, res, "E1", "env 块只能有一个")
 }
 
-func TestServiceUnboundParamRejected(t *testing.T) {
-	// 锁住 v0.11 消灭的那条位置魔法：以前 entry 里第一个 str 参数会被默默当 root。
-	res := checkSrc(t, fullEnv+svcTypes+`entry handle(req: Request, cfg: App, root: str) -> bytes | ApiError
-  invariant "一律 405"
-{
-  return b""
-}`)
-	expectOne(t, res, "E1", "无法绑定")
-}
-
-// ---------- D2：成功即值（R1 / R3）----------
-
-func TestServiceSuccessMustBeValue(t *testing.T) {
-	// R1：服务入口的成功类型只能是 bytes / Unit。Response 记录不再是「可选写法」，
-	// 而是 check 期错误；提示要说清它在语言里等于什么。
-	res := checkSrc(t, fullEnv+`type ApiError = NotFound
-
-type Request { method: str }
-
-type Response {
-  status: u64,
-  body: bytes
-}
-
-entry handle(req: Request, cfg: App) -> Response | ApiError
-  invariant "一律 405"
-{
-  return Response{status: 405, body: b""}
-}`)
-	if len(res.Errors) != 1 {
-		t.Fatalf("期望 1 条错误，实际 %d：%v", len(res.Errors), res.Errors)
-	}
-	msg := res.Errors[0].Msg
-	for _, want := range []string{"成功类型必须是 bytes 或 Unit", "在本语言里就是"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("消息 %q 不含 %q", msg, want)
-		}
-	}
-}
-
-func TestServiceResultMustBeUnion(t *testing.T) {
-	// 没有错误项的入口无法表达失败：错误必须显式，不能靠运行时兜底。
-	res := checkSrc(t, fullEnv+`type Request { method: str }
-
-entry handle(req: Request, cfg: App) -> bytes
-  invariant "一律 405"
-{
-  return b"ok"
-}`)
-	expectOne(t, res, "E1", "必须返回 `bytes | 错误`")
-}
+// ---------- D3：boundary 合成为路由表 ----------
 
 func TestBareReturnUnitValues(t *testing.T) {
 	// R3：Unit 与 bytes 的单位值都可以裸 `return`（后者是空 body）。

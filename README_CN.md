@@ -6,7 +6,7 @@
 
 Droplet 只优化一件事：**让 AI 的错误无法保持沉默，让验证便宜到代理真的会去跑。** 不是"造一门更安全、更抽象、更优雅的语言"，而是造一门错误藏不住、检查以毫秒计、运行时轻到能塞进最小生产实例的语言。
 
-> **状态：D0 已实现；D1 四项与 D2 三项已全部落地 ——** D1 落了「变体构造」（`T.V` / `T.V { … }`）、「`entry` 扁平化」（入口就是一个用 `entry` 声明的函数，不再有 `{ fn … }` 壳）、「删 `Response.etag`」（ETag 头由运行时从 body 推导，handler 不再书写）与「`env` 类型化配置」（一个 `env App { … }` 块成为一个 record 类型，handler 以 `cfg` 收到它；必填键缺失即在启动瞬间失败而非部署时才炸，源码里永不出现环境变量名）。D2 把 `Response` 这个类型整个删掉了：**成功就是一个值** —— entry 返回 `bytes`（带 body）或 `Unit`（不带），空 `return` 就是返回类型的 unit 值，而 HTTP 状态码只活在「错误变体 → 状态」这张表里（`NotFound`→404、`NotAllowed`→405、`PreconditionFailed`→412……）。写 `Response{status: 200, body: X}` 现在是 `check` 期的一条 `E1`，它告诉你那*就是* `X`。** 一个 88 行的示例服务（契约 + 入口）能编成 C11 二进制，以不到 2 MB 常驻内存启动并讲 HTTP/1.1；95 个 Go 测试覆盖 lexer、parser、checker、生成器、host 能力签名、运行时死代码审计、错误编号与运行时常量的一致性、AST 转储与契约导出。已实现的语言仍是设计的**有偏子集**，每一处缺口（密钥不透明类型、feature flag 生命周期……）都带原因与补齐里程碑，见 [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md)。完整提案见 [docs/SPEC.md](docs/SPEC.md)（§0 范式定位、§5.9 设计模式与 OOP 取舍、§5.10 意图一等公民、§7.8 收敛判据、§9 生产资源预算、附录 C 设计包袱自审）。英文版见 [README.md](README.md)。当前进度与下一步见 [docs/NEXT.md](docs/NEXT.md)。
+> **状态：D0 已实现；D1 四项、D2 三项与 D3 前两件已全部落地 ——** D1 落了「变体构造」（`T.V` / `T.V { … }`）、「`entry` 扁平化」（入口就是一个用 `entry` 声明的函数，不再有 `{ fn … }` 壳）、「删 `Response.etag`」（ETag 头由运行时从 body 推导，handler 不再书写）与「`env` 类型化配置」（一个 `env App { … }` 块成为一个 record 类型，handler 以 `cfg` 收到它；必填键缺失即在启动瞬间失败而非部署时才炸，源码里永不出现环境变量名）。D2 把 `Response` 这个类型整个删掉了：**成功就是一个值** —— entry 返回 `bytes`（带 body）或 `Unit`（不带），空 `return` 就是返回类型的 unit 值，而 HTTP 状态码只活在「错误变体 → 状态」这张表里（`NotFound`→404、`NotAllowed`→405、`PreconditionFailed`→412……）。写 `Response{status: 200, body: X}` 现在是 `check` 期的一条 `E1`，它告诉你那*就是* `X`。 D3 让 `boundary` 成为 HTTP 面的唯一事实源：方法上写 `@<动词>("/路径") impl <函数>`，**路由表就是服务入口**（再有 `entry` 会报错），每条写路由必须表态预条件 —— `with precondition` 或 `without precondition: "理由"`，沉默不写就是编译错误。生成的守卫调用运行时唯一的 `dp_precondition_check`，原先躺在 HTTP 层的那 22 行 If-Match 比对随之删除，412 的响应体统一为空。** 一个 92 行的示例服务（契约 + 实现）能编成 C11 二进制，以不到 2 MB 常驻内存启动并讲 HTTP/1.1；106 个 Go 测试覆盖 lexer、parser、checker、生成器、host 能力签名、运行时死代码审计、错误编号与运行时常量的一致性、AST 转储与契约导出。已实现的语言仍是设计的**有偏子集**，每一处缺口（密钥不透明类型、feature flag 生命周期……）都带原因与补齐里程碑，见 [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md)。完整提案见 [docs/SPEC.md](docs/SPEC.md)（§0 范式定位、§5.9 设计模式与 OOP 取舍、§5.10 意图一等公民、§7.8 收敛判据、§9 生产资源预算、附录 C 设计包袱自审）。英文版见 [README.md](README.md)。当前进度与下一步见 [docs/NEXT.md](docs/NEXT.md)。
 
 ## 快速开始
 
@@ -26,7 +26,7 @@ curl -s -X PUT -H 'Authorization: Bearer t' --data 'hello' localhost:8787/v1/blo
 curl -s        -H 'Authorization: Bearer t' localhost:8787/v1/blob/demo              # hello
 ```
 
-`sh code/webapi/deploy/accept.sh` 跑 13 项边界验收（412 / 405 / 413 / 501 / 推导的 ETag …）；`sh code/webapi/deploy/soak.sh` 是长时间泄漏观测。
+`sh code/webapi/deploy/accept.sh` 跑 14 项边界验收（412 且空 body / 405 / 413 / 501 / 推导的 ETag …）；`sh code/webapi/deploy/soak.sh` 是长时间泄漏观测。
 
 ## 核心想法
 

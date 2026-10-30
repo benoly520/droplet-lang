@@ -8,14 +8,6 @@ type ETag {
 // 改顺序就得同步改 rt.h 的 DP_ERR_*（由 gen 的 TestErrTagsMatchRuntime 把守）。
 type ApiError = NotFound | BadRequest | IoError | Conflict | NotAllowed | PreconditionFailed
 
-type Request {
-  method: str,
-  path: str,
-  key: str,
-  body: bytes,
-  if_match: str
-}
-
 // 服务底座配置：键名与类型固定（运行时按这五个键服务），默认值就写在声明里。
 // 源码里不出现环境变量名：读取面由块名推出，root → APP_ROOT。
 // token 的空默认值是**显式书写**的：不鉴权这件事写在代码里，部署时只能补上、不能抹掉。
@@ -39,13 +31,31 @@ host Versioning {
   fn commit_soon(str, str) -> Unit
 }
 
+// 服务形态的入口就是这张表（D3）：`@get("/v1/blob")` 是对外路由（动词与路径都写出来，
+// 不从方法名推），`impl blob_get` 指明实现函数。契约与实现因此对不上就会编译失败。
+//
+// 写路由必须显式表态预条件：`with precondition`（进 handler 之前比对 If-Match），
+// 或 `without precondition: "理由"` —— 沉默等于默认不做并发保护，这与「错误不可丢弃」
+// 是同一条纪律：不放行"忘了写"。
 boundary BlobApi @v1 {
-  get(key: str) -> bytes with idempotency
+  health() -> bytes
+    @get("/health") impl health
+    invariant "探活不鉴权，恒回一行 ok"
+
+  get(key: str) -> bytes
+    @get("/v1/blob") impl blob_get with idempotency
     invariant "同一 key 的 GET 字节等于最近一次成功 PUT 的字节"
 
-  put(key: str, body: bytes) -> ETag with idempotency
+  put(key: str, body: bytes) -> Unit
+    @put("/v1/blob") impl blob_put with idempotency, precondition
     invariant "PUT 前必须存在上一版本快照"
 
-  list() -> bytes with idempotency
+  list() -> bytes
+    @get("/v1/keys") impl keys_list with idempotency
     invariant "清单来自目录，不来自任何注册表文件"
+
+  create(key: str) -> Unit
+    @post("/v1/keys") impl keys_create with idempotency
+    without precondition: "创建新 key 没有既有版本可比；同 key 重复创建由 create 自己报 409"
+    invariant "POST 只在 key 不存在时成功"
 }

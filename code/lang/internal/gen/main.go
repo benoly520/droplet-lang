@@ -14,6 +14,11 @@ import (
 // ---------- main ----------
 
 func (g *gen) main() {
+	// 服务形态由 boundary 的路由表定义（D3）：有路由就没有 entry，反之亦然。
+	if len(g.res.Routes) > 0 {
+		g.serviceMain()
+		return
+	}
 	sig := g.res.Sigs[g.res.EntryPoint]
 	if sig == nil {
 		// 无入口的程序（如只有契约与工具函数）：仍引用全部函数，
@@ -24,11 +29,6 @@ func (g *gen) main() {
 		}
 		g.line("  return 0;")
 		g.line("}")
-		return
-	}
-
-	if sig.IsService {
-		g.serviceMain(sig, sig.ReqIdx)
 		return
 	}
 	g.cliMain(sig)
@@ -80,80 +80,64 @@ func (g *gen) cliMain(sig *check.FnSig) {
 	g.line("}")
 }
 
-// Request 字段 → dp_request 字段。不在表里的字段无法从 HTTP 请求填充。
-var requestFields = map[string]string{
-	"method":        "rq->method",
-	"path":          "rq->path",
-	"key":           "rq->key",
-	"query":         "rq->query",
-	"authorization": "rq->authorization",
-	"if_match":      "rq->if_match",
-	"body":          "rq->body",
-}
-
-// serviceMain 生成 HTTP 服务形态：entry 函数成为请求处理器，main 交给 dp_serve。
+// serviceMain 生成 HTTP 服务形态：入口是 boundary 合成的路由表（D3 / IMPL-PLAN §8.5）。
 //
-// 成功即值（D2 / R1）：成功类型是 bytes（有体）或 Unit（无体），成功恒 200；
-// 状态码只在「错误变体 → 状态码」的表里出现（rt_http.c 的 status_for_tag），
-// 于是 handler 里没有可写的状态码，也没有可构造的响应记录。
-func (g *gen) serviceMain(sig *check.FnSig, reqIdx int) {
-	reqType := sig.Params[reqIdx]
-	if sig.Ret == nil || sig.Ret.Kind != check.KUnion || len(sig.Ret.Items) < 2 {
-		g.failf(token.Pos{}, "entry %s 用于服务时必须返回 `bytes | 错误` 或 `Unit | 错误`", sig.Name)
-		return
-	}
-	// check 已经限定过（check/env.go 的 checkServiceResult），这里是兜底：
-	// 生成期再判一次，保证「生成器不会发出它自己不懂的响应」。
-	ok := sig.Ret.Items[0]
-	if ok.Kind != check.KBytes && ok.Kind != check.KUnit {
-		g.failf(token.Pos{}, "entry %s 的成功类型必须是 bytes 或 Unit，得到 %s", sig.Name, ok.Name)
-		return
-	}
-
+// 每个方法一条 `if (method == X && path == Y)`，守卫在调用实现之前跑：
+// 条件请求（with precondition）由生成的守卫调运行时那一处实现（dp_precondition_check），
+// handler 不参与；成功恒 200，状态码仍只在错误变体 → 状态码的表里出现（D2 的 R1/R2）。
+func (g *gen) serviceMain() {
 	// 配置先于处理器：静态 g_cfg 与加载器要出现在使用它之前，C 没有提升声明。
 	g.cfgLoader()
 	g.line("static int dp_serve_handle(dp_arena* a, const dp_request* rq, dp_response* out) {")
-
-	// 从 dp_request 构造 Request
-	g.line("  dp_T_%s v_req = {0};", reqType.Name)
-	for _, f := range reqType.Fields {
-		src, ok := requestFields[f.Name]
-		if !ok {
-			g.failf(token.Pos{}, "Request.%s 无法从 HTTP 请求填充", f.Name)
-			continue
+	for _, r := range g.res.Routes {
+		g.line("  if (dp_str_eq(rq->method, dp_str_lit(\"%s\")) && dp_str_eq(rq->path, dp_str_lit(\"%s\"))) {",
+			r.Verb, r.Path)
+		if r.Precondition {
+			// 预条件是「进 handler 之前」的事实：与 key 合法性同级，取消它要改声明。
+			g.line("    int _pc = dp_precondition_check(a, g_cfg.m_root, rq->key, rq->if_match);")
+			g.line("    if (_pc != 0) { return _pc; }")
 		}
-		g.line("  v_req.m_%s = %s;", f.Name, src)
+		sig := g.res.Sigs[r.Fn]
+		if sig == nil {
+			g.failf(token.Pos{}, "路由 %s %s 的实现 %s 不存在", r.Verb, r.Path, r.Fn)
+			return
+		}
+		args := []string{"a"}
+		for i, p := range sig.Params {
+			switch {
+			case i < len(r.Slots):
+				switch r.Slots[i] {
+				case "key":
+					args = append(args, "rq->key")
+				case "body":
+					args = append(args, "rq->body")
+				default:
+					g.failf(token.Pos{}, "boundary 参数 %s 没有生成期绑定规则", r.Slots[i])
+					return
+				}
+			case p.Kind == check.KHost:
+				// 能力不传值：调用点直接内联到 dp_blob_* / dp_ver_*（见 §5.3）。
+			case p.IsEnv:
+				args = append(args, "g_cfg")
+			default:
+				g.failf(token.Pos{}, "实现 %s 的参数 %s 无法绑定", r.Fn, sig.ParamNames[i])
+				return
+			}
+		}
+		g.line("    dp_R_%s _r = dp_f_%s(%s);", r.Fn, r.Fn, strings.Join(args, ", "))
+		g.line("    if (_r.tag != 0) { return (int)_r.tag; }")
+		g.line("    out->status = 200;")
+		g.line("    out->content_type = dp_str_lit(\"application/json\");")
+		if r.Ret != nil && r.Ret.Kind == check.KBytes {
+			// Unit 成功 = 200 + Content-Length: 0：out->body 已是零值。
+			g.line("    out->body = _r.u.ok;")
+		}
+		g.line("    return 0;")
+		g.line("  }")
 	}
-
-	// 其余参数：host 能力由运行时提供（生成期跳过），env 类型注入加载好的配置，
-	// 其他形状在 checker 里已被拦住（见 check/env.go 的绑定规则）。
-	args := []string{"a"}
-	for i, p := range sig.Params {
-		if p.Kind == check.KHost {
-			continue
-		}
-		if i == reqIdx {
-			args = append(args, "v_req")
-			continue
-		}
-		if p.IsEnv {
-			args = append(args, "g_cfg")
-			continue
-		}
-		name := "v_" + sig.ParamNames[i]
-		g.line("  %s %s = {0};", cType(p), name)
-		args = append(args, name)
-	}
-
-	g.line("  dp_R_%s _r = dp_f_%s(%s);", sig.Name, sig.Name, strings.Join(args, ", "))
-	g.line("  if (_r.tag != 0) { return (int)_r.tag; }")
-	g.line("  out->status = 200;")
-	g.line("  out->content_type = dp_str_lit(\"application/json\");")
-	if ok.Kind == check.KBytes {
-		// Unit 成功 = 200 + Content-Length: 0：out->body 已是零值。
-		g.line("  out->body = _r.u.ok;")
-	}
-	g.line("  return 0;")
+	// 没有命中任何路由：405。这条兜底以前写在 handler 的 if-chain 末尾，
+	// 现在长在生成的 dispatcher 里 —— 它不属于任何一条路由，就不该由某条路由实现。
+	g.line("  return (int)DP_ERR_NOT_ALLOWED;")
 	g.line("}")
 	g.line("")
 	g.line("int main(void) {")

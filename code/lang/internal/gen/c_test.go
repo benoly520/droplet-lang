@@ -105,8 +105,10 @@ func TestHelloBuildsAndPrintsWorld(t *testing.T) {
 }
 
 func TestContractTypeMapping(t *testing.T) {
-	src := genSource(t, "../../../webapi/src/contract.dlt")
-	prog := parseAll(t, source{"contract.dlt", src})
+	// 契约与实现要一起过检查：`impl <fn>` 的实现函数住在 main.dlt。
+	prog := parseAll(t,
+		source{"contract.dlt", genSource(t, "../../../webapi/src/contract.dlt")},
+		source{"main.dlt", genSource(t, "../../../webapi/src/main.dlt")})
 	res := check.Program(prog)
 	if len(res.Errors) > 0 {
 		t.Fatalf("检查未通过：%v", res.Errors)
@@ -123,8 +125,8 @@ func TestContractTypeMapping(t *testing.T) {
 		"  uint16_t tag;",
 		"struct { uint8_t _pad; } NotFound;",
 		"struct { uint8_t _pad; } Conflict;",
-		"dp_str m_if_match;",
-		"dp_bytes m_body;",
+		"dp_R_blob_get {",
+		"dp_unit ok;",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("生成的 C 缺少 %q", want)

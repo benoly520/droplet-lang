@@ -71,7 +71,9 @@ func TestRuntimeHasNoDeadFunctions(t *testing.T) {
 // checker 按联合里的错误项从 100 编号，运行时按同一个号映射状态码；两边漂移时，
 // handler 返回的错误会静默变成 500 或别的状态码 —— 所以两处都在这里逐项钉死。
 func TestErrTagsMatchRuntime(t *testing.T) {
-	prog := parseAll(t, source{"contract.dlt", genSource(t, "../../../webapi/src/contract.dlt")})
+	prog := parseAll(t,
+		source{"contract.dlt", genSource(t, "../../../webapi/src/contract.dlt")},
+		source{"main.dlt", genSource(t, "../../../webapi/src/main.dlt")})
 	res := check.Program(prog)
 	if len(res.Errors) > 0 {
 		t.Fatalf("契约有 %d 个检查错误：%v", len(res.Errors), res.Errors)

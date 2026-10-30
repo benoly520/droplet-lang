@@ -30,14 +30,20 @@ type Boundary struct {
 	Methods []Method `json:"methods"`
 }
 
-// Method 是契约里的一个方法。
+// Method 是契约里的一个方法。带路由的方法同时是一条 HTTP 端点：
+// Verb + Path 是它对外的地址（D3 起由声明合成，不再靠 handler 里的字符串比较），
+// Impl 指向实现函数，Precondition 表示进 handler 之前要比对 If-Match。
 type Method struct {
-	Name       string   `json:"name"`
-	Params     []Field  `json:"params"`
-	Ret        string   `json:"ret"`
-	Idempotent bool     `json:"idempotent"`
-	Intents    []Intent `json:"intents"`
-	Pos        string   `json:"pos"`
+	Name         string   `json:"name"`
+	Params       []Field  `json:"params"`
+	Ret          string   `json:"ret"`
+	Idempotent   bool     `json:"idempotent"`
+	Verb         string   `json:"verb,omitempty"`
+	Path         string   `json:"path,omitempty"`
+	Impl         string   `json:"impl,omitempty"`
+	Precondition bool     `json:"precondition,omitempty"`
+	Intents      []Intent `json:"intents"`
+	Pos          string   `json:"pos"`
 }
 
 // Field 是参数或配置项。
@@ -155,12 +161,16 @@ func boundaryOf(n *ast.BoundaryDecl) Boundary {
 	b := Boundary{Name: n.Name, Version: n.Version, Methods: make([]Method, 0, len(n.Methods))}
 	for _, m := range n.Methods {
 		method := Method{
-			Name:       m.Name,
-			Params:     fieldsOf(m.Params),
-			Ret:        typeOf(m.Ret),
-			Idempotent: m.Idempotent,
-			Intents:    intentsOf(m.Intents),
-			Pos:        posOf(m.Pos),
+			Name:         m.Name,
+			Params:       fieldsOf(m.Params),
+			Ret:          typeOf(m.Ret),
+			Idempotent:   m.Idempotent,
+			Verb:         strings.ToUpper(m.Verb),
+			Path:         m.Path,
+			Impl:         m.Impl,
+			Precondition: m.Precondition,
+			Intents:      intentsOf(m.Intents),
+			Pos:          posOf(m.Pos),
 		}
 		b.Methods = append(b.Methods, method)
 	}

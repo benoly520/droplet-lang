@@ -57,6 +57,14 @@ func (c *checker) declare() {
 				Methods: map[string]*FnSig{},
 			}
 
+		case *ast.BoundaryDecl:
+			if c.bnd != nil {
+				c.errorf(n.Pos, "E1", "boundary 块只能有一个：%s 与 %s，D3 不支持多张路由表",
+					c.bnd.Name, n.Name)
+				continue
+			}
+			c.bnd = n
+
 		case *ast.EnvDecl:
 			// env 块名就是一个类型（D1）：入口参数写 cfg: App 就是普通的 record 引用，
 			// 不需要新的类型面；不同的是它只能由生成的加载器构造，源码里写不出字面量。
@@ -239,7 +247,7 @@ func (c *checker) registerFn(fn *ast.FnDecl, host string, isEntry bool) *FnSig {
 }
 
 func (c *checker) newSig(fn *ast.FnDecl, host string) *FnSig {
-	sig := &FnSig{Name: fn.Name, Pos: fn.Pos, Host: host, Decl: fn, ReqIdx: -1}
+	sig := &FnSig{Name: fn.Name, Pos: fn.Pos, Host: host, Decl: fn}
 	for _, p := range fn.Params {
 		sig.Params = append(sig.Params, c.resolve(p.Type))
 		sig.ParamNames = append(sig.ParamNames, p.Name)

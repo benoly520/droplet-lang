@@ -1,8 +1,8 @@
 // Package check 对语法树做名字解析与类型检查。
 //
 // 本文件职责：env 声明的完整性，以及「服务形态必须自带配置」这条接线规则。
-// 拆出来是因为这两件事都横跨声明（env 块）与签名（entry 的形态），
-// 放在 decls.go 或 calls.go 任一侧都会让另一侧看不见规则的全貌。
+// D3 起服务形态由 boundary 的路由表定义（不再由「entry 带 Request 参数」定义），
+// 所以这条规则也跟着路由走：有路由就必须有 env，且五个底座键齐备。
 package check
 
 import (
@@ -46,51 +46,42 @@ func EnvVar(prefix, key string) string {
 	return prefix + "_" + strings.ToUpper(key)
 }
 
-// detectService 判定入口是不是 HTTP 服务形态：带一个名为 Request 的 record 参数。
-// 这条规则以前只长在 gen（requestParamIndex），于是 checker 无法据此要求配置；
-// 搬到这里，「响应字段形状」那类 gen 独有知识就少了一条（见 D0-DEVIATIONS §4.1）。
-func (c *checker) detectService(sig *FnSig) {
-	for i, p := range sig.Params {
-		if p.Kind == KRecord && p.Name == "Request" {
-			sig.IsService = true
-			sig.ReqIdx = i
-			return
+// checkEnvService 是所有声明与函数体都检查完之后跑的一遍：它要同时看到
+// env 块、路由表与程序形态，早跑会拿到不完整的事实。
+//
+// D3 之前「服务形态」= 入口带 Request 参数；现在 = boundary 里有路由。
+// 后者是唯一的事实源，所以 entry 与路由不能并存：一个程序要有两个入口，
+// 就等于「路由由谁定义」又变成两处。
+func (c *checker) checkEnvService() {
+	entry := c.entrySig()
+
+	if !c.serviceForm {
+		// 没有路由：CLI 程序或纯契约程序。配置面不存在，env 也没人消费。
+		if c.env != nil {
+			c.errorf(c.env.Pos, "E1",
+				"env %s 无人消费：env 只用于 HTTP 服务形态（boundary 里有 `@get(\"/path\") impl <函数>` 才行）",
+				c.env.Name)
 		}
+		return
 	}
+
+	if entry != nil {
+		c.errorf(entryNodePos(entry), "E1",
+			"服务形态的入口是 boundary 的路由表，entry %s 不能并存：把它的分支改写成路由的实现函数",
+			entry.Name)
+	}
+
+	if c.env == nil {
+		c.errorf(c.routesPos(), "E1",
+			"服务必须声明 env 块：运行时要 %s 五个键（见 SPEC §5.7）", cfgKeyNames())
+		return
+	}
+	c.checkEnvKeys()
 }
 
-// checkEnvService 是所有声明与函数体都检查完之后跑的一遍：它要同时看到
-// env 块、入口签名与程序形态，早跑会拿到不完整的事实。
-func (c *checker) checkEnvService() {
-	for _, sig := range c.fns {
-		c.detectService(sig)
-	}
-
-	entry := c.entrySig()
-	if entry == nil {
-		// 纯契约程序（没有入口）：env 只作为契约面导出给运维核对，
-		// 没有「起服务」这一步，所以也不要求底座五键。
-		return
-	}
-	if entry.IsService {
-		c.checkServiceResult(entry)
-	}
-	if c.env == nil {
-		// 非服务程序没有配置面：hello / shape 这类命令行程序继续走 argv，不要求 env。
-		if entry.IsService {
-			c.errorf(entryNodePos(entry), "E1",
-				"服务必须声明 env 块：运行时要 %s 五个键（见 SPEC §5.7）", cfgKeyNames())
-		}
-		return
-	}
-
-	if !entry.IsService {
-		c.errorf(c.env.Pos, "E1",
-			"env %s 无人消费：命令行程序的配置走 argv，env 只用于 HTTP 服务形态", c.env.Name)
-		return
-	}
-
-	// 服务形态：五个底座键一个都不能少，且类型必须是生成代码能接的那些。
+// checkEnvKeys 校验底座五个键：一个都不能少，类型必须是生成代码能接的那些。
+// 业务私有键不在这里管 —— 多出来的键由实现函数自己读。
+func (c *checker) checkEnvKeys() {
 	got := map[string]*EnvKey{}
 	for i := range c.env.Keys {
 		got[c.env.Keys[i].Name] = &c.env.Keys[i]
@@ -109,50 +100,9 @@ func (c *checker) checkEnvService() {
 				want.name, want.typ.Name, k.Type.Name)
 		}
 	}
-
-	// 服务入口的参数必须都能绑定：Request 来自请求，host 来自能力表，
-	// env 类型来自刚才加载的配置。其余类型（包括以前那个「第一个 str 参数就是 root」
-	// 的位置魔法）没有绑定规则，静默给零值就是「起得来、全读空目录」。
-	for i, p := range entry.Params {
-		if i == entry.ReqIdx || p.Kind == KHost || p.IsEnv {
-			continue
-		}
-		c.errorf(entryNodePos(entry), "E1",
-			"entry %s 的参数 %s: %s 在服务形态里无法绑定：只接受 Request、host 能力与 env 类型",
-			entry.Name, entry.ParamNames[i], p.Name)
-	}
 }
 
-// checkServiceResult 限制服务入口的结果形状（D2 的 R1）：成功只有「有体的 bytes」与
-// 「无体的 Unit」两种，错误只能是联合里的错误项。
-//
-// 以前这里放的是 `Response{status, body}` 记录：状态码在 handler 里手写，`check` 说 ok、
-// `build` 才发现字段形状不对（D0-DEVIATIONS §2）。删掉记录之后，状态码只在
-// 变体 → 状态码的映射表里出现，也就不存在「能构造出一个运行时不懂的响应」。
-func (c *checker) checkServiceResult(sig *FnSig) {
-	ret := sig.Ret
-	if ret == nil || ret.Kind == KInvalid {
-		return
-	}
-	if ret.Kind != KUnion {
-		c.errorf(entryNodePos(sig), "E1",
-			"entry %s 用于服务时必须返回 `bytes | 错误` 或 `Unit | 错误`，得到 %s", sig.Name, ret)
-		return
-	}
-	ok := okType(ret)
-	switch ok.Kind {
-	case KBytes, KUnit, KInvalid:
-		return
-	}
-	hint := ""
-	if ok.Kind == KRecord && ok.FieldsByName["status"] != nil {
-		hint = "；你写的 `Response{status: 200, body: X}` 在本语言里就是 `X`：状态码不是能构造的值，是标签表的投影"
-	}
-	c.errorf(entryNodePos(sig), "E1",
-		"entry %s 的成功类型必须是 bytes 或 Unit，得到 %s%s", sig.Name, ok, hint)
-}
-
-// entrySig 取入口签名；没有入口（纯契约程序）返回 nil。
+// entrySig 取入口签名；没有入口（纯契约程序或服务形态）返回 nil。
 // c.fns 是 map，多入口时按名字排序取第一个 —— 与 Program() 选 EntryPoint 的规则一致。
 func (c *checker) entrySig() *FnSig {
 	var names []string
@@ -168,7 +118,7 @@ func (c *checker) entrySig() *FnSig {
 	return c.fns[names[0]]
 }
 
-// entryNodePos 给出 entry 的声明位置，用于把「缺 env」这类形态错误指到入口处。
+// entryNodePos 给出 entry 的声明位置，用于把「不能并存」这类形态错误指到入口处。
 func entryNodePos(sig *FnSig) token.Pos {
 	if sig.Decl != nil {
 		return sig.Decl.Pos

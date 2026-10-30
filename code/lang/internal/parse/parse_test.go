@@ -54,56 +54,89 @@ func TestParseHello(t *testing.T) {
 func TestParseWebapiContract(t *testing.T) {
 	prog := mustFile(t, "../../../webapi/src/contract.dlt")
 
-	var sawSum, sawRecord, sawBoundary bool
+	var sawSum, sawBoundary bool
+	var put *ast.BndMethod
 	for _, it := range prog.Items {
 		switch n := it.(type) {
 		case *ast.SumType:
-			if n.Name == "ApiError" && len(n.Variants) == 4 {
+			if n.Name == "ApiError" && len(n.Variants) == 6 {
 				sawSum = true
 			}
-		case *ast.RecordType:
-			if n.Name == "Request" && len(n.Fields) == 5 {
-				sawRecord = true
-			}
 		case *ast.BoundaryDecl:
-			if n.Name == "BlobApi" && n.Version == 1 && len(n.Methods) == 3 {
+			if n.Name == "BlobApi" && n.Version == 1 && len(n.Methods) == 5 {
 				sawBoundary = true
+			}
+			for i := range n.Methods {
+				if n.Methods[i].Name == "put" {
+					put = n.Methods[i]
+				}
 			}
 		}
 	}
-	if !sawSum || !sawRecord || !sawBoundary {
-		t.Errorf("契约解析不完整：sum=%v record=%v boundary=%v", sawSum, sawRecord, sawBoundary)
+	if !sawSum || !sawBoundary {
+		t.Errorf("契约解析不完整：sum=%v boundary=%v", sawSum, sawBoundary)
+	}
+	if put == nil {
+		t.Fatal("契约里没有 put 方法")
+	}
+	// D3 的路由三件事 + 预条件声明都要落到 AST 上。
+	if put.Verb != "put" || put.Path != "/v1/blob" || put.Impl != "blob_put" {
+		t.Fatalf("put 的路由没解析：%+v", put)
+	}
+	if !put.Idempotent || !put.Precondition || put.NoPrecondition {
+		t.Fatalf("put 的 idempotency / precondition 没解析：%+v", put)
+	}
+	// 读路由不该带 precondition，写路由必须显式表态（这里用 without 声明）。
+	var gotGet, gotCreate bool
+	for _, m := range prog.Items {
+		b, ok := m.(*ast.BoundaryDecl)
+		if !ok {
+			continue
+		}
+		for _, x := range b.Methods {
+			switch x.Name {
+			case "get":
+				gotGet = x.Verb == "get" && !x.Precondition && !x.NoPrecondition
+			case "create":
+				gotCreate = x.Verb == "post" && x.NoPrecondition && x.NoPreconditionReason != ""
+			}
+		}
+	}
+	if !gotGet || !gotCreate {
+		t.Errorf("verb / without precondition 解析错：get=%v create=%v", gotGet, gotCreate)
 	}
 }
 
 func TestParseWebapiMain(t *testing.T) {
 	prog := mustFile(t, "../../../webapi/src/main.dlt")
 
+	// D3 起服务形态没有入口函数：main.dlt 就是几个实现函数，首个是 health。
 	fn, ok := prog.Items[0].(*ast.FnDecl)
-	if !ok || fn.Name != "handle" || !fn.Entry {
-		t.Fatalf("首个声明不是 entry handle：%#v", prog.Items[0])
+	if !ok || fn.Name != "health" || fn.Entry {
+		t.Fatalf("首个声明应为普通函数 health：%#v", prog.Items[0])
+	}
+	var put *ast.FnDecl
+	for _, it := range prog.Items {
+		if f, ok := it.(*ast.FnDecl); ok && f.Name == "blob_put" {
+			put = f
+		}
+	}
+	if put == nil {
+		t.Fatal("main.dlt 里没有 blob_put")
 	}
 	var names []string
-	for _, p := range fn.Params {
+	for _, p := range put.Params {
 		names = append(names, p.Name)
 	}
 	// 断言名字而不只是个数：v0.10 删 sys、v0.11 把 root 换成 cfg，只数个数的断言两次都漏过去了。
-	if got := strings.Join(names, ","); got != "req,fs,ver,cfg" {
-		t.Fatalf("handle 参数应为 req,fs,ver,cfg，得到 %s", got)
+	if got := strings.Join(names, ","); got != "key,body,fs,ver,cfg" {
+		t.Fatalf("blob_put 参数应为 key,body,fs,ver,cfg，得到 %s", got)
 	}
-	if fn.Ret == nil {
-		t.Fatal("handle 缺少返回类型")
+	if u, ok := put.Ret.(*ast.Union); !ok || len(u.Items) != 2 {
+		t.Errorf("blob_put 返回类型应为二元联合，得到 %#v", put.Ret)
 	}
-	if u, ok := fn.Ret.(*ast.Union); !ok || len(u.Items) != 2 {
-		t.Errorf("handle 返回类型应为二元联合，得到 %#v", fn.Ret)
-	}
-	if fn.Body == nil || len(fn.Body.Stmts) < 4 {
-		t.Fatalf("handle 函数体语句过少：%+v", fn.Body)
-	}
-
-	// 第一条语句应是 if，而不是被误判为构造的表达式语句。
-	if _, ok := fn.Body.Stmts[0].(*ast.If); !ok {
-		t.Errorf("首条语句应为 if，得到 %T", fn.Body.Stmts[0])
+	if put.Body == nil || len(put.Body.Stmts) < 3 {
+		t.Fatalf("blob_put 函数体语句过少：%+v", put.Body)
 	}
 }
 

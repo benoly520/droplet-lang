@@ -46,6 +46,8 @@ ETAG=$(tag -H "$A" "$U/v1/blob/demo")
 row 'GET  /v1/blob/demo (ETag)'    "$ETAG"
 row 'PUT  If-Match 命中'           "$(code -X PUT -H "$A" -H "If-Match: $ETAG" --data-binary 'hello2' "$U/v1/blob/demo")"
 row 'PUT  If-Match 不符 -> 412'    "$(code -X PUT -H "$A" -H 'If-Match: deadbeef' --data-binary 'x' "$U/v1/blob/demo")"
+# D3：412 由生成的守卫挡在 handler 之前，body 必须是 0 字节（错误不携带体）。
+row '412 empty body (bytes)'       "$(curl -s -o /dev/null -w '%{size_download}' -X PUT -H "$A" -H 'If-Match: deadbeef' --data-binary 'x' "$U/v1/blob/demo")"
 row 'POST /v1/keys/second'         "$(code -X POST -H "$A" "$U/v1/keys/second")"
 row 'GET  /v1/keys (两个)'         "$(curl -s -H "$A" "$U/v1/keys")"
 row 'GET  /v1/blob/missing -> 404' "$(code -H "$A" "$U/v1/blob/missing")"

@@ -9,27 +9,30 @@
 
 ## 0. 现在的状态（截至 2026-10-30）
 
-- `origin/main` = `main` = `ed9b1e0`（v0.12，D2 落地的那笔）。
-- 本轮（v0.12）做的事：**D2 落地 —— 删掉 `Response`，响应面统一为「成功即值」**。
-  - 入口成功类型只能是 `bytes`（有体）或 `Unit`（无体），签名回到 `-> bytes | ApiError`；
-    `Response{status: 200, body: X}` 在 `check` 就报 `E1`，并提示「它在语言里就是 `X`」。
-  - 状态码只在「错误变体 → 状态码」的表里出现：新增 `NotAllowed`(104→405)、
-    `PreconditionFailed`(105→412)，成功恒 200（`Unit` 成功 = 200 + `Content-Length: 0`）。
-  - **R3 是唯一新增的语义**：裸 `return` = 该返回类型的单位值（`bytes` → 空 body）。
-  - checker 认错误类型的规则从"谁用过 `!`"改成"签名里写没写"（联合里非首项的 sum），
-    否则只 `return ApiError.NotAllowed` 而不传播的程序会拿到 1.. 号、静默变 500。
-  - `rt.h` 的 `DP_ERR_*` 与契约声明顺序由 `TestErrTagsMatchRuntime` 钉死（两边漂移 = 静默 500）。
-  - **412 只做一半**：变体加了，但运行时 `If-Match` 比对**没删**（安全边界，与 `dp_valid_key` 同级），
-    D3 由 `boundary` 合流。tag 派生的错误响应现在一律空 body（405 的验收项）。
-- 规模：Go 非测试 4927 → 5037、内嵌运行时 1454 → 1462，合计 6381 → **6499，占 H8 的 8000 的 81%**。
-  **余量 1501 行。** 样例 91 → 88 行（`contract.dlt` 54 → 51、`main.dlt` 37 未变）。
-  H7 的两笔账第一次归零（`status: 200` 5→0、`body: b""` 3→0）。
-- 用例：`grep -c '^func Test'` = **95**（上一轮 91；本轮 −2 个 `E-GEN` 反例、+4 个 check 级 R1/R3、
-  +1 个 tag 表护栏、+1 个 412 不进 handler 的集成用例）。
-- 证据：`accept.sh` 13 项逐条不变（405 仍空 body、412 仍无快照无提交）；
-  `SOAK_SECONDS=60 SOAK_INTERVAL=0` 跑 866 轮，0 失败，RSS 恒 1852 KB、1 线程、无残留子进程。
-- 自检输出变了：`ok: 8 项声明`（`Response` 被删，少了一项）。
-- **3 天长稳仍未跑**（P0 不动）：D2 改了请求主链路（错误响应改由 tag 派生），60 s 只是冒烟。
+- `origin/main` = `main` = `TBD_HASH`（v0.13，D3-B1 落地的那笔）。
+- 本轮（v0.13）做的事：**D3-B1 落地 —— 路由搬进 `boundary`，预条件守卫由声明合成**。
+  - `boundary` 方法尾部新增 `@<verb>("/path")` + `impl <fn>`；动词是 check 期校验的小写标识符，
+    不占关键字（`precondition` / `without` 是上下文关键字，总数仍 14）。
+  - **写路由必须表态预条件**：`with precondition`，或 `without precondition: "理由"`。
+    沉默 = 忘了写，`E1` 拦下 —— 与「错误不可丢弃」同一条纪律。
+  - 服务形态的入口是**路由表**：有路由就生成 dispatcher，`entry` 并存报 `E1`；`env` 也只服务这个形态
+    （没有路由时 env 无人消费，报错）。
+  - `rt_http.c` 里的 `is_put` + 22 行 If-Match 比对下沉为 `dp_precondition_check`（运行时唯一实现），
+    gen 在调用 impl 之前插唯一守卫。**412 现在恒空 body**（以前同理但没断言）。
+  - 示例源码里 `Request` 记录被删：`main.dlt` 是 5 个普通函数（health / blob_get / blob_put / keys_list / keys_create），
+    不再有 `req.path` 字面量与 `req.method == "PUT"`。
+  - 契约 JSON 新增 `verb` / `path` / `impl` / `precondition`，5 条路由全部在契约里（D2 时只有 3 条 —— 契约是残缺的）。
+- 规模：Go 非测试 5037 → 5255、内嵌运行时 1462 → 1469，合计 6499 → **6724，占 H8 的 8000 的 84%**。
+  **余量 1276 行。** 样例 88 → 92 行（`contract.dlt` 51 → 61、`main.dlt` 37 → 31，路由从 handler 搬进声明）。
+  H7 的 path / method 字面量各 3 处 → 0（它们现在是声明上的数据，不是函数体里的字符串）。
+- 用例：`grep -rc '^func Test' code/lang` 合计 **106**（上一轮 95；本轮 +11：路由门禁 8、守卫位置 1、
+  契约导出 1、env 形态 1）。`internal/check/route_test.go` 是新加的，同时把 `check_test.go` 从 815 行压回 612
+  （H8 单文件 ≤ 800）。
+- 证据：`accept.sh` 14 项（13 项逐条不变，新增「412 empty body (bytes) = 0」）；
+  `SOAK_SECONDS=60 SOAK_INTERVAL=3` 跑 20 轮，0 失败，1 线程、无残留子进程；
+  `go build ./... && go vet ./... && go test ./...` 全绿。
+- 自检输出变了：`ok: 11 项声明，5 个函数`（服务形态没有入口行）。
+- **3 天长稳仍未跑**（P0 不动）：D3 改了请求主链路（路由匹配 + 预条件守卫），60 s 只是冒烟。
 
 
 ## 1. 新机器五分钟上手
@@ -38,7 +41,7 @@
 go version                                    # 需 ≥ 1.22（code/lang/go.mod 声明的最低版本，2026-10-30 由 1.24 下调）
 mkdir -p .build                               # 编译产物放这里，目录不会自动建
 cd code/lang && go build -o ../../.build/droplet ./cmd/droplet
-go test ./...                                 # 判据是退出码 0，不是"数 ok 行"（见 §4）；共 95 个用例
+go test ./...                                 # 判据是退出码 0，不是"数 ok 行"（见 §4）；共 106 个用例
 ```
 
 还需要 `cc`（gcc 或 clang，编译器以 `-std=c11` 调用它）。
@@ -57,8 +60,7 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 
 ```sh
 .build/droplet check code/webapi/src/contract.dlt code/webapi/src/main.dlt
-# 实测输出：ok: 8 项声明，1 个函数，入口 handle（env App 块算一项；v0.12 删掉 Response 后少一项）
-# （v0.9 之后入口就是那个函数本身，不再有外层的壳名）
+# 实测输出：ok: 11 项声明，5 个函数（env App 块算一项；服务形态没有入口行，入口是 boundary 的路由表）
 ```
 
 ## 2. 待办
@@ -73,7 +75,16 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
   新实例的 bind 顶掉，而请求照样有响应（来自旧二进制）—— 这种「0 失败」是假的。
   `sample.log` 的 rss 列为 0 就是这个形状；v0.10 起脚本自己会拦（启动即退出 → 报错并退出 1）
 
-### P1 · 下一件：D3 —— **方案已成文，等你点头三件**（IMPL-PLAN §8.5）
+### P1 · 下一件：B3 成功码投影（201 / 204）—— **D3-B1 已落地，这是拆出来的第二批**
+
+- 现状：成功恒 200（`Unit` = 200 + `Content-Length: 0`）。`@created` / `@no_content` 两个注解
+  让声明投影成功码，数字仍不进源码（R2 不破）。206 需要 Range 解析，**不在范围**。
+- 判据：`accept.sh` 的 POST / PUT 项改 201 / 204 后逐条重验；`contract` JSON 导出成功码；
+  再加一条 check 级反例（读路由写 `@created` 报 `E1`）。
+
+<details>
+<summary>已完成（v0.13）：D3-B1 —— 路由与预条件守卫合成（原 §8.5 三件中的 B1 + B2）</summary>
+
 
 - **病根比"412 有两处"更大**：`gen` 完全不读 `boundary`（`grep -rn "Boundary" internal/gen` 为空），
   路由是 handler 里的 3 个 `req.path ==` 字面量，"哪个方法是写"在 rt 的 `is_put` 与 handler 的
@@ -90,6 +101,9 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 - **判据升级**：B1 是安全边界搬家，光 `accept.sh` 绿不够 —— 要旧/新 C 逐字 diff +
   请求 × 响应矩阵逐项比（§8.5.5），且**必须重跑 3 天长稳**（与 P0 一起结）。
 - 账（估）：H8 净 +127 → 约 6630（83%）；H7 的 path/method 字面量各 3 → 0；契约从 3 条变 5 条路由。
+- 实结：H8 净 +225 → 6724（84%）；契约 5 条路由；`Request` 记录删除；用例 95 → 106。详见 IMPL-PLAN §8.5.7。
+
+</details>
 
 ### P2 · 意图表达式：先拍板组合子，再动 `E10`
 
@@ -116,9 +130,9 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
    要变成可重跑的护栏，得先解决它跟 `accept.sh` / `soak.sh` 抢实例的问题。
 4. （2026-10-30 追加）**D2 三件合成一批**：删 `Response` / 裸 `return` = 单位值 /
    412 只加变体不删运行时 —— **已落地（v0.12）**，方案与证据在 IMPL-PLAN §8.4。
-5. （待拍板）**D3 方案已成文但没动代码**：IMPL-PLAN §8.5 给出三件（B1 路由与守卫合成 /
-   B2 一致性护栏 / B3 成功码投影）与三处待点头。**没点头之前不要开始改 `boundary`** ——
-   方案 A 与方案 B 的结构差一层（`impl` 槽位 vs 方法带实现体），先写后改的代价比先问大。
+5. （2026-10-30 追加）**D3 按「方案 A」落地**：`impl` 槽位 + 合成 dispatcher，B1（路由 × 守卫）
+   与 B2（一致性护栏）合成一批完成；**B3（201/204）单独一批**，即现在的 P1。
+   新硬门禁「写路由必须显式声明预条件」同步生效。
 
 ## 4. 坑（踩过的，别再踩）
 

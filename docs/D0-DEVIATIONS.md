@@ -23,23 +23,24 @@
 
 | 项 | SPEC | D0 实际 | 原因 | 补齐 |
 | --- | --- | --- | --- | --- |
-| 412 条件失败 | 错误是值（C1） | **D2 已补一半（v0.12）**：新增 `PreconditionFailed` 变体与 412 映射，handler 现在能表达**自己的**条件失败；HTTP 层的 `If-Match` 比对仍在运行时、进 handler 之前 | 语言侧障碍（构造不出错误值）已消失，但这段比对是**安全边界**（与「非法 key 不进 handler」同级）—— 搬到 handler 后忘一次就是静默丢更新。语言侧的正解是 `boundary … with idempotency` 合成，不是交还给人 | **D3 合流**：由 boundary 合成后删掉运行时比对，届时同一语义只剩一处；须重跑长稳 |
+| 412 条件失败 | 错误是值（C1） | **已合流（D3 / v0.13）**：`PreconditionFailed` 变体与 412 映射（D2）+ 路由上的 `with precondition`。`rt_http.c` 里的 `is_put` 与 22 行 If-Match 比对下沉成 `dp_precondition_check`（运行时唯一实现），gen 在调用 impl 之前插唯一触发点；写路由沉默不表态是 `E1` | 预条件的正确性只在一个边界事实上（上一版成功写入的版本），不在 handler 的调用点：交还给人就是「忘一次 = 静默丢更新」 | 已完成；`accept.sh` 新增「412 empty body (bytes) = 0」，`TestPreconditionGuardIsSynthesized` 锁守卫位置 |
 | `ETag` 由谁书写 | IMPL-PLAN §2 曾写「PUT 成功返回新 `ETag`」 | v0.10 起 ETag 由**运行时**按 `dp_sys_u64_str(dp_sys_hash64(body))` 从响应 body 推导：非空 body 就有头，空 body 就没有。`PUT` 的成功响应因此不带 tag（要新版本号请 `GET`），`/health` 与 `/v1/keys` 则**开始**带 tag | 同一份表示只能有一个版本号（SPEC §2.2 H7 第四条减法）；`If-Match` 的比对本来就在运行时，两处必须用同一个函数才对得上 —— 对不上就是静默的并发 bug | 已完成（行为变化，客户端视角见 IMPL-PLAN §2） |
 | keep-alive | 未限定 | 不做；每请求一连接，`Connection: close` | 手写 HTTP 最容易在这里响应错位；也省内存 | 不做 |
 | chunked | 未限定 | 拒绝，回 501 | 防请求走私；body 上限 8 MiB 够用 | 不做 |
 | 并发 | 未限定 | 单线程；读写各 30 s 超时（只靠 `SO_RCVTIMEO`/`SO_SNDTIMEO`），超时回 408 | H4 内存预算；超时防一条连接钉死服务 | 需要时多进程 + `SO_REUSEPORT` |
 | host 能力 | 开放 effect 系统 | 写死 10 个（`Sys` 4 / `BlobFs` 5 / `Versioning` 1）；表外能力、参数个数、参数与返回类型不符在 `check` 就报 `E2`，表在 `internal/host`（check 与 gen 共用，含 ABI 类型与 `u64 → ETag` 的包装） | 只实现示例服务真正用到的 | 新增能力时扩表 + `rt.h` 加原型 |
-| boundary codegen | §7.4 生成 stub / handler / serializer | 只导出 JSON 契约（`droplet contract`）—— **gen 完全不读 `boundary`** | 消费方手写客户端就够（§10）；而路由事实源还不在语言侧（见下一行） | **D3**：方案见 IMPL-PLAN §8.5（待点头） |
-| 契约与真实 HTTP 面不一致 | 「一次声明同时产出对外契约」 | `boundary` 只声明 `get` / `put` / `list` 三条，示例服务实际有 **5 条路由**：`/health` 与 `POST /v1/keys` 在契约里不存在，导出的 JSON 因此是残缺事实（`accept.sh` 第 1、7 项打的就是这两条） | D0 没把路由从 `boundary` 合成，路由是 handler 里的字符串比较 —— 声明因此可以落后于实现且无人拦 | **D3 B1/B2**（§8.5.1 是证据表）；合流前不假装契约可信 |
+| boundary codegen | §7.4 生成 stub / handler / serializer | **D3 起 gen 读 `boundary`**：有路由就生成 dispatcher（`serviceMain`），并按 `impl` 绑定实现、按 `precondition` 插守卫；但仍只导出 JSON 契约，不生成客户端 stub / serializer | 服务端需要「路由是事实」；客户端有 `contract` JSON 手写就够（§10），生成 stub 属于下一层消费面 | 客户端 stub 未排期 |
+| 契约与真实 HTTP 面不一致 | 「一次声明同时产出对外契约」 | **已消除（D3 / v0.13）**：`boundary` 现在声明全部 5 条路由（`@verb("/path")` + `impl`），有 `impl` 无路由 / 有路由无 `impl` / 契约签名与实现不一致都是 `E1`；JSON 契约同时导出 `verb` / `path` / `impl` / `precondition` | 声明落后于实现在 D3 之后无法通过编译 —— 这正是「契约可被验证」的前提 | 已完成（`TestWebapiPasses` 断言 5 条路由；`doc_test.go` 断言导出） |
 | 存储 | schema 驱动查询 | 扁平文件 + `.snapshots/`；`APP_ROOT` 必须是已存在的目录，否则启动时直接退出 | 哑存储是刻意的最小面；缺目录不能让服务「起得来、写全 500」 | **未排期**：schema 查询超出最小服务面，D3 也不含（D2 结的是响应面那笔账，与本行无关） |
 | 快照 | 未限定 | `<key>.<unix>.<seq>`，每 key 只留最近 `DP_SNAPSHOT_KEEP` 份（默认 8，0 = 不轮转） | 不带 `seq` 时同秒两次写会互相覆盖；不轮转 72 h 堆约 8640 个文件 | 已完成 |
 | 传输安全 | 未限定 | 无 TLS，只有静态 `Bearer` token | 部署形态要求反代终结 TLS（IMPL-PLAN §7.3） | 不做 |
 
 **D2 起（v0.12）生效的偏差**：`Response` 类型被删掉之后，成功响应恒为 200
-（`Unit` 成功 = 200 + `Content-Length: 0`），**201 / 204 / 206 等暂时无法表达**。
-以前 `Response{status: 201}` 是能写的。补齐：D3 由 `boundary` 的成功形状合成状态码
-（与错误变体共用同一张 tag → status 表）。另外，tag 派生的错误响应一律**空 body**
-（405 因此不带文本），要人类可读的错误文案也等 D3 的错误表示。
+（`Unit` 成功 = 200 + `Content-Length: 0`），**201 / 204 等暂时无法表达**。
+以前 `Response{status: 201}` 是能写的。D3 没有做这件事：它只把「路由」搬进声明，
+成功码的投影要另一张注解（`@created` / `@no_content`），按批准拆成 B3 单独一批；
+**206 需要 Range 解析，明确不在范围**。另外，tag 派生的错误响应一律**空 body**
+（405 与 412 因此都不带文本），要人类可读的错误文案需要新的错误表示（未排期）。
 
 ## 3. 工具链
 
@@ -47,7 +48,7 @@
 | --- | --- | --- | --- | --- |
 | 动词 | `check` / `mem` / `bench` / `explore` / `trace` / `verify` | `parse` / `check` / `build` / `contract`（+ `help`） | 让服务跑起来所需的最小子集 | D1 |
 | 错误码 | `E0`–`E12` | `E1`（类型与匹配）、`E2`（能力与签名）、`E3`（边界序列化）、`E11` + 语法号 `E0003`–`E0009` + 生成期 `E-GEN` | 没实现的检查不报假错误；生成期只剩结构形状类报错 | 随特性 |
-| 增量编译 | 未限定 | 每次全量重编 | 样例只有 88 行（`contract.dlt` 51 + `main.dlt` 37） | 不做 |
+| 增量编译 | 未限定 | 每次全量重编 | 样例只有 92 行（`contract.dlt` 61 + `main.dlt` 31） | 不做 |
 | 契约 JSON | 含 `envs` 分组 | **已完成（v0.11）**：导出 `envs`（键名 / 类型 / 变量名 / 必填） | 曾因 checker 拒绝 env 而删掉该字段，`env` 落地后随之一并回来（`doc_test.go` 有断言） | 已完成 |
 
 ## 4. 一条跨阶段的老毛病：`check` 的保证比 `build` 弱
@@ -111,6 +112,9 @@
   有一个入口），所以删位置而不是删写法：**旧形状在 parse 就报 `E0006` 并给改写提示**。
   壳没了，`EntryDecl` 这个 AST 节点也没了（入口 = 带 `Entry` 标记的 `FnDecl`，四处 switch 各少一个分支）；
   将来的鉴权 / 超时 / 重试预算写成签名上的 intent，不回头把壳加回来。
+- **路由写在 `boundary` 上**（D3 落地，v0.13）：`@get("/v1/blob") impl blob_get with idempotency`。
+  动词是 check 期校验的小写标识符，不是关键字；`precondition` / `without` 是上下文关键字。
+  服务形态的入口因此是路由表（有路由就没有 `entry`，两者并存报 `E1`），`env` 也只服务这个形态。
 - **`Response` 这个类型**（D2 落地，v0.12）：v0.10 先删了它的 `etag` 字段，D2 把整个记录删了 ——
   成功即值：入口成功类型只能是 `bytes`（有体）或 `Unit`（无体），状态码只在「错误变体 → 状态码」
   的表里出现。写 `Response{status: 200, body: X}` 现在在 `check` 就报 `E1` 并提示「它在语言里就是 `X`」。
@@ -184,6 +188,14 @@ sed -n '/^var Caps = map/,/^}/p' code/lang/internal/host/host.go | grep -cE '^[[
 $B build code/webapi/src/contract.dlt code/webapi/src/main.dlt -o .build/q >/dev/null
 APP_ROOT=.build/nope .build/q ; echo "exit=$?"   # 期望打印原因 + exit=1
 
-# 13 项边界行为（含 412 / 405 / 413 / 501，以及 v0.10 起「405 的空 body 不带 ETag」）
+# 写路由不表态预条件：期望 E1「必须显式表态」（以前靠运行时那段 If-Match，漏写无人拦）
+printf 'env App {\n  port: u64 = 1,\n  bind: str = "127.0.0.1",\n  root: str = "/tmp",\n  token: str = "",\n  max_body: u64 = 1024\n}\n\ntype ApiError = NotFound\n\nboundary Api @v1 {\n  put(key: str, body: bytes) -> Unit @put("/v1/x") impl h with idempotency\n    invariant "x"\n}\n\nfn h(key: str, body: bytes, cfg: App) -> Unit | ApiError {\n  return\n}\n' > .build/p.dlt
+$B check .build/p.dlt   # 期望 E1: 写路由 put 必须显式表态预条件
+
+# 路由没写 impl：期望 E1「却没有实现」
+printf 'boundary Api @v1 {\n  get(key: str) -> bytes @get("/v1/x")\n    invariant "x"\n}\n' > .build/o.dlt
+$B check .build/o.dlt   # 期望 E1「却没有实现」（另有一条 env 缺失：路由让它成了服务形态）
+
+# 14 项边界行为（含 412 / 412 空 body / 405 / 413 / 501，以及 v0.10 起「405 的空 body 不带 ETag」）
 sh code/webapi/deploy/accept.sh
 ```

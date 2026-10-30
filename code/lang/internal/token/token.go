@@ -35,6 +35,8 @@ const (
 	CtxEffects
 	CtxCap
 	CtxBy
+	CtxPrecondition
+	CtxWithout
 
 	LBrace
 	RBrace
@@ -77,6 +79,7 @@ var kindNames = map[Kind]string{
 	CtxElse: "else", CtxWith: "with", CtxIdempotency: "idempotency",
 	CtxRequires: "requires", CtxInvariant: "invariant", CtxExample: "example",
 	CtxEffects: "effects", CtxCap: "cap", CtxBy: "by",
+	CtxPrecondition: "precondition", CtxWithout: "without",
 
 	LBrace: "{", RBrace: "}", LParen: "(", RParen: ")", LBrack: "[", RBrack: "]",
 	Comma: ",", Colon: ":", Semi: ";", Arrow: "->", FatArrow: "=>", Assign: "=",
@@ -129,6 +132,7 @@ var keywords = map[string]Kind{
 	"else": CtxElse, "with": CtxWith, "idempotency": CtxIdempotency,
 	"requires": CtxRequires, "invariant": CtxInvariant, "example": CtxExample,
 	"effects": CtxEffects, "cap": CtxCap, "by": CtxBy,
+	"precondition": CtxPrecondition, "without": CtxWithout,
 }
 
 // Lookup 判断标识符是否是关键字（含上下文关键字）。

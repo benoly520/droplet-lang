@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"droplet/internal/check"
 )
 
 // startBlobd 编译 webapi 契约并拉起服务，返回 base URL 与清理函数。
@@ -186,11 +188,15 @@ func TestServiceEndToEnd(t *testing.T) {
 	})
 
 	t.Run("if-match-412", func(t *testing.T) {
-		code, _, _ := do(t, "PUT", base+"/v1/blob/demo", "nope", map[string]string{"If-Match": `"deadbeef"`})
+		code, body, _ := do(t, "PUT", base+"/v1/blob/demo", "nope", map[string]string{"If-Match": `"deadbeef"`})
 		if code != 412 {
 			t.Fatalf("错误 If-Match 应 412，得到 %d", code)
 		}
-		// D2：412 由运行时在进 handler 之前挡下，内容必须原样。
+		// D3：412 由生成的 precond 守卫在进 handler 之前挡下，body 为空。
+		if body != "" {
+			t.Fatalf("412 不该有 body，得到 %q", body)
+		}
+		// 内容必须原样。
 		if code, got, _ := do(t, "GET", base+"/v1/blob/demo", "", nil); code != 200 || got != "hello2" {
 			t.Fatalf("412 后内容应不变，code=%d body=%q", code, got)
 		}
@@ -247,8 +253,9 @@ func TestNotFoundMapsTo404(t *testing.T) {
 	}
 }
 
-// TestPreconditionFailedDoesNotEnterHandler 锁定 D2 的边界：`If-Match` 仍由运行时把关
-// （安全边界，与 dp_valid_key 同级），412 时根本不进 handler —— 既没有快照，也没有提交。
+// TestPreconditionFailedDoesNotEnterHandler 锁定 D3 的边界：`with precondition` 让 gen 在
+// 进 handler 之前插一段 dp_precondition_check 守卫，412 时根本不进 handler ——
+// 既没有快照，也没有提交，body 也是空的（D3 起强错误不再有体）。
 // 与 accept.sh 的「If-Match 不符 -> 412 / 无快照 / 无提交」是同一个判据。
 func TestPreconditionFailedDoesNotEnterHandler(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "data")
@@ -267,6 +274,9 @@ func TestPreconditionFailedDoesNotEnterHandler(t *testing.T) {
 	code, body, _ := do(t, "PUT", base+"/v1/blob/demo", "v2", map[string]string{"If-Match": `"deadbeef"`})
 	if code != 412 {
 		t.Fatalf("错误 If-Match 应 412，得到 %d（body=%q）", code, body)
+	}
+	if body != "" {
+		t.Fatalf("412 不该有 body，得到 %q", body)
 	}
 	if got := snapshotFiles(t, root, "demo"); len(got) != 0 {
 		t.Fatalf("412 不该产生快照，得到 %v", got)
@@ -537,5 +547,44 @@ func TestBadCfgValueFailsFast(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "APP_PORT=1879x 不是整数") {
 		t.Fatalf("退出原因应指明非法值，得到：%s", out)
+	}
+}
+
+// TestPreconditionGuardIsSynthesized 锁住 D3 唯一的预条件触发点：`with precondition`
+// 让生成的 dispatcher 在调用 impl 之前插一段 dp_precondition_check；写了
+// `without precondition: "理由"` 的路由恰好相反 —— 没有守卫。
+func TestPreconditionGuardIsSynthesized(t *testing.T) {
+	prog := parseAll(t,
+		source{"contract.dlt", genSource(t, "../../../webapi/src/contract.dlt")},
+		source{"main.dlt", genSource(t, "../../../webapi/src/main.dlt")})
+	res := check.Program(prog)
+	if len(res.Errors) > 0 {
+		t.Fatalf("检查未通过：%v", res.Errors)
+	}
+	c, err := C(prog, res)
+	if err != nil {
+		t.Fatalf("生成失败：%v", err)
+	}
+	if n := strings.Count(c, "int _pc = dp_precondition_check"); n != 1 {
+		t.Fatalf("只有 PUT 路由该有守卫，得到 %d 处", n)
+	}
+	// 守卫必须在 impl 调用之前：挡在 handler 外面，handler 里既没有快照也没有提交。
+	put := strings.Index(c, `dp_str_lit("/v1/blob")`)
+	pc := strings.Index(c, "dp_precondition_check")
+	if put < 0 || pc < 0 || put > pc {
+		t.Fatalf("守卫位置错：route=%d guard=%d", put, pc)
+	}
+	// 调用点在守卫之后（函数定义在文件前部，所以从守卫处往后找）。
+	call := strings.Index(c[pc:], "dp_f_blob_put(")
+	if call < 0 {
+		t.Fatal("守卫之后没有 blob_put 的调用点")
+	}
+	// without precondition 的路由不该被顺手加上守卫。
+	post := strings.Index(c, `dp_str_lit("/v1/keys")`)
+	if post < 0 {
+		t.Fatal("找不到 POST /v1/keys 路由")
+	}
+	if strings.Contains(c[post:], "dp_precondition_check") {
+		t.Fatal("POST 路由声明了 without precondition，却仍有守卫")
 	}
 }

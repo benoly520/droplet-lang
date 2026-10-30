@@ -1,37 +1,31 @@
-// 示例服务入口：把 HTTP 请求映射到哑存储能力。
-// 成功即值：有体返回 bytes，无体就裸 `return`；状态码由错误变体经标签表映射，
-// handler 里不出现任何数字（SPEC §2.2 H7 / D2 的 R1–R3）。
-entry handle(req: Request, fs: BlobFs, ver: Versioning, cfg: App)
-    -> bytes | ApiError
-  invariant "非 GET/PUT 的请求一律 405"
-{
-  if req.path == "/health" {
-    return b"{\"ok\":true}"
-  }
+// 示例服务的实现：路由在 contract.dlt 的 boundary 里声明，这里只写每条的实现。
+// 成功即值：有体返回 bytes，无体就是裸 `return`；状态码由错误变体经标签表映射，
+// 实现里不出现任何数字（SPEC §2.2 H7 / D2 的 R1–R3）。
 
-  if req.path == "/v1/keys" {
-    if req.method == "GET" {
-      return fs.list_json(cfg.root)!
-    }
-    if req.method == "POST" {
-      fs.create(cfg.root, req.key)!
-      return
-    }
-  }
+fn health() -> bytes | ApiError {
+  return b"{\"ok\":true}"
+}
 
-  if req.path == "/v1/blob" {
-    if req.method == "GET" {
-      return fs.read(cfg.root, req.key)!
-    }
-    if req.method == "PUT" {
-      fs.backup(cfg.root, req.key)
-      // write 返回的新版本 ETag 这里用不上：响应头里的 ETag 由运行时从 body 推导，
-      // 客户端要新版本号就 GET（v0.10，SPEC §2.2 H7）。
-      fs.write(cfg.root, req.key, req.body)!
-      ver.commit_soon(cfg.root, req.key)
-      return
-    }
-  }
+fn blob_get(key: str, fs: BlobFs, cfg: App) -> bytes | ApiError {
+  return fs.read(cfg.root, key)!
+}
 
-  return ApiError.NotAllowed
+fn blob_put(key: str, body: bytes, fs: BlobFs, ver: Versioning, cfg: App) -> Unit | ApiError {
+  // If-Match 的比对不在这里：路由声明了 `with precondition`，守卫由生成的 dispatcher
+  // 在调用本函数之前跑（D3）。这里只看得到已经通过版本检查的请求。
+  fs.backup(cfg.root, key)
+  // write 返回的新版本 ETag 这里用不上：响应头里的 ETag 由运行时从 body 推导，
+  // 客户端要新版本号就 GET（v0.10，SPEC §2.2 H7）。
+  fs.write(cfg.root, key, body)!
+  ver.commit_soon(cfg.root, key)
+  return
+}
+
+fn keys_list(fs: BlobFs, cfg: App) -> bytes | ApiError {
+  return fs.list_json(cfg.root)!
+}
+
+fn keys_create(key: str, fs: BlobFs, cfg: App) -> Unit | ApiError {
+  fs.create(cfg.root, key)!
+  return
 }

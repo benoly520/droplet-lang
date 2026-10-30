@@ -98,6 +98,15 @@ typedef int (*dp_handler)(dp_arena* a, const dp_request* rq, dp_response* out);
 
 int dp_serve(dp_handler h, const dp_cfg* cfg);
 
+/* ---- 条件请求（If-Match）----
+ *
+ * D3 起由生成的守卫调用（boundary 方法上的 `with precondition`）：运行时只提供
+ * 这一处实现，触发点由声明合成 —— 同一语义不再两处，也不会因为谁忘了写而静默消失。
+ * 返回 0 表示通过（含未带 If-Match）；其余是错误 tag（105 = 412，102 = 500），
+ * 由 status_for_tag 映射成状态码，与 handler 自己返回的错误走同一条路。
+ */
+int dp_precondition_check(dp_arena* a, dp_str root, dp_str key, dp_str if_match);
+
 /* ---- 文件哑存储 ---- */
 bool       dp_valid_key(dp_str key);
 dp_bytes   dp_blob_read(dp_arena* a, dp_str root, dp_str key, int* err);

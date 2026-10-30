@@ -348,11 +348,57 @@ func (p *Parser) parseBoundary() ast.Item {
 		p.expect(token.RParen, ")")
 		p.expect(token.Arrow, "->")
 		m.Ret = p.parseType()
+
+		// 路由（D3）：@get("/v1/blob")。动词不走关键字表（get 仍是普通标识符），
+		// 合法性在 check 里判 —— 词法层不该知道 HTTP 有哪些动词。
+		if p.at(token.At) {
+			p.advance()
+			verb := p.expectIdent("HTTP 动词（get / put / post / delete）")
+			p.expect(token.LParen, "(")
+			path := p.expect(token.Str, "路由路径（字符串字面量）")
+			p.expect(token.RParen, ")")
+			m.Verb = verb.Text
+			m.Path = path.Text
+		}
+
+		// 实现：impl blob_put。`impl` 是普通标识符，只在方法头这个位置成立。
+		if p.at(token.Ident) && p.cur().Text == "impl" {
+			p.advance()
+			m.Impl = p.expectIdent("实现函数名").Text
+		}
+
+		// 修饰清单：with idempotency, precondition
 		if p.at(token.CtxWith) {
 			p.advance()
-			p.expect(token.CtxIdempotency, "idempotency")
-			m.Idempotent = true
+			for {
+				switch p.cur().Kind {
+				case token.CtxIdempotency:
+					p.advance()
+					m.Idempotent = true
+				case token.CtxPrecondition:
+					p.advance()
+					m.Precondition = true
+				default:
+					p.fail(p.cur().Pos, "E0003: with 后面只接受 idempotency 或 precondition，%s", p.got())
+				}
+				if p.at(token.Comma) {
+					p.advance()
+					continue
+				}
+				break
+			}
 		}
+
+		// 显式不检查：without precondition: "理由"（理由必写，同 ignore(reason)）
+		if p.at(token.CtxWithout) {
+			p.advance()
+			p.expect(token.CtxPrecondition, "precondition")
+			p.expect(token.Colon, ":")
+			r := p.expect(token.Str, "不检查的理由（字符串字面量）")
+			m.NoPrecondition = true
+			m.NoPreconditionReason = r.Text
+		}
+
 		m.Intents = p.parseIntents()
 		b.Methods = append(b.Methods, m)
 	}

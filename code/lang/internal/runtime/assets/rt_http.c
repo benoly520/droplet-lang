@@ -326,13 +326,35 @@ static void split_key(dp_str* path, dp_str* key) {
   path->n = cut;
 }
 
-/* 剥掉 If-Match 两侧的引号（弱校验标记 W/ 直接拒绝）。 */
+/* 剥掉 If-Match 两侧的引号（弱校验标记 W/ 直接拒绝）。只有 dp_precondition_check 用。 */
 static dp_str strip_quotes(dp_str v) {
   if (v.n >= 2u && v.p[0] == '"' && v.p[v.n - 1u] == '"') {
     v.p++;
     v.n -= 2u;
   }
   return v;
+}
+
+/* 条件请求比对：与响应 ETag 用同一个推导函数（dp_sys_hash64），所以 GET 拿到的
+ * 版本号可以直接贴到下一次 PUT。返回 0 = 通过，其余是错误 tag。 */
+int dp_precondition_check(dp_arena* a, dp_str root, dp_str key, dp_str if_match) {
+  if (if_match.n == 0u || key.n == 0u) {
+    return 0; /* 没带预条件，就没有要比的东西 */
+  }
+  int err = 0;
+  dp_bytes cur = dp_blob_read(a, root, key, &err);
+  if (err == (int)DP_ERR_NOT_FOUND) {
+    /* 目标不存在时 If-Match 必然失败：这是 412，不是 404（资源本来就在要建的路径上） */
+    return (int)DP_ERR_PRECONDITION_FAILED;
+  }
+  if (err != 0) {
+    return (int)DP_ERR_IO;
+  }
+  dp_str cur_tag = dp_sys_u64_str(a, dp_sys_hash64(cur));
+  if (!dp_str_eq(cur_tag, strip_quotes(if_match))) {
+    return (int)DP_ERR_PRECONDITION_FAILED;
+  }
+  return 0;
 }
 
 /* ---------- 单连接 ---------- */
@@ -378,7 +400,6 @@ static void handle_conn(int fd, dp_handler h, const dp_cfg* cfg) {
     return;
   }
 
-  bool is_put = header_is(head.method, "put");
 
   dp_str path;
   dp_str query;
@@ -457,29 +478,6 @@ static void handle_conn(int fd, dp_handler h, const dp_cfg* cfg) {
     dp_arena_free(a);
     send_status(fd, 400, "bad key");
     return;
-  }
-
-  /* If-Match 由运行时把关：D0 无法表达「条件失败」这个返回值 */
-  if (is_put && head.if_match.n > 0u && key.n > 0u) {
-    int err = 0;
-    dp_bytes cur = dp_blob_read(a, cfg->root, key, &err);
-    if (err == (int)DP_ERR_NOT_FOUND) {
-      dp_arena_free(a);
-      send_status(fd, 412, "precondition failed");
-      return;
-    }
-    if (err != 0) {
-      dp_arena_free(a);
-      send_status(fd, 500, "internal error");
-      return;
-    }
-    dp_str cur_tag = dp_sys_u64_str(a, dp_sys_hash64(cur));
-    dp_str want = strip_quotes(head.if_match);
-    if (!dp_str_eq(cur_tag, want)) {
-      dp_arena_free(a);
-      send_status(fd, 412, "precondition failed");
-      return;
-    }
   }
 
   dp_request rq;

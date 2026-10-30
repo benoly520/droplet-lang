@@ -124,13 +124,25 @@ type BoundaryDecl struct {
 }
 
 // BndMethod 是契约里的一个方法。
+//
+// 带 Impl 的方法同时是一条 HTTP 路由（D3 / IMPL-PLAN §8.5）：Verb 与 Path 来自
+// `@get("/v1/blob")`，实现函数由 `impl blob_get` 给出 —— 路由是**声明出来的**，
+// 不从方法名推，也不从 handler 里的字符串比较里猜。
 type BndMethod struct {
-	Pos        token.Pos
-	Name       string
-	Params     []Param
-	Ret        Type
-	Idempotent bool
-	Intents    []Intent
+	Pos          token.Pos
+	Name         string
+	Params       []Param
+	Ret          Type
+	Verb         string // HTTP 动词（get / put / post / delete），空表示没有路由
+	Path         string // 路由路径，必须显式书写
+	Impl         string // 实现函数名，空表示只有契约、没有实现
+	Idempotent   bool   // with idempotency
+	Precondition bool   // with precondition：进 handler 之前由生成的守卫比对 If-Match
+	// NoPrecondition 是「显式声明这条写路由不做预条件检查」，Reason 必须写。
+	// 与 ignore(reason) 同构：不可沉默，可 grep、可统计（IMPL-PLAN §8.5.2）。
+	NoPrecondition       bool
+	NoPreconditionReason string
+	Intents              []Intent
 }
 
 // Intent 是意图声明（requires / invariant / example / effects / cap / idempotent）。

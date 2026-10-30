@@ -445,8 +445,10 @@ H7 的账最终不是靠"删字段"还完的，而是靠**删掉那个记录**�
 - **R2 状态码只在一处出现**：变体 → HTTP 状态码的映射表（运行时的 `status_for_tag`）。
   错误变体按声明顺序从 100 编号，`NotFound→404`、`BadRequest→400`、`Conflict→409`、
   `NotAllowed→405`、`PreconditionFailed→412`，其余（含 `IoError`）→ 500。成功恒 200；
-  `Unit` 成功 = 200 + `Content-Length: 0`。tag 派生的错误响应**不带 body**（要人类可读的文案等 D3）。
-  201 / 204 / 206 等留到 `boundary` 合成，已登记 D0-DEVIATIONS。
+  `Unit` 成功 = 200 + `Content-Length: 0`。tag 派生的错误响应**不带 body** —— D3 之后 412 也走这条通道，
+  `accept.sh` 的「412 empty body (bytes) = 0」钉住它。
+  201 / 204 仍未做（D3 只做到「路由是事实」，成功码仍恒 200，见 §5.1.3 与 D0-DEVIATIONS §2）；
+  206 需要 Range 解析，明确不在范围。
 - **R3 裸 `return` = 该返回类型的单位值**：`Unit` → 没有值，`bytes` → 空 body。
   它不违反 §5.2「缺省值必须显式构造，零值不合法」—— 裸 `return` **不是构造零值，是不写字**；
   §5.2 管的是声明与构造点，那里仍然必须写全。联合按成功成员判定，裸 `return` 永远落在成功分支上。
@@ -456,12 +458,44 @@ H7 的账最终不是靠"删字段"还完的，而是靠**删掉那个记录**�
 运行时按 100+ 映射就静默变成 500。`rt.h` 的 `DP_ERR_*` 与这条声明顺序由
 `TestErrTagsMatchRuntime` 逐项钉死。
 
-**412 的边界不删**：语言侧现在能表达条件失败了（新增 `PreconditionFailed`），但 HTTP 层的
-`If-Match` 比对仍在运行时、进 handler 之前 —— 它是安全边界（与"非法 key 不进 handler"同级），
-搬到 handler 后忘一次就是静默丢更新。语言侧的正解是 `boundary … with idempotency` 合成，
-D3 合流时才删运行时那一份（见 D0-DEVIATIONS §2）。
+**412 的边界不删，但落点变了（D3）**：语言侧能表达条件失败（`PreconditionFailed`），HTTP 层的
+`If-Match` 比对仍是安全边界（与"非法 key 不进 handler"同级），搬到 handler 后忘一次就是静默丢更新。
+D3 的做法是不让 handler 有机会忘：写路由必须写 `with precondition`，由 gen 在调用 impl 之前插入
+`dp_precondition_check` 守卫 —— 实现只有运行时那一份，触发点由声明生成。原来 `rt_http.c` 里
+`is_put` + 22 行 If-Match 比对随之下沉为这一个函数（见 §5.1.3 与 D0-DEVIATIONS §2）。
 
+#### 5.1.3 路由即事实：`boundary` 是 HTTP 的唯一来源（v0.13 / D3 落地）
 
+D2 收敛了响应面，请求面当时仍是散的：动词与路径写在 handler 里（三个 `req.path == "/..."`、
+一个 `req.method == "PUT"`），`If-Match` 的比对藏在 `rt_http.c`（`is_put` + 22 行匹配 + `strip_quotes`）。
+结果是**契约本身残缺**：`boundary` 只声明了 3 个方法，实现里有 5 条路由，accept 有两个用例测的接口
+在契约里根本不存在 —— AI 照着契约生成代码，必然漏掉这两条。D3 把路由搬进声明：
+
+```
+boundary BlobApi @v1 {
+  get(key: str) -> bytes @get("/v1/blob") impl blob_get with idempotency
+  put(key: str, body: bytes) -> Unit @put("/v1/blob") impl blob_put with idempotency, precondition
+  create(key: str) -> Unit @post("/v1/keys") impl keys_create with idempotency
+    without precondition: "创建新 key 没有既有版本可比"
+}
+```
+
+四条规则：
+
+- **动词与路径写在方法上**：`@<verb>("/path")`，动词是小写标识符（get / put / post / delete），
+  在 check 期校验，不是关键字；`precondition` / `without` 是上下文关键字，关键字总数仍是 14。
+- **`impl` 把声明与实现焊死**：指向的函数必须存在、签名必须匹配（`key` / `body` 是请求槽位，
+  其余参数必须是 host 或 env 参数）；有 `impl` 无路由、有路由无 `impl`、两条路由撞动词+路径，
+  都是 `E1`。「契约比实现少」在 D3 之后编译不出来。
+- **写路由必须显式声明预条件**：`with precondition`，或 `without precondition: "理由"`。
+  沉默不是"没有预条件"，而是"忘了写" —— 与「错误不可丢弃」同一条纪律，`E1` 拦下。
+- **服务形态的入口是路由表，不是函数**：有路由就生成 dispatcher，`entry` 与路由并存报 `E1`；
+  `entry` 只留给 CLI 程序，`env` 也只服务这个形态（没有路由时 env 无人消费，同样报错）。
+
+实现面是**一份逻辑、两个薄壳**：`dp_precondition_check` 只在运行时实现一次，gen 只负责在正确的地方
+插触发点；路由匹配就是 `dp_str_eq` 比较，与之前手写的 if 链同构。判据：`accept.sh` 原 13 项逐条同值，
+新增 1 项「412 empty body (bytes) = 0」；`TestPreconditionGuardIsSynthesized` 锁住"守卫在 impl 之前、
+写了 `without` 的路由没有守卫"。
 
 - 值类型默认不可变；命名记录（record）+ 带载荷的判别联合（sum type），`match` **必须穷尽**，无 `default` 逃逸。
 - **构造一律带类型名**：record 写 `Name { f: v }`，变体写限定名 `T.V`（零字段）与 `T.V { f: v }`（带载荷）。
@@ -480,16 +514,19 @@ D3 合流时才删运行时那一份（见 D0-DEVIATIONS §2）。
 
 ```
 boundary UserApi @v1 {
-  get(id: Id<User>): User
-  update(id: Id<User>, patch: Patch<User>): User with idempotency
+  get(id: Id<User>) -> User @get("/users") impl user_get with idempotency
+  update(id: Id<User>, patch: Patch<User>) -> Unit @put("/users") impl user_update with idempotency, precondition
 }
 ```
 
-一条声明同时产出：调用桩、服务端入口、序列化代码、schema 文档、机器可读契约、幂等性要求。
+一条声明同时产出：调用桩、服务端入口、**HTTP 路由表**、序列化代码、schema 文档、机器可读契约、
+幂等性与预条件要求（D3，见 §5.1.3）。
 
 - **只有声明过的类型可以跨边界**（结构/联合/基本类型；不透明句柄、函数、区域引用一律编译失败）。
 - **函数不能跨边界**（无回调式 API，消除一整类"传了个东西过去，另一端收到 null/undefined"的错误）。
 - `with idempotency` 是强制标注项：重试语义必须写在边界声明上，因为重试的正确性不可在调用点局部判定（§3.1/§3.5 的并发范式选择问题）。
+- **写路由对预条件也必须表态**：`with precondition` 或 `without precondition: "理由"`，二者必居其一。
+  预条件的正确性同样不在调用点，而在"上一次成功写入的版本"这个边界事实上。
 - 版本演进规则内置：字段只能增/标可选/标废弃，破坏性变更必须升 `@v`；违反即编译错误。
 
 ### 5.4 效果与能力（effects & capabilities）（→ C2、C3）
@@ -1082,9 +1119,9 @@ fn list_users(db: db[users:read], cap: mem<16KiB>) -> [Summary] | DbError
 | 计算 | fn（闭包）、match、pipe | 3 |
 | 状态 | region（区域）、cell（区域内可更新单值）、value（不可变绑定） | 3 |
 | 效果 | effect（集合类型）、cap（能力）、handle（host 绑定） | 3 |
-| 边界 | boundary（含版本与幂等标注） | 1 |
+| 边界 | boundary（含版本、幂等标注与路由：`@verb("/path")` + `impl`） | 1 |
 | 并发 | task（结构化）、chan（有界通道） | 2 |
-| 服务面 | entry（入口，直接写签名；鉴权/超时/重试预算是签名上的 intent） | 1 |
+| 服务面 | entry（CLI 入口，直接写签名；服务形态的入口是 boundary 的路由表） | 1 |
 | 环境 | env（类型化配置，按环境实例化） | 1 |
 | 类型 | opaque（不透明句柄）、id（类型化标识） | 2 |
 | 失败 | err（联合的具名形态）+ ignore（显式留痕） | 2 |
@@ -1096,7 +1133,8 @@ fn list_users(db: db[users:read], cap: mem<16KiB>) -> [Summary] | DbError
 ### 14.2 关键字盘点（对照 H2 ≤ 14）
 
 `fn` `let` `type` `match` `move` `end` `entry` `boundary` `env` `host` `task` `for` `if` `return` = **14**，同样无余量。
-（区域、效果、能力用类型语法与属性表达，不占关键字；无 `class`/`interface`/`implements`/`extends`/`try`/`catch`/`throw`/`async`/`await`/`defer`/`new`/`this`/`import`/`export`/`mut`/`unsafe` —— **被删掉的这些恰恰是模型最强的先验，因此每一个都必须有对应的 E9 错误码与改写提示，见 §5.9.6、§7.2。**）
+（区域、效果、能力用类型语法与属性表达，不占关键字；`impl` / `with` / `idempotency` / `precondition` / `without`
+同样是上下文关键字，只在 `boundary` 方法尾部有含义；无 `class`/`interface`/`implements`/`extends`/`try`/`catch`/`throw`/`async`/`await`/`defer`/`new`/`this`/`import`/`export`/`mut`/`unsafe` —— **被删掉的这些恰恰是模型最强的先验，因此每一个都必须有对应的 E9 错误码与改写提示，见 §5.9.6、§7.2。**）
 
 ### 14.3 语法示意（**形状占位，语义已定义**）
 
@@ -1231,6 +1269,7 @@ droplet explore      # 列出候选与反例对供人阅读（§7.8.3-4）——
 
 | 版本 | 日期 | 内容 |
 | --- | --- | --- |
+| v0.13 | 2026-10-30 | D3-B1/B2 落地：**`boundary` 成为 HTTP 面的唯一事实源**（新增 §5.1.3）。方法尾部写 `@<verb>("/path") impl <fn>`，动词是 check 期校验的小写标识符（不占关键字），服务形态的入口因此是**路由表**：`entry` 并存报 `E1`，`env` 也只服务这个形态。写路由必须显式表态预条件 —— `with precondition` 或 `without precondition: "理由"`，沉默报 `E1`；gen 在调用 impl 之前插唯一守卫，`rt_http.c` 的 `is_put` + 22 行 If-Match 比对下沉为运行时唯一的 `dp_precondition_check`。`impl` 与路由必须成对、签名必须一致，**契约比实现少**在 D3 之后编译不出来（此前 `boundary` 声明 3 条、实际 5 条路由，`/health` 与 `POST /v1/keys` 不在契约里）。示例源码删掉 `Request` 记录（handler 不再看见 path/method，`if_match` 只由守卫读）；412 的 body 随 tag 派生错误统一为**空**，`accept.sh` 新增「412 empty body (bytes) = 0」（14 项，原 13 项逐条同值）。成功码仍恒 200：201/204（`@created` / `@no_content`）按批准拆成 B3 单独一批，206 需要 Range 解析、不在范围。样例 88 → 92 行；实现 6499 → 6724 行（Go 5037→5255、C 1462→1469，H8 84%）；用例 95 → 106；60 s 长稳 20 轮零失败、1 线程、无残留子进程 |
 | v0.12 | 2026-10-30 | D2 落地：**删掉 `Response`，响应面统一为「成功即值」**（新增 §5.1.2 的 R1/R2/R3）。入口成功类型只能是 `bytes`（有体）或 `Unit`（无体）；状态码只出现在「错误变体 → 状态码」的表里（新增 `NotAllowed`→405、`PreconditionFailed`→412，成功恒 200）；裸 `return` = 该返回类型的单位值（`bytes` 为空 body），它删的是书写而非零值构造。三条在 `check` 期就落地：`Response` 形状报 `E1` 并给改写提示，`check` 与 `build` 之间"响应字段形状"这一类分歧从结构上消失。checker 认错误类型的规则从"谁用过 `!`"改成"签名里写没写"，`rt.h` 的 `DP_ERR_*` 与声明顺序由 `TestErrTagsMatchRuntime` 钉死。`If-Match` 的运行时把守**不删**（安全边界），与语言侧新增的 `PreconditionFailed` 两处并存，D3 由 `boundary` 合流。H7 两笔账第一次归零（`status: 200` 5→0、`body: b""` 3→0）；样例 91 → 88 行；实现 6381 → 6499 行（Go 4927→5037、C 1454→1462，H8 81%）。用例 91 → 95；accept 13 项逐条不变（405 仍空 body、412 仍无快照无提交），60 s 长稳 866 轮零失败、RSS 1852 KB 无增长 |
 | v0.11 | 2026-10-30 | D1 最后一条落地：**`env` 成为一等特性**（§5.7 补 D1 落地段）。`env App { … }` 的块名注册成一个 record 类型，入口写 `cfg: App` 即普通引用、`cfg.root` 即普通字段，无新增类型面；默认值进声明，键类型限 `u64`/`str`。环境变量名由块名推出（`App`+`root`→`APP_ROOT`），源码永不出现变量名；`App{…}` 构造被拒（配置值来自启动环境不来自源码）。checker 新增服务形态判定（从 gen 搬来）并要求底座五键齐备/类型匹配/入口参数可绑定，缺则 `E1`。生成的加载器按声明读 `getenv`，必填键缺失或整数键非数字 → 启动 fail-fast；`dp_cfg_from_env` 硬编码表与三处静默回退删除，`dp_handler` 签名去掉 `root`。§5.7 的「缺键即编译失败」按 schema 层（编译期）与值层（启动期）分工兑现。契约导出恢复 `envs` 分组（此前恒空）。本轮**不引入 secret 不透明类型**（token 仍是 str），`DP_COMMIT_*` 三个运维钩子保留 `DP_` 前缀并登记偏差。两笔账分开结：样例 80 → 91 行（配置从运行时硬编码搬进可见声明），实现 6034 → 6381 行（Go 4564→4927、C 1470→1454）。用例 79 → 89、accept 仍 13 项；这是加特性不是减法，无「旧语法 vs 新语法」`-print-c` 对照，判据换成端到端 HTTP 行为 + 60 s 长稳 + 三条 fail-fast 探针 |
 | v0.10 | 2026-10-30 | D1 第三项落地：**删 `Response.etag`，ETag 改由运行时从 body 推导**（§5.1.1 增第四条减法）。`dp_response` 少一个字段，响应面只剩 `status` / `body` / `content_type`；写 `etag` 在生成期报 `E-GEN` 并给改法，同批把「未知响应字段被静默丢弃」也改成报错。前三条减法删的是书写层冗余（`-print-c` 逐字相同），这条删的是**同一件事的两次计算**，判据换成 HTTP 行为等价：GET 的 tag 逐字节不变、If-Match 链不变；变的是 PUT 不再带 tag（空 body 没有表示）与 /health、/v1/keys 开始带 tag。规则统一为「有表示就有版本」。连带删掉入口的一条能力授权（`sys: Sys` 在 handler 里已零调用），契约 `hosts` 3 → 2 项。两笔账分开结：样例 86 → 80 行（H7），实现 6023 → 6034 行（H8）。§2.2 的 H7 实测同步补 v0.10 复测：`etag` 归零，但 `status: 200` ×5 与 `body: b""` ×3 仍在 —— H7 阈值未达 0，两笔账归属 D2 |

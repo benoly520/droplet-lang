@@ -41,6 +41,7 @@ type Result struct {
 	Types     map[string]*Type
 	Hosts     map[string]*Type
 	Env       *EnvSpec // 程序的 env 声明；没有就是 nil
+	Routes    []Route  // 由 boundary 合成的路由表；空表示不是服务形态（D3）
 }
 
 // ---------- 检查器 ----------
@@ -56,7 +57,11 @@ type checker struct {
 	scope *scope
 	curFn *FnSig
 
-	env *EnvSpec // 已见过的 env 块（D1 只允许一个）
+	env *EnvSpec          // 已见过的 env 块（D1 只允许一个）
+	bnd *ast.BoundaryDecl // 契约块；有 impl 的方法会变成路由（D3）
+
+	routes      []Route // 由 boundary 合成的路由表
+	serviceForm bool    // boundary 里出现过路由或 impl（即使路由本身有错）
 
 	variantOrder []string          // 变体声明顺序，保证 tag 分配稳定
 	variantOwner map[string]string // 变体名 → 首次声明它的 sum，保证 tag 全局唯一
@@ -85,6 +90,7 @@ func Program(p *ast.Program) *Result {
 	c.fillTypes()
 	c.declareFns()
 	c.markErrorTypes()
+	c.checkRouting()
 	c.checkBodies()
 	c.checkEnvService()
 
@@ -123,6 +129,7 @@ func Program(p *ast.Program) *Result {
 		Sigs:      c.fns,
 		Types:     c.types,
 		Hosts:     c.hosts,
+		Routes:    c.routes,
 	}
 	if c.env != nil {
 		res.Env = c.env
