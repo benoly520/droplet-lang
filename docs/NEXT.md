@@ -9,15 +9,20 @@
 
 ## 0. 现在的状态（截至 2026-10-30）
 
-- 本地 `main` = `b646400`（`refactor(lang): check.go 同包拆分，并落地两条语法减法`），
-  **已提交、尚未推送**（`git log origin/main..main` 就是这一条）。工作区干净。
-- 那一条提交同时包含两件事（本来想拆两条，拆不开）：
-  - H8：`internal/check/` 同包拆 8 个文件（`check.go` 1188 → 161，最大 `types.go` 225）
-  - H7：host 能力参数不写名字、Unit 函数不写 `return`（旧写法报 `E0006` / `E1` 并带改写提示）
-  - 为什么不拆：新规则本身写在拆分后新建的 `stmts.go` 里，硬拆会造出一个测试跑不过的中间提交
-- 本轮已实测：`go vet ./...` 无输出、63 个用例全绿、`accept.sh` 12 项全通、
-  `SOAK_SECONDS=60 sh soak.sh` 退出码 0（2 轮 0 失败、1 线程、无残留子进程、`fail.log` 0 字节）、
-  **`-print-c` 逐字相同**（旧样例+旧编译器 vs 新样例+新编译器，`hello.dlt` 与 `webapi` 各一份）
+- 本地 `main` = `5c69477`（`feat(lang): D1 变体构造`），本轮文档在它上面再压一条。
+  **`origin/main` 已经在 `90ccef3`** —— `b646400`（check.go 拆 8 文件 + 两条语法减法）与
+  `90ccef3` 都已推送；上一轮本文件写的「已提交、尚未推送」是错的（当时没真跑
+  `git log origin/main..main` 就下了结论），这轮的推送状态以那条命令为准。
+- `5c69477` 做的事：sum 变体能构造值了 —— 零字段 `T.V`、带载荷 `T.V { f: v }`，
+  `match` 能绑字段（`Square { side } => …`）；带字段的错误变体不再是偏差。
+  两条配套硬规则：**裸变体名仍然非法**（构造点必须看得见类型），
+  **变体名跨程序唯一**（tag 按名字全局分配，撞名在声明处报 `E1`）。
+  顺带按 H8 把 `gen/c.go`（798 → 826 破线）同包拆成 4 个文件。
+- 本轮已实测：`gofmt -l` 无输出、`go vet ./...` 无输出、**72 个用例全绿**、
+  `accept.sh` 12 项全通、`examples/shape.dlt` 编出来跑出 `wide`、
+  **`-print-c` / `contract` / `parse` 三份输出与拆分前逐字相同**（既有样例都不构造变体）
+- 上一轮的 60 s 压缩长稳（`SOAK_SECONDS=60 sh soak.sh`）退出码 0；本轮没重跑长稳，
+  因为它只动编译器的语法侧，`code/lang/internal/runtime/` 一个字节都没改
 
 ## 1. 新机器五分钟上手
 
@@ -25,7 +30,7 @@
 go version                                    # 需 ≥ 1.24（code/lang/go.mod 声明的最低版本）
 mkdir -p .build                               # 编译产物放这里，目录不会自动建
 cd code/lang && go build -o ../../.build/droplet ./cmd/droplet
-go test ./...                                 # 期望全部包 ok（共 63 个用例）
+go test ./...                                 # 期望全部包 ok（共 72 个用例）
 ```
 
 还需要 `cc`（gcc 或 clang，编译器以 `-std=c11` 调用它）。
@@ -59,18 +64,21 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
 
 ### P1 · D1 设计项（**需要点头**）
 
-- **变体构造**：现在裸变体名被 `E1` 拒、`{...}` 只收 record，`match` 只能匹配零值
-- **删 `Response.etag`**：它可由 body 推导（GET 路径已经在算同一个 hash），现为 5 处构造里 4 处写 `""`
 - **`entry` 扁平化**：2 个 `entry`（`Demo` / `Serve`）各带 1 个永不承载内容的 `fn` 外壳
+- **删 `Response.etag`**：它可由 body 推导（GET 路径已经在算同一个 hash），现为 5 处构造里 4 处写 `""`
 - **`env` 一等特性**：现在 `check` 直接拒（`E1`），配置走环境变量
-- 四条都是 H7 基线里剩下未还的账，见 [IMPL-PLAN §8.2](IMPL-PLAN.md)；判据是 H7 实测归零 +
-  63 用例与 `accept.sh` 全通 + 旧写法报错带改写提示
-- 已定顺序：变体构造 → `entry` 扁平化 → 删 `Response.etag` → `env`（先解锁语言表达力，
-  再删冗余语法位置，`env` 放最后因为它要跟 `contract` 的 `envs` 分组一起回来）
+- 三条都是 H7 基线里剩下未还的账，见 [IMPL-PLAN §8.2](IMPL-PLAN.md)；判据是 H7 实测归零 +
+  72 用例与 `accept.sh` 全通 + 旧写法报错带改写提示
+- 已定顺序：`entry` 扁平化 → 删 `Response.etag` → `env`（先删冗余语法位置，
+  `env` 放最后因为它要跟 `contract` 的 `envs` 分组一起回来）
+- **新解锁的一条**：412 条件失败可以改回「错误是值」了 —— handler 返回 `ApiError.Conflict`，
+  同时删掉 `rt_http.c` 里自带的 If-Match 比对。以前它在语言侧表达不出来（构造不出错误值），
+  变体构造落地后障碍消失。这条动了 HTTP 语义与运行时，**要单独点头**，也意味着要重跑长稳
 
 ## 3. 等你拍板的两件事
 
-1. 本地那条提交现在 `git push`，还是等 D1 第一项（变体构造）做完一起推？
+1. 现在本地攒了 2 条未推送（D1 变体构造 + 本轮文档）：`git push`，
+   还是继续攒到 D1 第二项（`entry` 扁平化）？
 2. `.build/verify.sh` 要不要提升为入库脚本 `code/webapi/deploy/verify-docs.sh`
    （它把 IMPL-PLAN §6 的复核命令整段跑一遍，现在只在被 gitignore 的目录里）？
 
@@ -82,12 +90,22 @@ export TMPDIR=$PWD/.build GOCACHE=$TMPDIR/gocache
   `verify.sh`（= IMPL-PLAN §6 的抽取）、`quickstart.sh`（= README Quick start 的抽取）、
   `audit.sh`（运行时 `dp_*` 调用点计数）。本轮（2026-10-30）`verify.sh` 已不在，
   要复核就按 IMPL-PLAN §6 的命令逐段跑
-- `match` 分支之间**必须**有逗号（尾随可选），漏了报 `E0006`
+- 交接文档里的 **git 状态必须每次真跑一遍再写**（`git status --short`、
+  `git log --oneline origin/main..main`）。上一轮凭印象写了「已提交、尚未推送」，
+  实际那两条早在 origin 上；错的结论比没结论更贵，因为下一班会照着它决定推不推
 - 所有 `*_test.go` 用 **tab** 缩进，用空格写 `SearchReplace` 会匹配失败
 - 编辑文件与跑 `go vet` 不要放在同一批并行调用里，会读到旧文件
 - 做“拆分前后逐字相同”的对照时，`git worktree add .build/head HEAD` 后在 worktree 里用
   相对路径 `-o ../../../.build/x` 会落到 `.build/.build/x`（层级算错，反查不到）—— 用绝对路径
 - 沙盒跑起来先 `export TMPDIR=$PWD/.build GOCACHE=$PWD/.build/gocache`，否则 `go build` 建临时目录失败
+- 改 `*_test.go` 里某个测试函数：**整段函数（含函数头）一起替换**，别只替换函数头下面几行。
+  本轮一次批量替换把 `func TestVariantWithFieldsRejected(t *testing.T) {` 吞掉了，留下一个
+  没有函数头的悬空语句块；接着按行去补又因为「以为是 4 空格、实际是 tab」连续匹配失败，白绕一圈
+- 改 markdown 的**表格行**用一次性 python 补丁（`.build/patch_*.py`：读全文、`replace(old, new, 1)`、
+  找不到就 raise）。编辑工具会重排整张表，diff 里混进一堆无关空格改动，看不出真正改了哪条
+- 语法侧再加构造类特性前先估行数：`gen/c.go` 曾因变体构造从 798 涨到 826，**破 H8 的 800 线**，
+  只能同包拆文件（见 IMPL-PLAN §8.3 的 D1 追加）。拆分与加语法可以放同一条提交，
+  但 `-print-c` 逐字相同的证据要在拆分完成、既有样例仍不使用新语法时取
 
 ## 5. 文档地图
 
