@@ -659,14 +659,14 @@ C 写，`tsc` 用 TS 写。**没有人用 OCaml 写 Rust 程序。**
 开发用哪个版本写在文档里就够。护栏（**已建**，`.github/workflows/ci.yml`，2026-10-30）：跑两档 ——
 `floor` 用 1.22 守下限（任何 1.23+ 的 API 混进来、或有人把 `go` 指令抬高，立刻红），
 `latest` 用最新稳定版守前向兼容。两档都设 `GOTOOLCHAIN=local`，防止它偷偷下载新工具链
-把问题"修好"。CI 只做 build / vet / test；`accept.sh`、`soak.sh` 要端口与常开机器，不进去。
+把问题"修好"。CI 做 build / vet / test，并从 v0.22 起跑 `accept.sh`（HTTP 契约验收）；`soak.sh` 要常开机器，不进去。
 
 ### 7.2 目录结构（Go）
 
 ```
 droplet-lang/code/lang/
   go.mod                         # module droplet
-  cmd/droplet/main.go            # 动词表：parse / check / build / contract
+  cmd/droplet/main.go            # 动词表：check / build / contract（发布面）+ verify / explore（工具层）
   internal/token/token.go        # 词法单元与源码位置
   internal/lex/lex.go
   internal/ast/ast.go
@@ -674,7 +674,6 @@ droplet-lang/code/lang/
   internal/check/               # 两遍式检查，导出类型/Tag/Sigs 供 codegen 复用（9 个文件，同包）
     check.go  types.go  decls.go  hostcap.go  boundary.go  stmts.go  exprs.go  calls.go  construct.go
   internal/host/host.go          # host 能力表：名字 + 参数/返回的 ABI 类型 + 生成 C 调用的方式
-  internal/dump/dump.go          # AST → JSON（M0 的验收出口）
   internal/gen/                  # AST → C11（4 个文件，同包）
     c.go  stmts.go  exprs.go  main.go
   internal/gen/http_test.go      # 端到端：编出服务、拉进程、发真请求
@@ -730,7 +729,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now blobd
 
 | # | 交付 | 通过判据（不过不进下一步） | 预估 | 状态 |
 | --- | --- | --- | --- | --- |
-| M0 | 骨架 + lexer + parser + AST dump | 三个样例 `.dlt` 全部 parse 成功；`droplet parse` 输出合法 JSON；错误带行列号与 E 码 | 3–4 天 | **已完成** 2026-10-30（3 样例通过，6 个单元测试绿，AST 2559 行） |
+| M0 | 骨架 + lexer + parser + AST dump | 三个样例 `.dlt` 全部 parse 成功；`droplet parse` 输出合法 JSON；错误带行列号与 E 码 | 3–4 天 | **已完成** 2026-10-30（3 样例通过，6 个单元测试绿，AST 2559 行）。**注**：`droplet parse` 与 `internal/dump` 已于 v0.23 删除以腾预算（§8.6），判据里的那条出口不再可重跑，证据按历史保留 |
 | M1 | checker（E0/E1/E3/E11）+ `check` | 三个样例 0 错误；11 个反例各自命中预期 E 码且不级联 | 4–6 天 | **已完成** 2026-10-30（14 个 check 测试绿，错误按行列排序输出） |
 | M2 | codegen + `hello.dlt` 跑通 | `droplet build examples/hello.dlt && ./hello` 打印 `world` | 5–8 天 | **已完成** 2026-10-30（4 个 gen 测试绿，含 `-Werror` 端到端；30 个测试全过） |
 | M3 | `rt.c`（HTTP + blob + hash + spawn）+ `main.dlt` 编译 | `curl` 五个接口全通；412 / 404 / 400 / 413 各自命中；RSS 有基线数字 | 1.5–2 周 | **已完成** 2026-10-30（11 个 HTTP 端到端子测试绿，412/404/400/413/405 均命中；RSS 空转 1.83 MB、8 MB `PUT` 峰值 9.98 MB；`droplet contract` 可导出契约 JSON） |
@@ -905,7 +904,7 @@ H8 是 SPEC §2.2 里最新补的一条（单文件 ≤ 800 行、编译器 + �
 | `internal/parse/parse.go` | 661 | ok |
 | `internal/ast` | 374 | ok |
 | `internal/lex` | 311 | ok |
-| `internal/dump` | 258 | ok |
+| `internal/dump` | 258 | ok（v0.23 已删除，见 §8.6） |
 | 其余（cmd / contract / host / token / runtime） | 770 | ok |
 | Go 非测试合计 | 4564 | — |
 | 内嵌运行时 C（4 个 `.c` + `rt.h`） | 1470（最大 `rt_http.c` 622） | ok |
@@ -913,7 +912,8 @@ H8 是 SPEC §2.2 里最新补的一条（单文件 ≤ 800 行、编译器 + �
 
 另一个不打算消灭、只打算标价的数字：**新增一个 AST 节点要改 5 处** —— `ast`（结构体）→ `parse`（解析）→
 `check`（类型与签名）→ `gen`（生成 C）→ `dump`（`parse` 的输出）。这是管道结构的必然，不是缺陷；
-登记它只是为了在“加个语法”的决策时看得见价钱。目前只有 `dump` 有专用护栏（`Unknown*` 两条测试），
+登记它只是为了在“加个语法”的决策时看得见价钱。原先只有 `dump` 有专用护栏（`Unknown*` 两条测试）；
+**v0.23 删掉 dump 后改动面回到 4 处，那两条护栏随之消失**（见 §8.6）。
 `check` 与 `gen` 靠用例（v0.12 起 95 个，其中 `TestErrTagsMatchRuntime` 是 gen 侧第一条
 跨语言一致性护栏 —— 它盯的是 checker 的编号和 `rt.h` 的常量有没有对不上）。
 
@@ -1294,6 +1294,33 @@ C 1469 → 1472（+3：`no_body` 判断与注释）、合计 6724 → **6773（8
   说明长稳脚本里也硬编码了成功码；已改成 204，并在脚本里注明原因。
   教训：改客户端可见口径时，`grep` 整个 `deploy/` 而不只是测试。
 - `TestSuccessStatusProjected` 断言生成物里恰好一条 201、一条 204，且 204 分支不含 `content_type` / `out->body`。
+
+---
+
+### 8.6 v0.23 预算回收：删 `parse` + `internal/dump`
+
+P5 把三条路摆出来（删 `parse`/`dump`、砍运行时能力、抬 H8），本批选了第一条，理由只在预算这一条上成立：
+`internal/dump` 是 **AST 的 JSON 投影**，不是产品面 —— 没有客户端、没有契约消费方读它，
+它唯一的产出是给人看 AST。而生成 C、导出契约、跑 verify 都不经过它。
+
+账：Go 非测试 6499 → **6228**，加 C 1472 = **7700 / 8000（96%），余量 29 → 300 行**；用例 139 → 136。
+
+代价与处置：
+
+- **M0 的验收出口没了**。M0 那行判据写着「`droplet parse` 输出合法 JSON」，现在没法复核。
+  记录不删：当时的证据（3 样例、6 个单元测试、AST 2559 行）保留在 §8 里作为历史，
+  但**从 v0.23 起它不再是可重跑的命令**。要复现只能 `git checkout v0.22` 之前的树。
+- **「`Unknown*` 不得出现」两条护栏随之消失**。它们守的是 dump 的降级分支（type switch 的 default），
+  而那条分支只存在于 dump 内部（`grep Unknown internal/` 除 dump 外为空），所以删包即删问题。
+  它们**顺带**守的「新增 AST 节点别忘了改消费方」没有替代品 —— 现在这一条只靠 `check` / `gen`
+  自己编译不过时暴露（比静默降级早，但不覆盖"生成了但语义不对"）。
+- **新增 AST 节点的改动面从 5 处回到 4 处**：`ast` → `parse` → `check` → `gen`。
+  §8.3 那句「要改 5 处」是 D0 的历史计量，v0.23 起为 4。
+- 顺手修掉一处**注释错位**：`cmdExplore` 的文档注释里混着 `cmdVerify` 的那段（v0.21 把它插在了
+  两段注释之间，Go 把整块当成了 `explore` 的 doc）。`go vet` 不查这个，`golint` 类工具才会。
+
+没有做的事：`internal/parse/parse.go`（728/800）继续贴着单文件天花板，本次不动。
+腾出的 300 行现在够做 §7.8.2 缺的那半（按签名生成输入，约 +120 行），这是 P5 的下一步候选。
 
 ---
 

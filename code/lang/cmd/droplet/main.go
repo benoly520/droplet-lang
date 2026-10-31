@@ -1,6 +1,8 @@
 // Command droplet 是 Droplet 语言的工具链入口。
 //
-// M0：parse；M1：check；M2：build；M3：contract。
+// 发布面：check / build / contract（M1–M3）；工具层：verify / explore（§7.8，产物不可发布）。
+// M0 的 AST 导出（parse / internal/dump）已于 v0.23 删除 —— 它守的降级路径随包一起消失，
+// 换来的行数记在 docs/NEXT.md 的 P5。
 package main
 
 import (
@@ -14,7 +16,6 @@ import (
 	"droplet/internal/ast"
 	"droplet/internal/check"
 	"droplet/internal/contract"
-	"droplet/internal/dump"
 	"droplet/internal/gen"
 	"droplet/internal/parse"
 	rt "droplet/internal/runtime"
@@ -24,7 +25,6 @@ import (
 const usageText = `droplet - Droplet 语言工具链
 
 用法：
-  droplet parse <file.dlt>...            输出合并后的 AST（JSON）
   droplet check <file.dlt>...            类型与错误检查
   droplet build <file.dlt>... -o <out>   生成 C、调用 cc，产出可执行文件
                                          -print-c 只输出 C；-keep-c 保留 <out>.c
@@ -42,8 +42,6 @@ func main() {
 	}
 
 	switch args[0] {
-	case "parse":
-		cmdParse(args[1:])
 	case "check":
 		cmdCheck(args[1:])
 	case "build":
@@ -60,17 +58,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "droplet: 未知命令 %q\n\n%s", args[0], usageText)
 		os.Exit(2)
 	}
-}
-
-func cmdParse(files []string) {
-	needFiles("parse", files)
-	prog := loadProgram(files)
-
-	out, err := encodeJSON(dump.Program(prog))
-	if err != nil {
-		fail(err)
-	}
-	fmt.Print(out)
 }
 
 func cmdCheck(files []string) {
@@ -100,10 +87,6 @@ func cmdContract(files []string) {
 	fmt.Print(out)
 }
 
-// cmdVerify 把 example 当可执行 oracle 跑一遍（工具层，见 internal/verify）。
-//
-// 退出码：0 = 全部可执行样例成立；1 = 有样例不成立，或一条可执行的都没有。
-// "没有可执行样例"按失败处理 —— 那意味着意图没有任何牙齿（§7.8.1）。
 // cmdExplore 是 §7.8.2 的最小形态：只比**已声明**的 example，不生成输入。
 // 退出码：0 唯一存活；1 零存活或欠定（§7.8.3 A：不自动挑一个）；2 用法错。
 func cmdExplore(files []string) {
@@ -169,6 +152,10 @@ func cmdExplore(files []string) {
 	os.Exit(1)
 }
 
+// cmdVerify 把 example 当可执行 oracle 跑一遍（工具层，见 internal/verify）。
+//
+// 退出码：0 = 全部可执行样例成立；1 = 有样例不成立，或一条可执行的都没有。
+// "没有可执行样例"按失败处理 —— 那意味着意图没有任何牙齿（§7.8.1）。
 func cmdVerify(files []string) {
 	needFiles("verify", files)
 	prog := loadProgram(files)

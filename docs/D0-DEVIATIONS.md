@@ -7,7 +7,7 @@
 > 判定口径：一律以 `code/lang` 与 `code/webapi/src/*.dlt` 的**实际行为**为准，不以文档里的
 > 意图为准。每一条都能用第 5 节的命令复核。
 >
-> D0 = M0–M4。最后核对于 2026-10-30。
+> D0 = M0–M4。最后核对于 2026-10-31（v0.23 删 `parse`/`dump`）。
 
 ## 1. 语言
 
@@ -47,7 +47,7 @@
 
 | 项 | SPEC | D0 实际 | 原因 | 补齐 |
 | --- | --- | --- | --- | --- |
-| 动词 | `check` / `mem` / `bench` / `explore` / `trace` / `verify` | `parse` / `check` / `build` / `contract`（+ `help`） | 让服务跑起来所需的最小子集 | D1 |
+| 动词 | `check` / `mem` / `bench` / `explore` / `trace` / `verify` | 发布面 `check` / `build` / `contract`；工具层 `verify` / `explore`；另 `help`。**`parse` 已在 v0.23 删除**（连同 `internal/dump`，为腾 H8 预算；`mem` / `bench` / `trace` 仍未做） | 让服务跑起来所需的最小子集 + `verify`/`explore` 两个工具层命令；`parse` 只是 AST 的 JSON 投影，删它是预算选择而不是能力取舍（见 IMPL-PLAN §8.6） | D1（`mem` / `bench` / `trace`） |
 | 错误码 | `E0`–`E12` | `E1`（类型与匹配）、`E2`（能力与签名）、`E3`（边界序列化）、`E11` + 语法号 `E0003`–`E0009` + 生成期 `E-GEN` | 没实现的检查不报假错误；生成期只剩结构形状类报错 | 随特性 |
 | 增量编译 | 未限定 | 每次全量重编 | 样例只有 95 行（`contract.dlt` 64 + `main.dlt` 31） | 不做 |
 | 成功码 | 未限定（HTTP 面） | **已完成（v0.14）**：`@created` / `@no_content` 投影 201 / 204，默认 200；契约 JSON 导出 `success`（200 省略） | 以前只能恒 200（D2 删 `Response` 的代价）；恢复表达力的方式是声明上的注解，不是把状态码写回 handler | 已完成；206 不在范围 |
