@@ -18,6 +18,7 @@ import (
 	"droplet/internal/gen"
 	"droplet/internal/parse"
 	rt "droplet/internal/runtime"
+	"droplet/internal/verify"
 )
 
 const usageText = `droplet - Droplet 语言工具链
@@ -28,6 +29,7 @@ const usageText = `droplet - Droplet 语言工具链
   droplet build <file.dlt>... -o <out>   生成 C、调用 cc，产出可执行文件
                                          -print-c 只输出 C；-keep-c 保留 <out>.c
   droplet contract <file.dlt>...         导出契约 JSON（boundary / 函数签名 / tag 表 / env 配置）
+  droplet verify <file.dlt>...           把 example 当可执行 oracle 跑一遍（工具层，产物不可发布）
   droplet help                           显示本帮助
 `
 
@@ -47,6 +49,8 @@ func main() {
 		cmdBuild(args[1:])
 	case "contract":
 		cmdContract(args[1:])
+	case "verify":
+		cmdVerify(args[1:])
 	case "help", "-h", "--help":
 		fmt.Print(usageText)
 	default:
@@ -91,6 +95,39 @@ func cmdContract(files []string) {
 		fail(err)
 	}
 	fmt.Print(out)
+}
+
+// cmdVerify 把 example 当可执行 oracle 跑一遍（工具层，见 internal/verify）。
+//
+// 退出码：0 = 全部可执行样例成立；1 = 有样例不成立，或一条可执行的都没有。
+// "没有可执行样例"按失败处理 —— 那意味着意图没有任何牙齿（§7.8.1）。
+func cmdVerify(files []string) {
+	needFiles("verify", files)
+	prog := loadProgram(files)
+	res := check.Program(prog)
+	reportCheck(res)
+
+	out, err := verify.Run(prog, res)
+	if err != nil {
+		fail(err)
+	}
+	for _, c := range out.Cases {
+		switch {
+		case c.Skip != "":
+			fmt.Printf("  skip  %s   %s — %s\n", c.Src, c.Pos, c.Skip)
+		case c.OK:
+			fmt.Printf("  PASS  %s   %s\n", c.Src, c.Pos)
+		default:
+			fmt.Printf("  FAIL  %s   %s（%s 的样例不成立：实现改变了这条样例的期望）\n", c.Src, c.Pos, c.Owner)
+		}
+	}
+	fmt.Printf("verify: %d 条样例，%d 条可执行\n", len(out.Cases), out.Ran)
+	if out.Ran == 0 {
+		fmt.Fprintln(os.Stderr, "droplet: 没有可执行的样例 —— 意图没有牙齿（§7.8.1）；样例要写成封闭表达式，例如 `example f(3) == 9`")
+	}
+	if !out.Passed() {
+		os.Exit(1)
+	}
 }
 
 // cmdBuild 生成 C 源码，释放内嵌运行时，再调用系统 cc 产出可执行文件。

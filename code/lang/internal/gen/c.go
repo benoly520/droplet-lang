@@ -23,11 +23,27 @@ type gen struct {
 	tmps  int
 	cur   *check.FnSig
 	errs  []error
+
+	// verify 非 nil 时生成"验证用编译单元"：同样的函数，main 换成
+	// dp_verify_count / dp_verify_expr（见 main.go 与 internal/verify）。
+	verify []ast.Expr
 }
 
 // C 生成完整 C 源码；出现生成期错误时返回 error。
 func C(prog *ast.Program, res *check.Result) (string, error) {
-	g := &gen{prog: prog, res: res}
+	return generate(prog, res, nil)
+}
+
+// CVerify 生成验证用编译单元：程序的全部函数照旧，但入口换成
+// `dp_verify_count()` 与 `dp_verify_expr(i, a)` —— 后者逐条求值样例表达式。
+//
+// 这是工具层的产物（`droplet verify`），不参与发布构建；`main` 由驱动文件提供。
+func CVerify(prog *ast.Program, res *check.Result, exprs []ast.Expr) (string, error) {
+	return generate(prog, res, exprs)
+}
+
+func generate(prog *ast.Program, res *check.Result, exprs []ast.Expr) (string, error) {
+	g := &gen{prog: prog, res: res, verify: exprs}
 	g.header()
 	g.typeDecls()
 	g.retTypes()

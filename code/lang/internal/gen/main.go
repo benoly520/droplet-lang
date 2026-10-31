@@ -14,6 +14,11 @@ import (
 // ---------- main ----------
 
 func (g *gen) main() {
+	// 验证用编译单元：入口换成样例求值函数，main 由驱动提供（internal/verify）。
+	if g.verify != nil {
+		g.verifyMain()
+		return
+	}
 	// 服务形态由 boundary 的路由表定义（D3）：有路由就没有 entry，反之亦然。
 	if len(g.res.Routes) > 0 {
 		g.serviceMain()
@@ -32,6 +37,39 @@ func (g *gen) main() {
 		return
 	}
 	g.cliMain(sig)
+}
+
+// verifyMain 生成样例求值入口：`dp_verify_count()` 与 `dp_verify_expr(i, a)`。
+//
+// 表达式在函数上下文里求值，但**不允许**产生前置语句：样例里不能有 `!`、
+// 不能调用联合返回的函数或能力（这些会发临时变量）。校验在 internal/verify 做，
+// 这里只做兜底 —— 发语句就记生成错误，绝不把语句吐到 switch 中间。
+func (g *gen) verifyMain() {
+	g.line("int dp_verify_count(void) {")
+	// 样例不一定调到每个函数；引用一遍，避免 -Wunused-function 在 -Werror 下卡住。
+	for _, name := range sortedFnNames(g.res) {
+		g.line("  (void)&dp_f_%s;", name)
+	}
+	g.line("  return %d;", len(g.verify))
+	g.line("}")
+	g.line("")
+	g.line("int dp_verify_expr(int i, dp_arena* a) {")
+	g.line("  (void)a;")
+	g.line("  switch (i) {")
+	for i, e := range g.verify {
+		g.body = g.body[:0]
+		g.depth = 0
+		s := g.expr(e)
+		if len(g.body) > 0 {
+			g.failf(token.Pos{}, "样例 %d 需要前置语句，验证器不支持（不能调用联合返回的函数或能力）", i)
+			g.body = g.body[:0]
+			continue
+		}
+		g.line("  case %d: return (%s) ? 1 : 0;", i, s)
+	}
+	g.line("  }")
+	g.line("  return -1;")
+	g.line("}")
 }
 
 // cliMain 生成命令行形态：参数按位置取 argv，缺省用类型零值。
