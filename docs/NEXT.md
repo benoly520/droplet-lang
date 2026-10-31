@@ -9,7 +9,7 @@
 
 ## 0. 现在的状态（截至 2026-10-30）
 
-- `origin/main` = `main` = `ffde7a3`（v0.16，E10 静态片段那笔）。
+- `origin/main` = `main` = `17d2b37`（v0.17，droplet verify 那笔）。
 - 本轮（v0.17）做的事：**`droplet verify` —— example 成为可执行的 oracle（工具层）**。
   - 新包 `internal/verify`：把**封闭**的 example（常量 + 程序内具名函数调用）编进专用二进制
     逐条求值，`PASS` / `FAIL` / `skip（原因）` 每条都指到源位置。
