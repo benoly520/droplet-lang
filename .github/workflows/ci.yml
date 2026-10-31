@@ -40,6 +40,8 @@ jobs:
       - name: go test
         working-directory: code/lang
         run: go test ./...
+      - name: accept（HTTP 契约验收，测的是 wire）
+        run: sh code/webapi/deploy/accept.sh
 
   latest:
     name: Go latest（前向兼容）
@@ -63,3 +65,5 @@ jobs:
       - name: go test
         working-directory: code/lang
         run: go test ./...
+      - name: accept（HTTP 契约验收，测的是 wire）
+        run: sh code/webapi/deploy/accept.sh
