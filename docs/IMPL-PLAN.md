@@ -474,7 +474,7 @@ int main(void) {
 | 无 `entry` 的程序 | 生成立即返回 0 的 `main`，并引用全部函数避免 `-Wunused-function` | 无需补 |
 | `If-Match` / 412 归运行时 | 412 由运行时在进 handler 之前判定。以前是因为构造不出错误值（裸变体名被 `E1` 拒），handler 表达不了“条件失败”；D1 变体落地后这个理由消失了 | 改成 handler 返回 `ApiError.Conflict`，同时删掉 runtime 自带的 If-Match 比对（下一项） |
 | 提交是 leading-edge 防抖 | 窗口内的后续写不单独提交，要等下一次写才带上；若进程之后再无写入，最后一次写只落盘、不进历史 | 要“每次写都进历史”就把 `DP_COMMIT_DEBOUNCE` 设 0 |
-| `contract` 导出的意图 | 导出口径：文字（`invariant` / `cap` / `idempotent`）、`effects` 的标识符，以及 `requires` / `example` 表达式的规范形（v0.15 起，`intents[].expr`，由 `internal/print` 渲染） | `E10` 落了静态片段（v0.16）与工具层证据面 `droplet verify`（v0.17，封闭 example 当可执行 oracle）；变异检验仍未接，见 D0-DEVIATIONS |
+| `contract` 导出的意图 | 导出口径：文字（`invariant` / `cap` / `idempotent`）、`effects` 的标识符，以及 `requires` / `example` 表达式的规范形（v0.15 起，`intents[].expr`，由 `internal/print` 渲染） | `E10` 落了静态片段（v0.16）与工具层证据面 `droplet verify`（v0.17 取值 + v0.18 两类变异）；另四类变异未接，见 D0-DEVIATIONS |
 
 ## 6. C 运行时 `code/lang/internal/runtime/assets/`
 

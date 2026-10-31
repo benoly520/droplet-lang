@@ -107,7 +107,7 @@ func cmdVerify(files []string) {
 	res := check.Program(prog)
 	reportCheck(res)
 
-	out, err := verify.Run(prog, res)
+	out, err := verify.Run(prog, res, verify.Options{Mutate: true})
 	if err != nil {
 		fail(err)
 	}
@@ -125,7 +125,25 @@ func cmdVerify(files []string) {
 	if out.Ran == 0 {
 		fmt.Fprintln(os.Stderr, "droplet: 没有可执行的样例 —— 意图没有牙齿（§7.8.1）；样例要写成封闭表达式，例如 `example f(3) == 9`")
 	}
-	if !out.Passed() {
+
+	// 变异报告：存活下来的那几处就是"意图在这里没有牙齿"的证据（§7.8.1）。
+	miss := 0
+	for _, m := range out.Mutants {
+		if m.CaughtBy == "" {
+			miss++
+			fmt.Printf("  MISS  %s   %s — 没有样例抓住这处改动\n", m.Desc, m.Pos)
+			continue
+		}
+		fmt.Printf("  CAUGHT  %s   %s — %s\n", m.Desc, m.Pos, m.CaughtBy)
+	}
+	if len(out.Mutants) > 0 {
+		fmt.Printf("mutate: %d 处变异，%d 处没被抓住\n", len(out.Mutants), miss)
+	}
+	if miss > 0 {
+		fmt.Fprintln(os.Stderr, "droplet: 有变异存活 —— 意图在那些位置没有约束力（§7.8.1 的 E10 事实，由工具报出而不是让构建失败）")
+	}
+
+	if !out.Passed() || miss > 0 {
 		os.Exit(1)
 	}
 }

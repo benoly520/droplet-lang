@@ -5,8 +5,9 @@
 // ① §7.8.1 的变异检验需要独立验证器，把它塞进编译器会破 H8；
 // ② "给人看证据"与"能不能上线"必须分开，这是收敛判据 A 的前提。
 //
-// 这一版只做第一半：把封闭的 example 编进一个专用二进制并逐条求值。
-// 变异那一半（改一处、重跑、看样例抓不抓得住）随后接在同一套驱动上。
+// 两半都在这里：① 把封闭的 example 编进一个专用二进制并逐条求值；
+// ② 逐处改动实现（常量 +1、边界翻转，见 mutate.go）再跑同一批样例，
+// 看有没有一条翻面 —— 没翻面的那几处就是"意图没有牙齿"的证据。
 package verify
 
 import (
@@ -36,8 +37,16 @@ type Case struct {
 
 // Result 是一次 verify 的结论。
 type Result struct {
-	Cases []Case
-	Ran   int // 真正跑过的条数
+	Cases   []Case
+	Ran     int      // 真正跑过的条数
+	Mutants []Mutant // opt.Mutate 为真时：每处变异有没有被样例抓住
+}
+
+// Options 控制验证范围。
+type Options struct {
+	// Mutate 打开机械变异（常量 +1、边界翻转）：改一处实现、重跑同一批样例，
+	// 看有没有样例翻面。它把"意图有没有牙齿"变成看得见的账（§7.8.1）。
+	Mutate bool
 }
 
 // Passed 报告是否全部通过。没有可执行样例不算通过 —— 那等于没证据。
@@ -55,7 +64,7 @@ func (r *Result) Passed() bool {
 
 // Run 收集程序里的 example、生成验证用编译单元、编译并逐条求值。
 // 调用方负责先跑 check 并把错误报出去（这里假定 res.Errors 为空）。
-func Run(prog *ast.Program, res *check.Result) (*Result, error) {
+func Run(prog *ast.Program, res *check.Result, opt Options) (*Result, error) {
 	if len(res.Routes) > 0 {
 		return nil, fmt.Errorf("服务形态暂不支持 verify：实现函数依赖 env 与 host 能力，样例跑不起来")
 	}
@@ -95,7 +104,9 @@ func Run(prog *ast.Program, res *check.Result) (*Result, error) {
 	}
 
 	// 按表达式顺序回填结果：被跳过的用例不进二进制，用 ran 游标对齐。
+	// srcs 与二进制里的下标同序，变异报告要用它点名"是哪条样例抓住了"。
 	ran := 0
+	srcs := make([]string, 0, len(exprs))
 	for i := range out.Cases {
 		if out.Cases[i].Skip != "" {
 			continue
@@ -105,9 +116,18 @@ func Run(prog *ast.Program, res *check.Result) (*Result, error) {
 			return nil, fmt.Errorf("验证驱动少返回了第 %d 条例样", ran)
 		}
 		out.Cases[i].OK = ok
+		srcs = append(srcs, out.Cases[i].Src)
 		ran++
 	}
 	out.Ran = ran
+
+	if opt.Mutate && ran > 0 {
+		ms, err := mutate(prog, res, exprs, srcs, results)
+		if err != nil {
+			return nil, err
+		}
+		out.Mutants = ms
+	}
 	return out, nil
 }
 

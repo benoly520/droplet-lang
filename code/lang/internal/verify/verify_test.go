@@ -23,6 +23,13 @@ func load(t *testing.T, src string) (*ast.Program, *check.Result) {
 	return prog, res
 }
 
+// runOpt 是 Run 的测试便利入口：parse/check 与选项分开传。
+func runOpt(t *testing.T, src string, opt Options) (*Result, error) {
+	t.Helper()
+	prog, res := load(t, src)
+	return Run(prog, res, opt)
+}
+
 // TestRunReportsPassAndFail 是最核心的一条：样例必须真的跑在实现上，
 // 不成立的要被点名（示例实现故意写错一条）。
 func TestRunReportsPassAndFail(t *testing.T) {
@@ -38,7 +45,7 @@ entry main() -> Unit
   return
 }
 `
-	out, err := Run(load(t, src))
+	out, err := runOpt(t, src, Options{})
 	if err != nil {
 		t.Fatalf("运行失败：%v", err)
 	}
@@ -72,7 +79,7 @@ entry main() -> Unit
   return
 }
 `
-	out, err := Run(load(t, src))
+	out, err := runOpt(t, src, Options{})
 	if err != nil {
 		t.Fatalf("运行失败：%v", err)
 	}
@@ -100,7 +107,7 @@ entry main() -> Unit invariant "无" {
   return
 }
 `
-	out, err := Run(load(t, src))
+	out, err := runOpt(t, src, Options{})
 	if err != nil {
 		t.Fatalf("运行失败：%v", err)
 	}
@@ -119,11 +126,76 @@ entry main() -> Unit invariant "无" {
   return
 }
 `
-	out, err := Run(load(t, src))
+	out, err := runOpt(t, src, Options{})
 	if err != nil {
 		t.Fatalf("运行失败：%v", err)
 	}
 	if len(out.Cases) != 0 || out.Ran != 0 || out.Passed() {
 		t.Fatalf("没有样例时应为空且不通过：%+v", out)
+	}
+}
+
+// TestMutateCatchesAndMisses 是 E10 证据面的核心：同一条实现里，
+// 被样例覆盖到的常量/边界要被抓住，没被覆盖到的要如实记成 MISS。
+func TestMutateCatchesAndMisses(t *testing.T) {
+	const src = `fn sign(x: u64) -> u64 {
+  if x < 10 {
+    return 1
+  }
+  return 2
+}
+
+entry main() -> Unit
+  example sign(9) == 1
+  invariant "无"
+{
+  return
+}
+`
+	out, err := runOpt(t, src, Options{Mutate: true})
+	if err != nil {
+		t.Fatalf("运行失败：%v", err)
+	}
+	// 四处变异：x < 10 的两个常量与边界，以及 return 1 / return 2 的常量。
+	if len(out.Mutants) != 4 {
+		t.Fatalf("期望 4 处变异，得到 %d：%+v", len(out.Mutants), out.Mutants)
+	}
+	caught, missed := 0, 0
+	for _, m := range out.Mutants {
+		if m.CaughtBy == "" {
+			missed++
+		} else {
+			caught++
+		}
+	}
+	if caught != 1 || missed != 3 {
+		t.Fatalf("期望 1 抓住 / 3 存活，得到 %d / %d：%+v", caught, missed, out.Mutants)
+	}
+	for _, m := range out.Mutants {
+		if m.CaughtBy != "" && m.CaughtBy != "sign(9) == 1" {
+			t.Errorf("抓住它的样例应为 sign(9) == 1，得到 %q", m.CaughtBy)
+		}
+	}
+}
+
+// TestMutateOffByDefault 锁住：不开选项就不编译变异，别让 verify 悄悄变慢。
+func TestMutateOffByDefault(t *testing.T) {
+	const src = `fn double(x: u64) -> u64 {
+  return x * 2
+}
+
+entry main() -> Unit
+  example double(3) == 6
+  invariant "无"
+{
+  return
+}
+`
+	out, err := runOpt(t, src, Options{})
+	if err != nil {
+		t.Fatalf("运行失败：%v", err)
+	}
+	if len(out.Mutants) != 0 {
+		t.Fatalf("没开 Mutate 时不该有变异报告：%+v", out.Mutants)
 	}
 }
