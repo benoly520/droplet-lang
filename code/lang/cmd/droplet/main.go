@@ -30,6 +30,7 @@ const usageText = `droplet - Droplet 语言工具链
                                          -print-c 只输出 C；-keep-c 保留 <out>.c
   droplet contract <file.dlt>...         导出契约 JSON（boundary / 函数签名 / tag 表 / env 配置）
   droplet verify <file.dlt>...           把 example 当可执行 oracle 跑一遍（工具层，产物不可发布）
+  droplet explore <a.dlt> <b.dlt>...      多个候选跑同一批 example，点名分歧（工具层，§7.8.2）
   droplet help                           显示本帮助
 `
 
@@ -51,6 +52,8 @@ func main() {
 		cmdContract(args[1:])
 	case "verify":
 		cmdVerify(args[1:])
+	case "explore":
+		cmdExplore(args[1:])
 	case "help", "-h", "--help":
 		fmt.Print(usageText)
 	default:
@@ -101,6 +104,71 @@ func cmdContract(files []string) {
 //
 // 退出码：0 = 全部可执行样例成立；1 = 有样例不成立，或一条可执行的都没有。
 // "没有可执行样例"按失败处理 —— 那意味着意图没有任何牙齿（§7.8.1）。
+// cmdExplore 是 §7.8.2 的最小形态：只比**已声明**的 example，不生成输入。
+// 退出码：0 唯一存活；1 零存活或欠定（§7.8.3 A：不自动挑一个）；2 用法错。
+func cmdExplore(files []string) {
+	if len(files) < 2 {
+		fmt.Fprintln(os.Stderr, "droplet: explore 至少要两个候选（单个候选用 verify）")
+		os.Exit(2)
+	}
+	var srcs []verify.Source
+	for _, f := range files {
+		prog := loadProgram([]string{f})
+		res := check.Program(prog)
+		reportCheck(res)
+		srcs = append(srcs, verify.Source{Name: f, Prog: prog, Res: res})
+	}
+
+	rep := verify.Explore(srcs)
+	for i := range rep.Cands {
+		c := &rep.Cands[i]
+		if c.Err != nil {
+			fmt.Printf("  %s  跑不起来 — %v\n", c.Name, c.Err)
+			continue
+		}
+		fmt.Printf("  %s  %d 条可执行 / %d 条声明\n", c.Name, c.Ran, len(c.Cases))
+	}
+	if len(rep.Divergent) > 0 {
+		fmt.Println("分歧（同一条样例，候选之间结论不一致）：")
+		for _, l := range rep.Divergent {
+			fmt.Printf("  %s\n", l)
+			for i := range rep.Cands {
+				if v, ok := rep.Cands[i].Cases[l]; ok {
+					fmt.Printf("    %s  %s\n", rep.Cands[i].Name, v)
+				}
+			}
+		}
+	}
+	if len(rep.OnlyIn) > 0 {
+		fmt.Println("意图集不一致（下面这些样例只在部分候选里声明）：")
+		for _, l := range rep.Labels {
+			if who := rep.OnlyIn[l]; len(who) > 0 {
+				fmt.Printf("  %s  缺：%v\n", l, who)
+			}
+		}
+	}
+
+	switch len(rep.Alive) {
+	case 1:
+		fmt.Printf("存活：%s —— 意图把候选集收敛到唯一一个\n", rep.Alive[0])
+		return
+	case 0:
+		fmt.Println("存活：无")
+		for i := range rep.Cands {
+			for _, l := range rep.Labels {
+				if rep.Cands[i].Cases[l] == "FAIL" {
+					fmt.Printf("  %s 被 %s 否掉\n", rep.Cands[i].Name, l)
+				}
+			}
+		}
+		fmt.Fprintln(os.Stderr, "droplet: 没有候选同时满足全部意图 —— 要么实现坏了，要么意图互相矛盾")
+	default:
+		fmt.Printf("存活：%v —— 欠定（§7.8.3 A：不自动挑一个）\n", rep.Alive)
+		fmt.Fprintln(os.Stderr, "droplet: 还有多个候选存活 —— 补一条 example / invariant 让它们分开")
+	}
+	os.Exit(1)
+}
+
 func cmdVerify(files []string) {
 	needFiles("verify", files)
 	prog := loadProgram(files)
