@@ -1,0 +1,30 @@
+// 候选 c（生成器：把"客户端自己写坏了"和"服务端冲突"当作可重试来省一条往返）
+type ApiError = NotFound | BadRequest | IoError | Conflict | NotAllowed | PreconditionFailed
+
+fn retryable(e: ApiError) -> bool {
+  match e {
+    IoError => {
+      return true
+    },
+    PreconditionFailed => {
+      return true
+    },
+    Conflict => {
+      return true
+    },
+    _ => {
+      return false
+    }
+  }
+}
+
+entry model() -> Unit
+  example retryable(ApiError.IoError) == true
+  example retryable(ApiError.PreconditionFailed) == true
+  example retryable(ApiError.NotFound) == false
+  example retryable(ApiError.Conflict) == false
+  example retryable(ApiError.BadRequest) == false
+  example retryable(ApiError.NotAllowed) == false
+{
+  return
+}

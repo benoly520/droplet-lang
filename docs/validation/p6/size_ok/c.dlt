@@ -1,0 +1,19 @@
+// 候选 c（生成器：上限先命名，再逐层判）
+fn size_ok(n: u64) -> bool {
+  let max = 8388608
+  if n >= 1 {
+    if n <= max {
+      return true
+    }
+  }
+  return false
+}
+
+entry model() -> Unit
+  example size_ok(0) == false
+  example size_ok(8388608) == true
+  example size_ok(8388609) == false
+  example size_ok(1) == true
+{
+  return
+}

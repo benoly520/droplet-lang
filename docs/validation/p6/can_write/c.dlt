@@ -1,0 +1,20 @@
+// 候选 c（生成器：先比版本，再比存在性；上限写成"小于上限加一"）
+fn can_write(prev: u64, if_match: u64, body_len: u64) -> bool {
+  if if_match != prev {
+    return false
+  }
+  if prev == 0 {
+    return false
+  }
+  return (body_len > 0) && (body_len < 8388609)
+}
+
+entry model() -> Unit
+  example can_write(0, 5, 10) == false
+  example can_write(5, 5, 10) == true
+  example can_write(5, 4, 10) == false
+  example can_write(5, 5, 8388609) == false
+  example can_write(0, 0, 10) == false
+{
+  return
+}

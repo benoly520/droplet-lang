@@ -1,0 +1,28 @@
+// P6 · 任务 B 的「人写的那一半」：错误变体 → 能不能重试。
+// ApiError 的六个变体与 src/contract.dlt 一致（顺序就是 tag 顺序）。
+// 人给的决定是：传输层失败与 412 可重试（412 重取新版本再 PUT），其余不可。
+
+type ApiError = NotFound | BadRequest | IoError | Conflict | NotAllowed | PreconditionFailed
+
+// 占位实现同样要用到参数（-Werror=unused-parameter），这里让所有分支都回 false。
+fn retryable(e: ApiError) -> bool {
+  match e {
+    IoError => {
+      return false
+    },
+    _ => {
+      return false
+    }
+  }
+}
+
+entry model() -> Unit
+  example retryable(ApiError.IoError) == true
+  example retryable(ApiError.PreconditionFailed) == true
+  example retryable(ApiError.NotFound) == false
+  example retryable(ApiError.Conflict) == false
+  example retryable(ApiError.BadRequest) == false
+  example retryable(ApiError.NotAllowed) == false
+{
+  return
+}

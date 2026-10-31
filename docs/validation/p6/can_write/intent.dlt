@@ -1,0 +1,18 @@
+// P6 · 任务 C 的「人写的那一半」：一条写请求能不能进（412 与 413 的那道决定）。
+// prev = 上一版的版本号，0 表示这个 key 从来没有成功写过；if_match = 请求带进来的版本；
+// body_len = body 字节数。人给的是三条：必须有上一版、版本必须对得上、body 非空且不超上限。
+
+// 占位实现要用到全部三个参数（否则 unused-parameter 编不过）：这里管版本对得上与非空，忘了上界。
+fn can_write(prev: u64, if_match: u64, body_len: u64) -> bool {
+  return (if_match == prev) && (body_len > 0)
+}
+
+entry model() -> Unit
+  example can_write(0, 5, 10) == false
+  example can_write(5, 5, 10) == true
+  example can_write(5, 4, 10) == false
+  example can_write(5, 5, 8388609) == false
+  example can_write(0, 0, 10) == false
+{
+  return
+}

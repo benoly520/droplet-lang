@@ -1,0 +1,16 @@
+// 候选 a（生成器：一条 guard + 一个范围表达式）
+fn size_ok(n: u64) -> bool {
+  if n == 0 {
+    return false
+  }
+  return n <= 8388608
+}
+
+entry model() -> Unit
+  example size_ok(0) == false
+  example size_ok(8388608) == true
+  example size_ok(8388609) == false
+  example size_ok(1) == true
+{
+  return
+}

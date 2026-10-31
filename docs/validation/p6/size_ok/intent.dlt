@@ -1,0 +1,19 @@
+// P6 · 任务 A 的「人写的那一半」。作者只写了签名 + 意图 + 一个占位实现（`return false`）。
+// 占位实现是**故意留下的靶子**：`droplet verify` 必须能把它否掉，否则意图没有牙齿（§7.8.1）。
+// 上限来自部署配置 max_body 的默认值（src/contract.dlt 里是 8388608），这里按纯函数重述。
+
+// 注意：占位实现必须**用到参数**，否则生成的 C 在 -Werror=unused-parameter 下编不过 ——
+// 这条是本轮实测撞到的：D0 没有"未实现"这个标记，所以"人只写意图 + 空实现"作为独立工件不成立。
+// 这里退而求其次：写一个"用到参数但规则不全"的实现（只管非空，忘了上界），让它当靶子。
+fn size_ok(n: u64) -> bool {
+  return n > 0
+}
+
+entry model() -> Unit
+  example size_ok(0) == false
+  example size_ok(8388608) == true
+  example size_ok(8388609) == false
+  example size_ok(1) == true
+{
+  return
+}

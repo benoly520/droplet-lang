@@ -1,0 +1,16 @@
+// 候选 b（生成器：把两条规则写成一个合取）
+fn size_ok(n: u64) -> bool {
+  if (n > 0) && (n <= 8388608) {
+    return true
+  }
+  return false
+}
+
+entry model() -> Unit
+  example size_ok(0) == false
+  example size_ok(8388608) == true
+  example size_ok(8388609) == false
+  example size_ok(1) == true
+{
+  return
+}
