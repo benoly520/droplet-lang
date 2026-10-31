@@ -32,6 +32,17 @@ else
   SAMPLE_EVERY=1
 fi
 if [ "$SAMPLE_EVERY" -lt 1 ]; then SAMPLE_EVERY=1; fi
+# 压缩时间自测（SOAK_SECONDS）时按总轮数重新分摊采样：否则"每小时一采"会让一次
+# 十分钟的跑动只留下 1 个样本 —— 斜率算不出来，等于没观测。目标 ~60 个样本。
+if [ -n "${SOAK_SECONDS:-}" ]; then
+  if [ "$INTERVAL" -gt 0 ]; then
+    RUN_ROUNDS=$(( SOAK_SECONDS / INTERVAL ))
+  else
+    RUN_ROUNDS=$SOAK_SECONDS
+  fi
+  SAMPLE_EVERY=$(( RUN_ROUNDS / 60 ))
+  if [ "$SAMPLE_EVERY" -lt 1 ]; then SAMPLE_EVERY=1; fi
+fi
 
 mkdir -p "$OUT"
 : > "$OUT/sample.log"
@@ -95,7 +106,11 @@ fail() {
   FAILS=$(( FAILS + 1 ))
 }
 
-echo "soak: ${HOURS}h 每 ${INTERVAL}s 一轮，端口 $PORT，pid $PID，样本每 $SAMPLE_EVERY 轮"
+if [ -n "${SOAK_SECONDS:-}" ]; then
+  echo "soak: ${SOAK_SECONDS}s（压缩自测）每 ${INTERVAL}s 一轮，端口 $PORT，pid $PID，样本每 $SAMPLE_EVERY 轮"
+else
+  echo "soak: ${HOURS}h 每 ${INTERVAL}s 一轮，端口 $PORT，pid $PID，样本每 $SAMPLE_EVERY 轮"
+fi
 sample
 
 while [ "$(date +%s)" -lt "$END" ]; do
@@ -123,15 +138,35 @@ echo
 echo "--- 判定 ---"
 echo "轮次 $N，失败 $FAILS"
 awk -v limit="$MAX_GROWTH" '
-  { n++; t = $1/3600; y = $3
-    st += t; sy += y; stt += t*t; sty += t*y }
+  { n++; t[n] = $1/3600; y[n] = $3 }
   END {
-    if (n < 2) { printf "样本 %d 个，不足以算斜率（跑得越久越准）\n", n; exit 0 }
-    k = (n*sty - st*sy) / (n*stt - st*st)
-    last = y
-    printf "样本 %d 个，末次 RSS %d KB，斜率 %.1f KB/h（上限 %s）\n", n, last, k, limit
-    if (k > limit) printf "结论：FAIL —— RSS 有增长趋势\n"
-    else printf "结论：PASS —— 斜率远低于阈值\n"
+    if (n < 3) { printf "样本 %d 个，不足以算斜率（跑得越久越准）\n", n; exit 0 }
+
+    # 全窗口斜率：只作参考，永远打出来，不许藏。
+    for (i = 1; i <= n; i++) { st += t[i]; sy += y[i]; stt += t[i]*t[i]; sty += t[i]*y[i] }
+    den = n*stt - st*st
+    kall = (den == 0) ? 0 : (n*sty - st*sy) / den
+
+    # 判据取"去预热后"的斜率：进程刚起时的常驻分配是一次性开销，不是泄漏。
+    # 短窗口（压缩自测）里那段爬升会被全窗口线性拟合当成"增长趋势"，判据就只剩
+    # 一个方向 —— 见 docs/NEXT.md P0。预热段 = 前 10% 的样本。
+    skip = int(n/10); if (skip < 1) skip = 1
+    m = 0
+    for (i = skip+1; i <= n; i++) { m++; st2 += t[i]; sy2 += y[i]; stt2 += t[i]*t[i]; sty2 += t[i]*y[i] }
+    printf "样本 %d 个（前 %d 个视为预热，不进判据），末次 RSS %d KB\n", n, skip, y[n]
+    if (m < 3) { printf "结论：样本不足 —— 去预热后只剩 %d 个点，跑久一点\n", m; exit 0 }
+    den2 = m*stt2 - st2*st2
+    k = (den2 == 0) ? 0 : (m*sty2 - st2*sy2) / den2
+    printf "斜率：全窗口 %.1f KB/h，去预热后 %.1f KB/h（判据上限 %s KB/h）\n", kall, k, limit
+
+    # 平台检查与窗口长度无关：最后 10% 样本的极差就是"还在不在长"。
+    lo = y[n]; hi = y[n]; cnt = 0
+    for (i = n-int(n/10); i <= n; i++) { if (i < 1) continue; cnt++
+      if (y[i] < lo) lo = y[i]; if (y[i] > hi) hi = y[i] }
+    printf "尾部 %d 个样本：%d–%d KB（极差 %d KB）\n", cnt, lo, hi, hi-lo
+
+    if (k > limit) printf "结论：FAIL —— 去预热后 RSS 仍有增长趋势\n"
+    else printf "结论：PASS —— 去预热后斜率低于阈值，尾部稳定在 %d–%d KB\n", lo, hi
   }' "$OUT/sample.log"
 
 # 单线程服务 + SIGCHLD=SIG_IGN：线程数应恒为 1，子进程不该堆积。
