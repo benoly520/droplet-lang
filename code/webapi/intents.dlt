@@ -1,0 +1,48 @@
+// 意图模型（SPEC 附录 D.9 / NEXT P11 路 a）—— 本仓库第一份**可执行**意图。
+//
+// 为什么需要这个文件：`droplet verify` 看见程序里有路由就直接拒绝
+// （internal/verify/verify.go:69「服务形态暂不支持 verify」），所以服务本体
+// 一条样例也跑不了；而 src/contract.dlt 里那 5 条目标全是 `invariant` 自由文本，
+// 不进 oracle。合起来的结果是：全仓库 4 个 .dlt 里可执行样例为 0。
+//
+// 这里把服务中"确实由一个纯决定撑着"的目标降成谓词 + `example`，
+// 让挑选通路第一次有真证据可产。护栏是 internal/verify/intents_test.go（进 CI）。
+//
+// **诚实的边界**：这个文件验的是**抽取物**，不是 src/contract.dlt 的实现 ——
+// 它能证明"这条目标被降成了可失败的形状，且那个形状自洽"，不能证明服务照做。
+// 没抽进来的三条：
+//   ① "同一 key 的 GET 字节等于最近一次成功 PUT 的字节"、
+//   ② "PUT 前必须存在上一版本快照" —— 跨调用带状态，当前意图子集表达不了；
+//   ③ "清单来自目录，不来自任何注册表文件" —— 决定在运行时 C 里，不在 .dlt 里。
+// 这三条按 D.7.3 第 3 条的正确处置是**标"未证 + 原因"**，而不是让它们冒充意图。
+
+// 对应 rt_http.c:465-467 的真实决定：`token.n > 0 && !is_health` 才鉴权。
+// 四格真值表写全，是为了让变异无处可藏（改任一格都有一条样例翻面）。
+fn requires_auth(token_set: bool, is_health: bool) -> bool {
+  if token_set {
+    if is_health {
+      return false
+    }
+    return true
+  }
+  return false
+}
+
+// 对应 `POST 只在 key 不存在时成功`：已存在就走 Conflict（状态码不进源码，H7）。
+fn create_ok(exists: bool) -> bool {
+  if exists {
+    return false
+  }
+  return true
+}
+
+entry model() -> Unit
+  example requires_auth(false, false) == false
+  example requires_auth(false, true) == false
+  example requires_auth(true, true) == false
+  example requires_auth(true, false) == true
+  example create_ok(true) == false
+  example create_ok(false) == true
+{
+  return
+}

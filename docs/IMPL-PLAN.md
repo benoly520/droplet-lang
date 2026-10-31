@@ -361,6 +361,20 @@ entry greet(sys: Sys) -> Unit
 所以 D1 之前那条语法缺口没有任何端到端护栏（`gen` 的两个 shape 测试是后补的）。
 
 
+### 4.5 `code/webapi/intents.dlt`（v0.27 追加：第一份可执行意图）
+
+不构建、不进服务，只给 `droplet verify` 跑 —— 它是"样例必须全绿"这条节里**唯一有可执行
+`example` 的文件**（此前全仓库 4 个 `.dlt` 的 `example` 为 0，可执行意图只活在 Go 测试夹具里）。
+
+为什么单独一份：`verify` 见路由即拒绝（`internal/verify/verify.go:69`），且只收集 `fn`/`entry`
+上的样例（`verify.go:75-79`），所以服务本体的目标降不成可执行形状 —— 只能把**确实由一个纯决定
+撑着**的那部分抽出来：`requires_auth`（照 `rt_http.c:465-467` 的 `token.n > 0 && !is_health`
+写成四格真值表）与 `create_ok`（key 已存在即走 Conflict）。护栏是
+`internal/verify/intents_test.go`（测试文件不计入 H8），要求非零可执行样例、模型自洽、
+每处变异都被抓住；实测 `6 条样例，6 条可执行`、`6 处变异，0 处没被抓住`。
+
+代价与边界写在 SPEC 附录 D.9.1：验的是抽取物，不是 `src/contract.dlt`。
+
 ## 5. 编译管线
 
 ```
@@ -678,6 +692,7 @@ droplet-lang/code/lang/
     c.go  stmts.go  exprs.go  main.go
   internal/gen/http_test.go      # 端到端：编出服务、拉进程、发真请求
   internal/contract/doc.go       # AST + 检查结果 → 契约 JSON
+  internal/verify/               # example 当 oracle + 机械变异 + explore（工具层，不进构建图；v0.17 起，本树其余部分是 M0 快照）
   internal/runtime/embed.go      # go:embed 打包运行时
   internal/runtime/assets/       # rt.h + 四个 .c（包目录里不能放 .c，所以放子目录）
     rt.h  rt_core.c  rt_http.c  rt_blob.c  rt_ver.c
@@ -685,6 +700,7 @@ droplet-lang/code/lang/
   examples/shape.dlt         # D1：变体构造 + match 绑字段
 droplet-lang/code/webapi/
   src/{contract.dlt,main.dlt}
+  intents.dlt                  # v0.27：不带路由的意图模型，本仓库唯一有可执行 example 的 .dlt
   deploy/{blobd.service,blobd.env.example,accept.sh,soak.sh}
 droplet-lang/docs/
   SPEC.md  IMPL-PLAN.md  D0-DEVIATIONS.md   # 设计 / 实现计划 / 已实现与设计的偏差登记
