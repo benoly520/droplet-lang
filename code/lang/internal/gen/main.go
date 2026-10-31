@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"droplet/internal/ast"
 	"droplet/internal/check"
 	"droplet/internal/token"
 )
@@ -17,6 +18,11 @@ func (g *gen) main() {
 	// 验证用编译单元：入口换成样例求值函数，main 由驱动提供（internal/verify）。
 	if g.verify != nil {
 		g.verifyMain()
+		return
+	}
+	// 逐条输入求值：main 同样由驱动提供，但求的是值而不是真假。
+	if g.probes != nil {
+		g.probeMain()
 		return
 	}
 	// 服务形态由 boundary 的路由表定义（D3）：有路由就没有 entry，反之亦然。
@@ -41,34 +47,46 @@ func (g *gen) main() {
 
 // verifyMain 生成样例求值入口：`dp_verify_count()` 与 `dp_verify_expr(i, a)`。
 //
-// 表达式在函数上下文里求值，但**不允许**产生前置语句：样例里不能有 `!`、
-// 不能调用联合返回的函数或能力（这些会发临时变量）。校验在 internal/verify 做，
-// 这里只做兜底 —— 发语句就记生成错误，绝不把语句吐到 switch 中间。
+// probeMain 生成"逐条输入求值"入口：`dp_probe(i, a)`。两者只差签名与每条表达式的
+// 包装（求真假 vs 求值），扫描与前置语句检查共用 evalMain。
 func (g *gen) verifyMain() {
 	g.line("int dp_verify_count(void) {")
-	// 样例不一定调到每个函数；引用一遍，避免 -Wunused-function 在 -Werror 下卡住。
-	for _, name := range sortedFnNames(g.res) {
-		g.line("  (void)&dp_f_%s;", name)
-	}
 	g.line("  return %d;", len(g.verify))
 	g.line("}")
 	g.line("")
-	g.line("int dp_verify_expr(int i, dp_arena* a) {")
+	g.evalMain("int dp_verify_expr(int i, dp_arena* a)", "-1", g.verify,
+		func(s string) string { return "(" + s + ") ? 1 : 0" })
+}
+
+func (g *gen) probeMain() {
+	g.evalMain("uint64_t dp_probe(int i, dp_arena* a)", "0", g.probes,
+		func(s string) string { return "(uint64_t)(" + s + ")" })
+}
+
+// evalMain 生成逐条求值的 switch。表达式在函数上下文里求值，但**不允许**产生
+// 前置语句：不能有 `!`、不能调用联合返回的函数或能力（这些会发临时变量）。
+// 校验在 internal/verify 做，这里只兜底 —— 发语句就记生成错误，绝不把语句吐到
+// switch 中间。返回值投影由 wrap 决定：verify 求真假，probe 求值。
+func (g *gen) evalMain(sig, zero string, exprs []ast.Expr, wrap func(string) string) {
+	g.line("%s {", sig)
+	// 样例/输入不一定调到每个函数；引用一遍，避免 -Wunused-function 在 -Werror 下卡住。
+	for _, name := range sortedFnNames(g.res) {
+		g.line("  (void)&dp_f_%s;", name)
+	}
 	g.line("  (void)a;")
 	g.line("  switch (i) {")
-	for i, e := range g.verify {
-		g.body = g.body[:0]
-		g.depth = 0
+	for i, e := range exprs {
+		g.body, g.depth = g.body[:0], 0
 		s := g.expr(e)
 		if len(g.body) > 0 {
-			g.failf(token.Pos{}, "样例 %d 需要前置语句，验证器不支持（不能调用联合返回的函数或能力）", i)
+			g.failf(token.Pos{}, "第 %d 条需要前置语句，验证器不支持（不能调用联合返回的函数或能力）", i)
 			g.body = g.body[:0]
 			continue
 		}
-		g.line("  case %d: return (%s) ? 1 : 0;", i, s)
+		g.line("  case %d: return %s;", i, wrap(s))
 	}
 	g.line("  }")
-	g.line("  return -1;")
+	g.line("  return %s;", zero)
 	g.line("}")
 }
 

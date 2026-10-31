@@ -131,6 +131,19 @@ func cmdExplore(files []string) {
 		}
 	}
 
+	if rep.Probes > 0 {
+		fmt.Printf("自动输入：%d 条（按签名生成，源码里没写；只覆盖 u64 / i64 / bool 参数）\n", rep.Probes)
+	}
+	for _, d := range rep.ProbeDiff {
+		var parts []string
+		for _, c := range rep.Cands {
+			if v, ok := d.Vals[c.Name]; ok {
+				parts = append(parts, c.Name+" 得 "+v)
+			}
+		}
+		fmt.Printf("  分歧  %s → %s\n", d.Label, strings.Join(parts, "，"))
+	}
+
 	switch len(rep.Alive) {
 	case 1:
 		fmt.Printf("存活：%s —— 意图把候选集收敛到唯一一个\n", rep.Alive[0])
@@ -146,7 +159,11 @@ func cmdExplore(files []string) {
 		}
 		fmt.Fprintln(os.Stderr, "droplet: 没有候选同时满足全部意图 —— 要么实现坏了，要么意图互相矛盾")
 	default:
-		fmt.Printf("存活：%v —— 欠定（§7.8.3 A：不自动挑一个）\n", rep.Alive)
+		if len(rep.ProbeDiff) > 0 {
+			fmt.Printf("存活：%v —— 欠定；生成的输入上已经抓到分歧（§7.8.2 的反例对）\n", rep.Alive)
+		} else {
+			fmt.Printf("存活：%v —— 欠定（§7.8.3 A：不自动挑一个）\n", rep.Alive)
+		}
 		fmt.Fprintln(os.Stderr, "droplet: 还有多个候选存活 —— 补一条 example / invariant 让它们分开")
 	}
 	os.Exit(1)

@@ -27,11 +27,15 @@ type gen struct {
 	// verify 非 nil 时生成"验证用编译单元"：同样的函数，main 换成
 	// dp_verify_count / dp_verify_expr（见 main.go 与 internal/verify）。
 	verify []ast.Expr
+
+	// probes 非 nil 时生成"逐条输入求值"的编译单元：main 换成 dp_probe(i, a)，
+	// 把第 i 条输入的返回值投影成 u64（见 internal/verify/probe.go）。
+	probes []ast.Expr
 }
 
 // C 生成完整 C 源码；出现生成期错误时返回 error。
 func C(prog *ast.Program, res *check.Result) (string, error) {
-	return generate(prog, res, nil)
+	return generate(&gen{prog: prog, res: res})
 }
 
 // CVerify 生成验证用编译单元：程序的全部函数照旧，但入口换成
@@ -39,11 +43,19 @@ func C(prog *ast.Program, res *check.Result) (string, error) {
 //
 // 这是工具层的产物（`droplet verify`），不参与发布构建；`main` 由驱动文件提供。
 func CVerify(prog *ast.Program, res *check.Result, exprs []ast.Expr) (string, error) {
-	return generate(prog, res, exprs)
+	return generate(&gen{prog: prog, res: res, verify: exprs})
 }
 
-func generate(prog *ast.Program, res *check.Result, exprs []ast.Expr) (string, error) {
-	g := &gen{prog: prog, res: res, verify: exprs}
+// CProbe 生成"逐条输入求值"的编译单元：函数照旧，入口换成
+// `uint64_t dp_probe(int i, dp_arena* a)` —— 第 i 条输入的返回值投影成 u64。
+//
+// 与 CVerify 同一套纪律：工具层产物，不参与发布构建。区别只有一点：
+// 它求的是**值**而不是真假，所以只接受标量返回（u64 / i64 / bool）。
+func CProbe(prog *ast.Program, res *check.Result, calls []ast.Expr) (string, error) {
+	return generate(&gen{prog: prog, res: res, probes: calls})
+}
+
+func generate(g *gen) (string, error) {
 	g.header()
 	g.typeDecls()
 	g.retTypes()

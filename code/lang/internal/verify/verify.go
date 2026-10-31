@@ -213,37 +213,49 @@ int main(void) {
 }
 `
 
-// compileAndRun 把验证单元 + 驱动 + 内嵌运行时编成一个临时二进制并执行，
-// 返回"第 i 条例样是否成立"。
-func compileAndRun(src string) (map[int]bool, error) {
+// buildUnit 把生成单元 + 驱动 + 内嵌运行时编成一个临时二进制。
+// 返回的 cleanup 必须由调用方执行（删临时目录）。
+func buildUnit(src, drv, name, opt string) (string, func(), error) {
+	noop := func() {}
 	dir, err := os.MkdirTemp("", "droplet-verify-*")
 	if err != nil {
-		return nil, err
+		return "", noop, err
 	}
-	defer os.RemoveAll(dir)
+	cleanup := func() { os.RemoveAll(dir) }
 
 	if err := os.WriteFile(filepath.Join(dir, "gen.c"), []byte(src), 0o644); err != nil {
-		return nil, err
+		return "", cleanup, err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "verify_main.c"), []byte(driver), 0o644); err != nil {
-		return nil, err
+	if err := os.WriteFile(filepath.Join(dir, name+".c"), []byte(drv), 0o644); err != nil {
+		return "", cleanup, err
 	}
 	if err := rt.WriteTo(dir); err != nil {
-		return nil, err
+		return "", cleanup, err
 	}
 
-	bin := filepath.Join(dir, "verify")
-	args := []string{"-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-o", bin,
-		filepath.Join(dir, "gen.c"), filepath.Join(dir, "verify_main.c"), "-I", dir}
-	for _, name := range rt.Names {
-		if strings.HasSuffix(name, ".c") {
-			args = append(args, filepath.Join(dir, name))
+	bin := filepath.Join(dir, name)
+	args := []string{"-std=c11", opt, "-Wall", "-Wextra", "-Werror", "-o", bin,
+		filepath.Join(dir, "gen.c"), filepath.Join(dir, name+".c"), "-I", dir}
+	for _, f := range rt.Names {
+		if strings.HasSuffix(f, ".c") {
+			args = append(args, filepath.Join(dir, f))
 		}
 	}
 	cc := exec.Command("cc", args...)
 	if out, err := cc.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("cc 失败：%w\n%s", err, out)
+		return "", cleanup, fmt.Errorf("cc 失败：%w\n%s", err, out)
 	}
+	return bin, cleanup, nil
+}
+
+// compileAndRun 把验证单元 + 驱动 + 内嵌运行时编成一个临时二进制并执行，
+// 返回"第 i 条例样是否成立"。
+func compileAndRun(src string) (map[int]bool, error) {
+	bin, cleanup, err := buildUnit(src, driver, "verify_main", "-O2")
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
 
 	run := exec.Command(bin)
 	out, err := run.Output()
