@@ -9,7 +9,7 @@
 
 ## 0. 现在的状态（截至 2026-10-31）
 
-- `origin/main` = `main` = `2219ad5`（v0.22）＋ 本批 v0.23（提交号见下条待补）。
+- `origin/main` = `main` = `d2188b4`（v0.23，删 `parse` + `dump` 那笔）。
 - 本轮（v0.23）做的事：**预算回收 —— 删 `droplet parse` + `internal/dump`**。
   - P5 的三条路里选了第一条。理由：dump 是 AST 的 JSON 投影，不是产品面 ——
     没有客户端、没有契约消费方读它，生成 C / 导出契约 / 跑 verify 都不经过它。
