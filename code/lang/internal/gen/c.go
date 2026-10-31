@@ -226,6 +226,10 @@ func (g *gen) fn(fn *ast.FnDecl) {
 
 // terminates 判断节点是否必定提前离开函数。
 // 只做保守判断：不确定时返回 false，宁可多一条不可达 return。
+//
+// `match` 不算"必定离开"——穷尽的 match 生成的是不带 default 的 switch，
+// C 编译器证明不了它覆盖了所有 tag，缺兜底 return 就是
+// `-Werror=return-type`。这不是保守与否的问题，是 C 侧的事实。
 func terminates(s ast.Node) bool {
 	switch n := s.(type) {
 	case *ast.Return:
@@ -240,16 +244,6 @@ func terminates(s ast.Node) bool {
 			return false
 		}
 		return terminates(n.Then) && terminates(n.Else)
-	case *ast.Match:
-		if len(n.Arms) == 0 {
-			return false
-		}
-		for _, arm := range n.Arms {
-			if !terminates(arm.Body) {
-				return false
-			}
-		}
-		return true
 	}
 	return false
 }

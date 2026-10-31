@@ -156,9 +156,10 @@ entry main() -> Unit
 	if err != nil {
 		t.Fatalf("运行失败：%v", err)
 	}
-	// 四处变异：x < 10 的两个常量与边界，以及 return 1 / return 2 的常量。
-	if len(out.Mutants) != 4 {
-		t.Fatalf("期望 4 处变异，得到 %d：%+v", len(out.Mutants), out.Mutants)
+	// 五处变异，覆盖两条轴：表达式轴（x < 10 的两个常量与边界、两个 return 的常量）
+	// 与语句轴（清空 then、删掉守卫里的 return）。
+	if len(out.Mutants) != 5 {
+		t.Fatalf("期望 5 处变异，得到 %d：%+v", len(out.Mutants), out.Mutants)
 	}
 	caught, missed := 0, 0
 	for _, m := range out.Mutants {
@@ -168,13 +169,81 @@ entry main() -> Unit
 			caught++
 		}
 	}
-	if caught != 1 || missed != 3 {
-		t.Fatalf("期望 1 抓住 / 3 存活，得到 %d / %d：%+v", caught, missed, out.Mutants)
+	// sign(9) == 1 只看得见"x=9 走哪条路"，所以边界收紧与 return 2 的常量都活着。
+	if caught != 3 || missed != 2 {
+		t.Fatalf("期望 3 抓住 / 2 存活，得到 %d / %d：%+v", caught, missed, out.Mutants)
+	}
+	// 语句轴的两处必须被抓住：删掉 then 或删掉 return，sign(9) 都变成 2。
+	var stmtAxis int
+	for _, m := range out.Mutants {
+		if strings.HasPrefix(m.Desc, "分支删除") || strings.HasPrefix(m.Desc, "提前返回") {
+			stmtAxis++
+			if m.CaughtBy != "sign(9) == 1" {
+				t.Errorf("语句轴变异 %s 应被 sign(9) == 1 抓住，得到 %q", m.Desc, m.CaughtBy)
+			}
+		}
+	}
+	if stmtAxis != 2 {
+		t.Fatalf("语句轴应有两处变异（分支删除、提前返回），得到 %d：%+v", stmtAxis, out.Mutants)
 	}
 	for _, m := range out.Mutants {
 		if m.CaughtBy != "" && m.CaughtBy != "sign(9) == 1" {
 			t.Errorf("抓住它的样例应为 sign(9) == 1，得到 %q", m.CaughtBy)
 		}
+	}
+}
+
+// TestMutateMatchArms 把语句轴压到 §7.8.1 的原文上：删掉一条 match 分支的处理体。
+// 一条样例只走一条分支，所以另一条分支的两处变异必须如实活着 —— 这就是
+// "意图只覆盖了半个程序"的可执行证据。
+func TestMutateMatchArms(t *testing.T) {
+	const src = `type Shape = Circle | Square
+
+fn sides(s: Shape) -> u64 {
+  match s {
+    Circle => {
+      return 4
+    },
+    Square => {
+      return 3
+    }
+  }
+}
+
+entry main() -> Unit
+  example sides(Shape.Circle) == 4
+  invariant "无"
+{
+  let n = sides(Shape.Circle)
+  if n == 4 {
+    return
+  }
+  return
+}
+`
+	out, err := runOpt(t, src, Options{Mutate: true})
+	if err != nil {
+		t.Fatalf("运行失败：%v", err)
+	}
+	var arms, caughtCircle, missSquare int
+	for _, m := range out.Mutants {
+		if !strings.HasPrefix(m.Desc, "分支删除 清空 match 分支") {
+			continue
+		}
+		arms++
+		switch m.CaughtBy {
+		case "sides(Shape.Circle) == 4":
+			caughtCircle++
+		case "":
+			missSquare++
+		}
+	}
+	if arms != 2 {
+		t.Fatalf("每个 match 分支应各有一处清空变异，得到 %d：%+v", arms, out.Mutants)
+	}
+	if caughtCircle != 1 || missSquare != 1 {
+		t.Fatalf("期望走到的分支被抓住、没走到的分支存活，得到 caught=%d miss=%d：%+v",
+			caughtCircle, missSquare, out.Mutants)
 	}
 }
 

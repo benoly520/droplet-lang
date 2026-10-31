@@ -217,6 +217,42 @@ func TestVariantConstructRuns(t *testing.T) {
 	}
 }
 
+// TestExhaustiveMatchGetsFallbackReturn 锁住一个真被踩到的坑：非 Unit 返回的函数，
+// 函数体只有一条穷尽 match、每条分支都 return 时，生成的是不带 default 的 switch，
+// C 编译器证明不了它覆盖了所有 tag —— 于是缺兜底 return 就是 -Werror=return-type。
+// 判据取保守的一边：match 不参与"必定离开"的推断，宁可多一条不可达 return。
+func TestExhaustiveMatchGetsFallbackReturn(t *testing.T) {
+	const src = `type Shape = Circle | Square
+
+fn sides(s: Shape) -> u64
+  invariant "sides 返回 4 或 3"
+{
+  match s {
+    Circle => {
+      return 4
+    },
+    Square => {
+      return 3
+    }
+  }
+}
+
+entry main() -> Unit
+  invariant "无"
+{
+  let n = sides(Shape.Circle)
+  if n == 4 {
+    return
+  }
+  return
+}
+`
+	bin := build(t, source{"sides.dlt", src})
+	if _, err := os.Stat(bin); err != nil {
+		t.Fatalf("可执行文件不存在：%v", err)
+	}
+}
+
 func parseAll(t *testing.T, srcs ...source) *ast.Program {
 	t.Helper()
 	prog := &ast.Program{}
