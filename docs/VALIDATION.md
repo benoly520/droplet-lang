@@ -1,9 +1,11 @@
-# VALIDATION：核心命题的第一次完整演练（P6）
+# VALIDATION：核心命题的演练（P6）与 C 对照组
 
-> 这份文档只记**跑过的事实**。P6 要回答的是项目对外的那句话 ——
+> 这份文档只记**跑过的事实**。§1–§6 回答项目对外的那句话 ——
 > "人写意图、AI 生成候选、验证器挑选" —— 到底跑不跑得通。
-> 第一次跑的时间：2026-10-31（v0.28）。题面、候选、命令输出全部在
-> `docs/validation/p6/` 里，可以照 §5 重跑。
+> §7 回答作者的另一句质问：**"AI 对 C 的训练已经够多了，为什么不直接用 C。"**
+> P6 第一次跑：2026-10-31（v0.28）；C 对照组：同日（v0.29）。
+> 题面、候选、命令与全部产物在 `docs/validation/p6/` 与 `docs/validation/c-control/`，
+> 分别照 §5 与 §7.6 重跑。
 
 ## 1. 先说这次实验不能证明什么
 
@@ -111,3 +113,150 @@ done
   这样"首次通过率 / 收敛轮数 / 人补样例条数 / 人分钟数"才有意义。
 
 本轮不动 `code/lang`：H8 仍 7993 / 8000（余量 7 行），用例 142。
+
+## 7. 对照组：同一个服务直接用 C 写（v0.29）
+
+### 7.1 这一节要证伪的是我自己
+
+作者的问题很直白：AI 对 C 的训练已经够多了，为什么不直接用 C。
+我上一轮的回答里有一条"这门语言把正确性从需要理解变成需要机械检查"，
+但没查过这句话里的机械检查有几分是**语言**的功劳、几分是**任何语言 + 一份清单 + 一个检查器**就有的。
+这一节就是去查这个，且默认结论可能否掉这门语言。
+
+公平条件先摆明：
+
+| 条件 | 做法 |
+| --- | --- |
+| 运行时 | 1472 行 `rt_*.c` **两组共用**，不算语言的功劳（HTTP 解析、鉴权、key 合法性、413、快照、commit 都在里面） |
+| 编译参数 | C 侧用与生成物完全相同的 `-std=c11 -O2 -Wall -Wextra`，并额外单独试 `-Werror` |
+| 判定 | 不是打印给人看的 17 行，是 `accept-c.sh` 里 **19 条断言**（原 17 条 + 「404 空 body」+「405 空 body」） |
+| 对照组必须写到功能全对 | 先写一版自然的 C（15/19），再修正到 19/19；**四条纪律要在功能全对的 C 上试**，写坏的 C 说明不了"结构上做不到" |
+| 同源偏置 | C 也是我写的。这一节测的是**机制有没有**，不是通过率 —— 与 §1 的偏置声明同一条性质 |
+
+### 7.2 工件与基线
+
+| 组 | 人写的行数 | 19 条断言 |
+| --- | --- | --- |
+| droplet | `contract.dlt` 64 + `main.dlt` 31 + `intents.dlt` 48 = **143** 行 → 生成 **247** 行 C | **19/19** |
+| C 第一版 `service.c` | **195** | 15/19（挂 #7 #14 #17 #18） |
+| C 第二版 `service2.c` | **201** | **19/19** |
+
+C 第一版挂的四条不是随手写坏的样本：`dp_response` 只有一个 `status` 和一个 `body`，
+"错误不携带表示"（D2/R2）在 C 里**没有落点**，写 C 的人自然会把 `{"error":"not found"}` 塞进 body，
+于是运行时还给错误页推了 ETag（#18）。这是一条纪律在 C 里无处安放的实例 ——
+但要说清：**它被 wire 断言抓住了**，因为那张表里恰好有"412/404/405 空 body"三条。
+
+### 7.3 四条纪律逐条实测
+
+**① 守卫落点（If-Match 不能按路由漏写）**
+
+- C：把 `service2.c` 里 If-Match 那 7 行整块删掉 → `-Wall -Wextra -Werror` **全部通过**；
+  跑表 **18/19**，只挂 #6（If-Match 不符却回 204）。
+  更难看的是 **#7「412 空 body」照样通过** —— 响应已经不是 412，body 仍是 0 字节，**断言空过**。
+- droplet：同形变异 = 从路由声明里删掉 `, precondition` →
+  `E1: 写路由 PUT /v1/blob 必须显式表态：with precondition 或 without precondition: "理由" —— 沉默等于默认不做并发保护`（编译期失败）。
+- 补测（这条最要紧）：droplet 里显式写 `without precondition: "理由"` → 编译过，跑表同样 **18/19、同样只挂 #6**，
+  与无守卫的 C **一模一样**。
+- ⇒ 语言的增益**不在运行期强度**：人一旦显式决定不保护，两边行为等价。
+  增益只有一句话：**在 C 里"漏写"和"决定不写"是同一个状态，在这里不是。**
+
+**② 外部触点可枚举（不能有环境读取 ambient）**
+
+- C：5 个 `APP_*` 名不在 `getenv` 处，而在 `cfg_get("APP_ROOT", …)` 的调用点上 ——
+  也就是说**光是"列出读了哪些环境变量"就取决于你怎么重构代码**。另有 1 处未声明读取（`DP_LOG_LEVEL`）。
+  写了 **45 行**对账器（`surface-c.py` + `manifest.json`）：它精确报出
+  "代码里有、清单没写 `['DP_LOG_LEVEL']`"，退出码 1。
+- 它的上限（实测）：把同一处读取改成 `snprintf("%s%s%s", "DP_", "LOG_", "LEVEL")` 再 `getenv(nm)` →
+  对账器报**三类全对得上、退出码 0**，而二进制照读（stderr 打印 `log level debug`）。
+  ⇒ 基于文本模式的抽取会被**一次普通重构**击穿，不需要恶意。
+- droplet：`cfg.loglevel`（未声明字段）→ `E1: Cfg 没有字段 loglevel`；要读就得进 `env`，
+  进了 `env` 就出现在 `contract` 的 `envs` 节（5 个键，带 `var` / 默认值 / `required`）。
+- 诚实的半句：共享运行时自己有 **3** 处 ambient 读取（`DP_SNAPSHOT_KEEP`、`DP_COMMIT_DEBOUNCE`、`DP_COMMIT_CMD`），
+  这两组**一样不闭合**。闭合只覆盖人写的那 143 行与生成的 247 行。
+- ⇒ 差在"闭合是**结构性的**还是**模式性的**"。
+
+**③ 可执行意图 + 变异**
+
+- C 里决定不在这份文件里：`requires_auth` 落在 `rt_http.c:465` 的请求循环内，
+  `create_ok` 落在 `rt_blob.c:356` 的返回值里。要让样例够得着，只能**手抄一份**
+  （`decisions.h` + `decisions.c` 35 行，加执行器 `intent_c.c` 30 行）——**样例验的是复制品，服务跑的是原件，没有任何东西把守两者一致**。
+- 把 `verify` 的两个算子（分支删除=清空 then；提前返回=删掉 return）逐处作用到 `decisions.c`：
+  **8 处算子 → 6 个不同程序**（C 的 then 块只有一条语句时，两个算子落到同一处文本）。
+  同一批 6 条样例的结果：droplet 编译参数下 **5 抓住 / 1 MISS**（C3：删掉末尾 `return true;`），
+  但那 1 处编译器报 `warning: control reaches end of non-void function`；
+  换 `-Werror` → **6/6**。droplet 侧同批：**6 处变异，0 处没被抓住**。
+- ⇒ **这一条语言不占优**：C + 样例 + `-Werror` 拿到同样的变异覆盖率。
+  语言剩下的唯一真差别是"样例写在被调用那一侧，不必复制实现"。
+- 方法学事故，记下来：第一版变异脚本拿裸 `"    return false;"` 当锚点，
+  匹配到了 6 空格那行的**后半截**，产出一个根本没碰 `create_ok` 的假变异并被当成 MISS。
+  变异实验里最便宜的失败就是把假变异当发现 —— 脚本头部已把这条写成注释，锚点全部改成整块。
+
+**④ 外部面可导出、可 diff**
+
+- `droplet contract` 有四节：`boundaries / functions / tags / envs`。PUT 那一项里
+  `success: 204`、`precondition: true`、`intents[]`（invariant 文本）、`idempotent` 都在，位置带 `path:line`。
+- 去掉 `@no_content`（外部变更，204→200）→ `boundaries` 节 diff = **1 行**（`- "success": 204,`）。
+  抽一个 helper（纯内部重构）→ `boundaries` 节 diff = **0 行**（`functions` 节 +22 行，另属一格）。
+- C 只有源码文本这一种介质：同样两个改动 → **2 行 vs 14 行**，同类同形，
+  审的人分不开"改了承诺"和"改了写法"。
+
+### 7.4 对照组赢了一局，而且赢得对
+
+实测（各自干净数据目录、同一个 key 连 POST 两次）：
+
+| 二进制 | 第一次 | 第二次（key 已存在） | 契约里的 invariant |
+| --- | --- | --- | --- |
+| `blobd-lang` | 201 | **201** | "POST 只在 key 不存在时成功" |
+| `blobd-c2`（手抄 C） | 201 | **409** | 同一条 |
+
+根因：`main.dlt` 里 `fs.create(cfg.root, key)!` 把 `bool` 丢掉了 —— `create` 的语义是
+"已存在返回 false，不是错误"（`rt_blob.c:371`），生成的 C 就是 `(void)(_t11.u.ok);`。
+而这条 invariant：① 是散文，不进 oracle（§D.9）；② boundary 上的 example 也不被收集（P12）；
+③ 19 条 wire 断言里没有"同一个 key POST 两次"这一条。
+**三层全都没看见它。** 更刺的是 `code/webapi/intents.dlt` 里 `create_ok` 的 6 条样例全过、变异 0 漏，
+与服务的真实行为**直接矛盾**，而工具从不比较这两者。
+
+⇒ 这是本仓库对"人只审目标"目前最硬的一条反例：目标被写成字据、被抽成可执行谓词、全部通过，
+**实现照样违反它**。拦到这件事的不是语言的四条纪律，是对照组里那句手写的 `if (!create_ok(exists))`。
+
+### 7.5 结论
+
+1. 四条纪律里 **①②④ 语言确有结构性增益**，但形态要说准：
+   ① 让"沉默"不能成为一个决定；② 让闭合是结构性而非模式性的；④ 让承诺与写法分成两种介质。
+   都不是"更强的运行期安全" —— ①的补测（显式 `without precondition`）与 C 无守卫版等价，就是这件事的证据。
+2. ③ **语言不占优**。C + 样例 + `-Werror` 同样 6/6。谁的变异覆盖率更高这种比较，撑不起这门语言。
+3. 所以"要不要一门语言"该由 **7.4** 决定：**声明的目标与跑着的实现之间有没有一条会失败的通路**。
+   今天没有。缺的那块正是 **P12**，它从此不是一条改进项，是命题的空心部分。
+4. 收回我上一轮的一句话：我把四条纪律当成命题成立的证据；对照实验显示它们最多是**必要条件**。
+5. 方案 B（C + 清单 + 检查器）不是纸上谈兵 —— 45 行就拿到了枚举与对账（见 `c-control/OPTION-B.md`），
+   但闭合性止于文本模式：要跨过 7.3-② 那个拼接名的例子，检查器必须落到语义层
+   （libclang / 编译插件 / 静态分析框架），成本回到"写一个 front-end"的量级。
+   这句话是本轮能给 B 的最强陈述，也是它能被否掉的方式。
+
+### 7.6 怎么重跑（C 对照组）
+
+```sh
+cd <仓库根>
+mkdir -p .build
+A=code/lang/internal/runtime/assets
+S=docs/validation/c-control
+
+# 基线：语言版
+.build/droplet build code/webapi/src/contract.dlt code/webapi/src/main.dlt -o .build/blobd-lang
+sh $S/accept-c.sh "$PWD/.build/blobd-lang" 18801 lang
+
+# 对照组：自然版 / 修正版
+cc -std=c11 -O2 -Wall -Wextra            -I$S -I$A $S/service.c  $A/rt_core.c $A/rt_http.c $A/rt_blob.c $A/rt_ver.c -o .build/blobd-c
+cc -std=c11 -O2 -Wall -Wextra -Werror    -I$S -I$A $S/service2.c $A/rt_core.c $A/rt_http.c $A/rt_blob.c $A/rt_ver.c $S/decisions.c -o .build/blobd-c2
+sh $S/accept-c.sh "$PWD/.build/blobd-c"  18803 c1
+sh $S/accept-c.sh "$PWD/.build/blobd-c2" 18805 c2
+
+# 四条纪律
+sh $S/exp1-noguard.sh          # ① 删守卫：编译 + 跑表（另附 droplet 侧同形变异）
+python3 $S/surface-c.py $S/service2.c $S/manifest.json   # ② 对账（rc=1 报 DP_LOG_LEVEL）
+sh $S/exp2-indirect.sh         # ② 的重构击穿：对账 rc=0 而二进制照读
+sh $S/mutate-c.sh              # ③ 8 算子 → 6 程序，样例抓 5，-Werror 抓 6
+sh $S/exp4-invariant.sh        # 7.4：同一 key POST 两次，lang 201/201，C 201/409
+```
+
+端口 18801–18816 这段被本实验用过；重跑撞上旧实例时 `accept-c.sh` 会直接报"启动即退出"。

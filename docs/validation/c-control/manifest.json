@@ -1,0 +1,5 @@
+{
+  "routes": ["GET /health", "GET /v1/blob", "GET /v1/keys", "POST /v1/keys", "PUT /v1/blob"],
+  "statuses": [200, 201, 204, 409],
+  "envs": ["APP_BIND", "APP_MAX_BODY", "APP_PORT", "APP_ROOT", "APP_TOKEN"]
+}
