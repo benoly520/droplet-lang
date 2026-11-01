@@ -7,6 +7,11 @@ A "superset" here means exactly one thing: valid C is never rejected by this lay
 bespoke language in this repository; it was removed, and no further language extensions will be
 built (docs/SPEC.md §2.1). What remains is the part that measurably worked.
 
+"AI" here means the author, not a design target: nothing in the syntax or the toolchain is specific
+to AI. What is specific is the workflow — declarations a machine can reconcile, checks that fail,
+and results a human can accept without reading the implementation. Whether that workflow actually
+helps AI write more reliable C is **not measured yet** (docs/VALIDATION.md §4).
+
 The division of labour this is built around:
 
 | Actor | Does | Does not |
