@@ -260,3 +260,61 @@ sh $S/exp4-invariant.sh        # 7.4：同一 key POST 两次，lang 201/201，C
 ```
 
 端口 18801–18816 这段被本实验用过；重跑撞上旧实例时 `accept-c.sh` 会直接报"启动即退出"。
+
+
+## 8. 超集形态的实测（v0.30）
+
+方向调整之后的第一组数字（决定依据见 SPEC §0.8）。对象：`code/sup/`，
+旗舰服务的 C 超集写法 —— 合法 C11 + 三张声明表，不经 `code/lang`。
+
+### 8.1 同一张表跑两种介质
+
+| 编号 | 断言 | 超集 | 语言 |
+| --- | --- | --- | --- |
+| #1–#19 | 上一轮对照组那张表（错误空 body、204 无 Content-Length、405、412、413…） | 19 过 | 19 过 |
+| #20 | 同一 key 连 POST 两次 = **409** | 过 | **挂（实际 201）** |
+| #21 | GET 回来的字节 = 最近一次成功 PUT 的字节 | 过 | 过 |
+| 合计 | | **21 过 / 0 挂** | **20 过 / 1 挂** |
+
+#20 就是 D.10 里对照组赢我们的那一局；#21 是本轮新发现 —— 上一轮的 19 条里
+**没有一条**在验契约明写的这条 invariant，两种介质下它一直未证。
+
+### 8.2 破坏测试：7 项全被抓，0 假阴性
+
+| 编号 | 破坏动作 | 抓住它的工具 |
+| --- | --- | --- |
+| S1 | 路由表里删掉一行（实现留着） | 编译器 `-Wunused-function` + `-Werror` |
+| S2 | 表里列一个不存在的实现 | 编译器 `used but never defined` |
+| S3 | 读一个没声明的环境变量 | `dp_sup.h` 末尾把 `getenv` 改名 → 编译期失败 |
+| S4 | 目标谎称被不存在的断言 #99 证明 | `contract-sup.py` 退出码 1 |
+| S5 | 从验收表里删掉断言 #20 | `contract-sup.py` 退出码 1 |
+| S6 | 把"丢弃 create 的 bool"塞回胶水层 | `accept-sup.sh` #20 |
+| S7 | 用 `snprintf` 拼出未声明的环境变量名再读 | 编译期 —— 宏改的是函数名，不看字符串从哪来 |
+
+### 8.3 逃逸口（同一轮里实测，别只测赢的一面）
+
+| 编号 | 动作 | 结果 |
+| --- | --- | --- |
+| E1 | `#undef getenv` 之后再读 | 构建成功 —— 口开着，代价是必须显式写一行、可 grep |
+| E2 | 实现改非 `static` / 拆第二个 TU | 构建成功 —— `-Wunused-function` 只守单 TU |
+| E3 | handler 里写 `out->status = 418u` | **编译失败**：handler 参数里没有 `dp_response` |
+| E4 | 运行时自带的三个 `DP_*` 环境变量 | 不在这个声明面内，仍是隐式读取 |
+| E6 | `extern char **environ` 自己遍历 | 构建成功 —— 守卫改的是 `getenv`，管不到第二条路 |
+
+S7 值得单独说一句：D.10.2 里击穿 45 行正则核对器的就是 `snprintf("%s%s%s","DP_","LOG_","LEVEL")`
+这种写法，而**同一个写法在超集形态里编译期就挂**。差别不是检查器更聪明，是抓手换了位置 ——
+文本对账查的是字符串，构造查的是符号名，字符串怎么拼的不重要。
+
+E1/E2 就是"分析完整 C 要多少钱"这笔账的可执行部分，也是 P17 唯一还有价值的地方。
+
+### 8.4 重跑命令
+
+```sh
+sh code/sup/build.sh sup                                        # 构建（-Wall -Wextra -Werror）
+sh code/sup/accept-sup.sh "$PWD/.build/sup/blobd" 18880 sup     # 21 条断言
+python3 code/sup/contract-sup.py .build/sup/blobd code/sup/accept-sup.sh -o /tmp/contract.json
+sh code/sup/sabotage-sup.sh 18850                               # S1–S7
+sh code/sup/accept-sup.sh "$PWD/.build/dlt/blobd" 18881 dlt     # 语言版同一张表（端口勿复用）
+```
+
+ASan/UBSan 版：`cc -std=c11 -g -fsanitize=address,undefined ...` 后跑同一张表，实测 21/21 无诊断。
