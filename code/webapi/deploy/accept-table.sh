@@ -30,7 +30,16 @@ mkdir -p "$B/data"
 cd "$B/data"
 git init -q .
 # 只提交本次写的那个 key：扫全树会撞上正在 rename 的 .tmp.<pid>.<seq>。
-DP_COMMIT_CMD='git add -A -- "$DP_COMMIT_KEY" && git -c user.name=droplet -c user.email=dp@example.com commit -q -m "snapshot $DP_COMMIT_KEY"'
+# **并发**：运行时每次成功写入都拉起一个子进程（DP_COMMIT_DEBOUNCE=0 不合并），所以这条命令会被
+# 同时跑好几份。直接跑 `git commit` 会抢 HEAD 的 ref 锁 —— CI 第一次跑 v0.33 就挂在这一条上
+# （`fatal: cannot lock ref 'HEAD'`，4 次写入只落地 3 条提交）。用 flock 把命令串起来执行；
+# 这不是放宽 #23，它仍然是"一次成功写入 = 一条提交"，只是让子进程排队而不是互相踩。
+cat > "$B/commit.sh" <<'EOS'
+#!/bin/sh
+git add -A -- "$DP_COMMIT_KEY" &&
+git -c user.name=droplet -c user.email=dp@example.com commit -q -m "snapshot $DP_COMMIT_KEY"
+EOS
+DP_COMMIT_CMD="flock \"$B/commit.lock\" sh \"$B/commit.sh\""
 export DP_COMMIT_CMD
 export DP_COMMIT_DEBOUNCE=0
 export APP_BIND=127.0.0.1
@@ -145,14 +154,15 @@ CK21=$(body -H "$A" "$BLOB")
 ck 21 hello4 "$CK21" "GET 回来的字节 == 最近一次成功 PUT 的字节"
 
 # ---- 从 accept.sh 的打印转成断言的三条（v0.33 合并时新增）----
-# 提交子进程是异步的：轮询等它落盘（最多 3 秒），否则 #23 数到的是写入过程中的中间态。
+# 提交子进程是异步的：轮询等它落盘（最多 10 秒；CI 的 runner 比本机慢，3 秒实测不够），
+# 否则 #23 数到的是写入过程中的中间态。
 # 等待不等于放宽：等到之后仍然断言**恰好** 4 条，多一条少一条都算挂。
 COMMON_WAIT=0
 COMMITS=0
-while [ "$COMMON_WAIT" -lt 3 ]; do
+while [ "$COMMON_WAIT" -lt 20 ]; do
   COMMITS=$(git -C "$B/data" rev-list --count HEAD 2>/dev/null || echo 0)
   [ "$COMMITS" -eq 4 ] && break
-  sleep 1
+  sleep 0.5
   COMMON_WAIT=$((COMMON_WAIT + 1))
 done
 
