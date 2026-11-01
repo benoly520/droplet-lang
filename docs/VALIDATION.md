@@ -17,6 +17,11 @@ sh code/sup/compare-sup.sh --self-test             # 候选比较：唯一 / 无
 sh code/sup/firstpass.sh --self-test               # 首次成功率量尺，3 条自检（不产生模型数字）
 sh code/sup/maint-cost.sh                          # 三种改动的文件数 / +/- 行数
 sh code/sup/sabotage-sup.sh 18900                  # 14 条破坏，每条必须被具体工具抓住
+sh code/sup/check.sh --full                        # 作者/维护回路：一条命令一个退出码（10 项）
+sh code/sup/brief.sh .build/briefpack              # 题面包（不含实现，预算内）
+sh code/sup/submit-sup.sh code/sup/dp_decide.c 18882   # 提交口：参考实现必须被接受
+sh code/sup/report.sh .build/check/blobd --accept 18881  # 人类验收页
+sh code/sup/lab/make-packet.sh /tmp/lab/packet     # 实验题面（两条仓库里不存在的决定）
 ```
 
 ASan+UBSan：把 `build.sh` 里的 `cc` 换成 `cc -g -fsanitize=address,undefined` 同口径编译，
@@ -37,6 +42,9 @@ ASan+UBSan：把 `build.sh` 里的 `cc` 换成 `cc -g -fsanitize=address,undefin
 | 首次成功率 | 量尺自检 **3/3**；**没有模型数据，数字未测量** |
 | 维护成本 | 改默认端口 **2 文件 / 4 个 +/- 行**；加配置项 **1 / 3**；改边界策略 **3 / 6** |
 | 破坏测试 | **14 抓住 / 0 假阴性**，每条带归因（哪个工具、什么诊断） |
+| 作者回路 | `check.sh` 快档 **4/4 绿**；题面包 7,190 token（估算）、无实现文件；提交口接受参考实现、拒绝丢 bool 的候选 |
+| 实验（决定层） | **3 次独立生成，pass@1 = 3/3**（12/12 样例，首次即过）；详见 [EXPERIMENT.md](EXPERIMENT.md) |
+| 实验（维护） | **1 次陌生改动：5 文件 / 18 个 +/- 行，`check --full` 10 项全绿**，断言 26 条未删未放宽 |
 
 ### 2.1 接口承诺（26 条断言钉住的那些）
 
@@ -86,9 +94,10 @@ ASan+UBSan：把 `build.sh` 里的 `cc` 换成 `cc -g -fsanitize=address,undefin
 3. **变异有 2 个 MISS**。我判定它们与实现等价（无符号与非零判断同外延），工具并没有证明这一点。
 4. **运行时在检查面之外**。1468 行共享 C 没有样例、没有变异；它出问题只能靠 wire 断言兜。
 5. **没有长稳结论**。`soak.sh` 只跑过压缩时间自测（60 秒级），72 小时那条线仍是空的。
-6. **没有 AI 首次正确率的数字**。本轮补上了量尺（`firstpass.sh`）与候选比较（`compare-sup.sh`），
-   但仓库里没有模型在环，没有候选序列可喂。所以这张表里没有 pass@k 的数 —— 只有量尺的自检。
+6. **首次正确率只有一个很小的数**。决定层 n=3、pass@1=3/3，题面由人写、模型同族、首次提交口径；
+   不能外推成“AI 能写这个服务”。完整服务与人类维护者仍然没有测量（EXPERIMENT §4）。
 7. **必读面的 token 数是估算**。ASCII 4 B/token、非 ASCII 3 B/token；换分词器会变。
    它是回归护栏，不是“AI 需要读这么多”的因果结论。
-8. **维护成本只数局部性**。三个脚本化改动都在小面上完成；这不代表任意改动都便宜，
-   例如改路由鉴权策略会同时牵动表、断言与目标措辞。
+8. **维护成本只数局部性**。三个脚本化改动都在小面上完成；这不代表任意改动都便宜：
+   实测一次跨层维护（405 -> 501）是 5 文件 / 18 个 +/- 行，因为映射住在运行时，
+   样例碰不到，只能靠 wire 断言与目标措辞同步（EXPERIMENT §2）。

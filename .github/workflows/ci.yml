@@ -12,6 +12,8 @@ name: CI
 #   compare  候选比较：样例能不能把唯一正确的一份挑出来（含自检）
 #   firstpass 首次成功率量尺（含自检；没有模型数据，数字不在这里产生）
 #   maint    三种典型改动的文件/行数预算
+#   loop     作者回路：check.sh 一条命令一个退出码；brief 题面包不含实现；submit 能收也能拒
+#   report   人类验收页：目标 -> 断言 -> 红绿，一屏
 #   sabotage 14 条破坏测试，每条必须由具体工具以具体诊断抓住
 #
 # soak.sh 不在这里：它要一台长时间常开的机器。
@@ -51,5 +53,15 @@ jobs:
         run: sh code/sup/firstpass.sh --self-test
       - name: 维护成本（改动局部性）
         run: sh code/sup/maint-cost.sh
+      - name: 作者回路（一条命令一个退出码）
+        run: sh code/sup/check.sh
+      - name: 题面包（不含实现文件，且在预算内）
+        run: sh code/sup/brief.sh "$GITHUB_WORKSPACE/.build/briefpack"
+      - name: 实验题面包（可从零交给任意模型）
+        run: sh code/sup/lab/make-packet.sh "$GITHUB_WORKSPACE/.build/labpacket"
+      - name: 提交口（参考实现必须被接受）
+        run: sh code/sup/submit-sup.sh code/sup/dp_decide.c 18953
+      - name: 人类验收页（目标 -> 断言 -> 红绿）
+        run: sh code/sup/report.sh "$GITHUB_WORKSPACE/.build/ci-sup/blobd" --accept 18952
       - name: 破坏测试（每条断言归因到具体工具）
         run: sh code/sup/sabotage-sup.sh 18960

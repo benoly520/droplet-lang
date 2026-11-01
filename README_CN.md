@@ -5,8 +5,10 @@
 这里的“超集”只有一条含义：合法的 C 不会被这一层拒绝。自造语言已删除，也不再做任何语言扩展（见 docs/SPEC.md §2.1）。
 
 “AI”在这里指作者，不是设计对象：语法和工具链里没有任何一处是专为 AI 设计的。专为 AI 的是**工作流** ——
-声明能被机器对账、检查会失败、人不必读实现就能验收。这个工作流是否真的让 AI 写出更可靠的 C，
-**目前没有测量**（见 docs/VALIDATION.md §4）。
+声明能被机器对账、检查会失败、人不必读实现就能验收。这个工作流是否真的让 AI 写出更可靠的 C：
+现有**一项小规模测量** —— 决定层 3 次独立生成，首次提交全部通过（pass@1 = 3/3）；
+外加一次维护实验（405 -> 501，5 文件 / 18 个 +/- 行，全套检查绿）。
+完整服务与真实人类维护者仍未测量，见 [docs/EXPERIMENT.md](docs/EXPERIMENT.md)。
 
 它围绕这个分工设计：
 
@@ -30,9 +32,13 @@
 需要 `cc`（C11）、`sh`、`python3`、`git`、`flock`、`curl`。不需要 Go，也不需要代码生成器。
 
 ```sh
-sh code/sup/build.sh sup                       # 编用户 TU -> 符号审计 -> 接线检查 -> 链接
-sh code/sup/accept-sup.sh "$PWD/.build/sup/blobd" 18880 sup   # 26 条 wire 断言
+sh code/sup/check.sh                           # 一条命令一个退出码（构建 / 样例 / 契约 / 预算）
+sh code/sup/report.sh .build/check/blobd --accept 18881   # 人类验收页：目标 -> 断言 -> 红绿
 ```
+
+作者回路是三段：`brief.sh` 出题面包（声明 + 契约 + 命令，不含实现）、`check.sh` 给第一个失败项、
+`submit-sup.sh 候选.c` 在临时树里跑整条面并接受/拒绝。维护者用 `check.sh --full`
+追加验收、变异与破坏测试。
 
 或者直接打它：
 
@@ -71,10 +77,12 @@ code/sup/            受检层：四张声明表、旗舰服务、全部检查
   blobd.c            DP_ROUTES + DP_GOALS —— 229 行，用户所有
   dp_env.h           DP_ENVS —— 18 行，用户所有
   dp_decide.h/.c     五个纯决定 + 19 条 DP_EXAMPLES —— 114 行，用户所有，服务链接的就是这份
+  check.sh report.sh brief.sh submit-sup.sh   三条回路：作者、人类验收、提交口
   dp_sup.h dp_cfg.c dp_conf.h dp_oracle.c   机制，344 行
 code/runtime/        服务运行时，1468 行 C（rt_core / rt_http / rt_blob / rt_ver，含 rt.h）
+code/sup/lab/        实验题面包：两条本仓库里不存在的决定
 code/webapi/deploy/  26 条断言表、soak、systemd 单元、环境变量样例
-docs/                SPEC（这是什么）、VALIDATION（实测数字）、NEXT（交接）
+docs/                SPEC、VALIDATION（实测数字）、EXPERIMENT（两个实验）、NEXT（交接）
 ```
 
 ## 已知边界

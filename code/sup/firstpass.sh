@@ -7,12 +7,18 @@
 #
 # 口径：
 #   * 候选按文件名字典序（attempt-01 < attempt-02 ...）；
-#   * 一次候选 = 一份完整 dp_decide.c；编译失败也算一次失败（与 build.sh 同口径）；
+#   * 一次候选 = 一份完整实现；编译失败也算一次失败（与 build.sh 同口径）；
 #   * 一条样例一个进程；全过才算这次候选通过；
 #   * pass@k：前 k 次里只要有一次全过就是 1，否则 0。first-pass 记录实际第几次。
 #
+# 两种用法：
+#   * 仓库口径（默认）：判据是 `code/sup/dp_decide.h` 的样例表；
+#   * 题面包口径（`--packet DIR`）：判据是 `DIR/dp_decide.h`，用于"从声明写实现"的实验。
+#     包里的样例编号从表里读（没有干净实现可链接时也能起判）。
+#
 # 用法：
 #   sh code/sup/firstpass.sh <目录> [k]
+#   sh code/sup/firstpass.sh --packet <题目录> <含 attempt-*.c 的目录> [k]
 #   sh code/sup/firstpass.sh --self-test
 set -eu
 
@@ -22,12 +28,30 @@ export TMPDIR=$ROOT/.build
 FLAGS="-std=c11 -O2 -Wall -Wextra -Werror"
 rm -rf "$B"; mkdir -p "$B"
 
-cp "$ROOT"/code/sup/dp_decide.h "$ROOT"/code/sup/dp_oracle.c "$ROOT/code/runtime/rt.h" "$B/"
-cc $FLAGS -I"$B" -c "$ROOT/code/sup/dp_oracle.c" -o "$B/oracle.o"
-cp "$ROOT/code/sup/dp_decide.c" "$B/clean.c"
-cc $FLAGS -I"$B" -c "$B/clean.c" -o "$B/clean.o"
-cc $FLAGS -I"$B" "$B/oracle.o" "$B/clean.o" -o "$B/clean-oracle"
-IDS=$("$B/clean-oracle" --list | cut -f1)
+PACKET=""
+if [ "${1:-}" = "--packet" ]; then
+  PACKET=${2:-}
+  shift 2
+  if [ -z "$PACKET" ] || [ ! -f "$PACKET/dp_decide.h" ] || [ ! -f "$PACKET/dp_oracle.c" ]; then
+    echo "挂：--packet 需要一个含 dp_decide.h 与 dp_oracle.c 的目录" >&2
+    exit 2
+  fi
+fi
+
+if [ -n "$PACKET" ]; then
+  cp "$PACKET/dp_decide.h" "$PACKET/dp_oracle.c" "$B/"
+  if [ -f "$PACKET/rt.h" ]; then cp "$PACKET/rt.h" "$B/"; else cp "$ROOT/code/runtime/rt.h" "$B/"; fi
+  cc $FLAGS -I"$B" -c "$B/dp_oracle.c" -o "$B/oracle.o"
+  IDS=$(grep -oE 'X\([0-9]+' "$B/dp_decide.h" | tr -dc '0-9\n')
+else
+  cp "$ROOT/code/sup/dp_decide.h" "$ROOT/code/sup/dp_oracle.c" "$ROOT/code/runtime/rt.h" "$B/"
+  cc $FLAGS -I"$B" -c "$ROOT/code/sup/dp_oracle.c" -o "$B/oracle.o"
+  cp "$ROOT/code/sup/dp_decide.c" "$B/clean.c"
+  cc $FLAGS -I"$B" -c "$B/clean.c" -o "$B/clean.o"
+  cc $FLAGS -I"$B" "$B/oracle.o" "$B/clean.o" -o "$B/clean-oracle"
+  IDS=$("$B/clean-oracle" --list | cut -f1)
+fi
+
 N=$(printf '%s\n' "$IDS" | grep -c '^[0-9]' || true)
 if [ "$N" -eq 0 ]; then
   echo "挂：样例表 0 行 —— 首次成功率没有判据" >&2
@@ -42,7 +66,7 @@ run_attempts() {
   FIRST=0
   PASS_AT_K=0
   for SRC in "$DIR"/attempt-*.c; do
-    [ -f "$SRC" ] || continue
+    if [ ! -f "$SRC" ]; then continue; fi
     IDX=$((IDX + 1))
     NAME=$(basename "$SRC")
     TAG=$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9' '_')
@@ -77,7 +101,7 @@ run_attempts() {
     return 2
   fi
   P1=0
-  [ "$FIRST" -eq 1 ] && P1=1
+  if [ "$FIRST" -eq 1 ]; then P1=1; fi
   if [ "$IDX" -lt "$K" ]; then
     echo "（候选只有 $IDX 次，k=$K 按实际次数算）"
   fi
@@ -133,7 +157,7 @@ PY
 fi
 
 if [ "$#" -lt 1 ] || [ ! -d "$1" ]; then
-  echo "用法：sh code/sup/firstpass.sh <含 attempt-*.c 的目录> [k] | --self-test" >&2
+  echo "用法：sh code/sup/firstpass.sh [--packet <题目录>] <含 attempt-*.c 的目录> [k] | --self-test" >&2
   exit 2
 fi
 run_attempts "$1" "${2:-5}"

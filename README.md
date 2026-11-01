@@ -10,7 +10,10 @@ built (docs/SPEC.md §2.1). What remains is the part that measurably worked.
 "AI" here means the author, not a design target: nothing in the syntax or the toolchain is specific
 to AI. What is specific is the workflow — declarations a machine can reconcile, checks that fail,
 and results a human can accept without reading the implementation. Whether that workflow actually
-helps AI write more reliable C is **not measured yet** (docs/VALIDATION.md §4).
+helps AI write more reliable C: there is now **one small measurement** — three independent generations
+of the decision layer, all passing on the first submission (pass@1 = 3/3) — plus one maintenance trial
+(405 -> 501 in 5 files / 18 +/- lines, full check green). The whole service and real human maintainers
+are still unmeasured; see [docs/EXPERIMENT.md](docs/EXPERIMENT.md).
 
 The division of labour this is built around:
 
@@ -36,9 +39,14 @@ The superset form kept the part that did work. Everything under `code/` is C11 p
 Needs `cc` (C11), `sh`, `python3`, `git`, `flock`, `curl`. No Go, no code generator.
 
 ```sh
-sh code/sup/build.sh sup                       # compile user TUs -> symbol audit -> wiring check -> link
-sh code/sup/accept-sup.sh "$PWD/.build/sup/blobd" 18880 sup   # 26 wire assertions
+sh code/sup/check.sh                            # one command, one exit code (build / samples / contract / budget)
+sh code/sup/report.sh .build/check/blobd --accept 18881   # human page: goal -> assertions -> red/green
 ```
+
+The authoring loop is three commands: `brief.sh` emits a task packet (declarations, contract, commands —
+no implementation), `check.sh` gives the first failing gate, `submit-sup.sh candidate.c` runs the whole
+surface in a scratch tree and accepts or rejects it. `check.sh --full` adds acceptance, mutation and
+sabotage for maintainers.
 
 Or talk to it directly:
 
@@ -77,10 +85,12 @@ code/sup/            the checked layer: four declaration tables, the flagship se
   blobd.c            DP_ROUTES + DP_GOALS — 229 lines, user-owned
   dp_env.h           DP_ENVS — 18 lines, user-owned
   dp_decide.h/.c     five pure decisions + 19 DP_EXAMPLES — 114 lines, user-owned, linked by the service
+  check.sh report.sh brief.sh submit-sup.sh   the three loops: author, human acceptance, submission
   dp_sup.h dp_cfg.c dp_conf.h dp_oracle.c   mechanism, 344 lines
 code/runtime/        the service runtime, 1468 lines of C (rt_core / rt_http / rt_blob / rt_ver, incl. rt.h)
+code/sup/lab/        the experiment packet: two decisions that do not exist in this repo
 code/webapi/deploy/  26-assertion acceptance table, soak, systemd unit, env example
-docs/                SPEC (what this is), VALIDATION (measured numbers), NEXT (handoff)
+docs/                SPEC, VALIDATION (numbers), EXPERIMENT (two trials), NEXT (handoff)
 ```
 
 ## Known limits
