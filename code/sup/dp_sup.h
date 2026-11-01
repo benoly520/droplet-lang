@@ -28,6 +28,7 @@
 #include <stdio.h>
 
 #include "dp_conf.h"
+#include "dp_decide.h"
 
 #ifndef DP_ROUTES
 #error "本层要求先定义 DP_ROUTES：没有路由表就没有可声明的面（不 include 本头的普通 C 程序不受任何影响）"
@@ -81,10 +82,8 @@ DP_ROUTES(DP_ROUTE_ROW)
 static inline int dp_created(dp_arena* a, dp_str key) {
   int err = 0;
   bool fresh = dp_blob_create(a, dp_conf.root, key, &err);
-  if (err != 0) {
-    return err;
-  }
-  return fresh ? 0 : (int)DP_ERR_CONFLICT; /* P16 的那一局在这里不再可能 */
+  /* 决定住在 dp_decide.c —— 与 oracle 跑的是同一份，不是第二份抄本。 */
+  return dec_create_result(fresh, err);
 }
 
 /* ---- 成功投影：数字只在这一个 switch 里 ---- */

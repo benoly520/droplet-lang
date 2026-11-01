@@ -20,19 +20,38 @@ mkdir -p "$B"
 RT=$ROOT/code/lang/internal/runtime/assets
 cp "$RT"/rt.h "$RT"/rt_core.c "$RT"/rt_http.c "$RT"/rt_blob.c "$RT"/rt_ver.c "$B/"
 cp "$ROOT"/code/sup/dp_sup.h "$ROOT"/code/sup/dp_conf.h "$ROOT"/code/sup/dp_cfg.c \
-   "$ROOT"/code/sup/dp_env.h "$ROOT"/code/sup/blobd.c "$B/"
+   "$ROOT"/code/sup/dp_env.h "$ROOT"/code/sup/dp_decide.h "$ROOT"/code/sup/dp_decide.c \
+   "$ROOT"/code/sup/blobd.c "$B/"
 cp "$ROOT"/code/sup/audit-sup.sh "$B/"
 
 # -Wall -Wextra -Werror：上一轮实测"C + -Werror 打平 verify"，这一版直接把它当默认，
 # 并且把表与实现的双向对账交给编译器（原型/未用函数），不交给正则。
 # 用户 TU 与机制 TU 都严格编译；本层不再对 C 的既有用法加任何限制。
 cc -std=c11 -O2 -Wall -Wextra -Werror -I"$B" -c "$B/blobd.c" -o "$B/blobd.o"
+cc -std=c11 -O2 -Wall -Wextra -Werror -I"$B" -c "$B/dp_decide.c" -o "$B/dp_decide.o"
 cc -std=c11 -O2 -Wall -Wextra -Werror -I"$B" -c "$B/dp_cfg.c" -o "$B/dp_cfg.o"
 
-sh "$B/audit-sup.sh" "$B/blobd.o"
+# 审计对象 = 所有用户 TU。v0.32 起 dp_decide.c 是第二个用户 TU，
+# 它的 .o 也进审计：拆 TU 不再是"绕开检查"的办法（E2 的一半在这里被抵掉）。
+sh "$B/audit-sup.sh" "$B/blobd.o" "$B/dp_decide.o"
+
+# 服务必须**真的引用**那些被样例覆盖的决定，否则 oracle 验的又是一份复制品
+# —— 对照组输掉的就是这一点（VALIDATION §7.3 ③），这里用符号表把它变成可失败的检查。
+# 这条不看源码文本：改名改不掉，引用关系在 .o 里。
+# 每个被样例覆盖的决定都要一对：谁的 .o 必须引用它。漏一个就是漏一条口子。
+for PAIR in "blobd.o dec_create_result" "dp_cfg.o dec_port_usable"; do
+  OBJ=$(printf '%s' "$PAIR" | cut -d' ' -f1)
+  SYM=$(printf '%s' "$PAIR" | cut -d' ' -f2)
+  if ! nm -u "$B/$OBJ" | awk '{print $2}' | grep -qx "$SYM"; then
+    echo "构建红：$OBJ 没有引用 $SYM —— DP_EXAMPLES 验的就不是服务跑的那份代码" >&2
+    exit 1
+  fi
+  echo "接线绿：$OBJ 引用了被样例覆盖的决定（$SYM）"
+done
 
 cc -std=c11 -O2 -Wall -Wextra -Werror -I"$B" \
-   "$B/blobd.o" "$B/dp_cfg.o" "$B"/rt_core.c "$B"/rt_http.c "$B"/rt_blob.c "$B"/rt_ver.c \
+   "$B/blobd.o" "$B/dp_cfg.o" "$B/dp_decide.o" \
+   "$B"/rt_core.c "$B"/rt_http.c "$B"/rt_blob.c "$B"/rt_ver.c \
    -o "$B/blobd"
 
 echo "构建成功：$B/blobd"

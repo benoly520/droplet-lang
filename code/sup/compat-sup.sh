@@ -114,7 +114,8 @@ int main(void) {
   return 0;
 }
 EOF
-cp "$ROOT"/code/sup/dp_sup.h "$ROOT"/code/sup/dp_conf.h "$ROOT"/code/sup/dp_env.h "$B/"
+cp "$ROOT"/code/sup/dp_sup.h "$ROOT"/code/sup/dp_conf.h "$ROOT"/code/sup/dp_env.h \
+   "$ROOT"/code/sup/dp_decide.h "$ROOT"/code/sup/dp_decide.c "$B/"
 RT=$ROOT/code/lang/internal/runtime/assets
 cp "$RT"/rt.h "$RT"/rt_core.c "$RT"/rt_http.c "$RT"/rt_blob.c "$RT"/rt_ver.c "$B/"
 cp "$ROOT"/code/sup/dp_cfg.c "$B/"

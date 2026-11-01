@@ -1,12 +1,14 @@
 name: CI
 
-# 两档，各管一件事：
+# 三档，各管一件事：
 #   floor —— 用 go.mod 声明的下限（1.22）编一遍、跑全部用例。任何 1.23+ 的 API 混进来，
 #            或有人顺手把 go 指令抬高，这一档立刻红。GOTOOLCHAIN=local 保证它**不会**
 #            偷偷去下载新工具链来"修好"自己。
 #   latest —— 用最新稳定版编一遍，守前向兼容（新版本引入的编译错误/deprecation 先看见）。
+#   sup     —— 超集形态（code/sup）只靠 cc，不经过 code/lang。它测的是"这一层能不能自己站住"：
+#            兼容性、符号审计、接线检查、样例 oracle、变异、21 断言表、11 条破坏测试。
 #
-# 只做 build / vet / test。accept.sh 与 soak.sh 需要端口与常开机器，不放进 CI。
+# soak.sh 仍不在这里：它要长时间常开的机器。accept*.sh 用一次性临时端口，可以进来。
 
 on:
   push:
@@ -67,3 +69,23 @@ jobs:
         run: go test ./...
       - name: accept（HTTP 契约验收，测的是 wire）
         run: sh code/webapi/deploy/accept.sh
+
+  sup:
+    name: 超集形态（code/sup，纯 cc）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 兼容性实测（合法 C 两种口径）
+        run: sh code/sup/compat-sup.sh ci-compat
+      - name: 构建 = 编用户 TU + 符号审计 + 接线检查
+        run: sh code/sup/build.sh ci-sup
+      - name: 样例 oracle（DP_EXAMPLES，一条一个进程）
+        run: sh code/sup/oracle-sup.sh ci-oracle
+      - name: 决定层变异测试
+        run: sh code/sup/mutate-dec.sh ci-mutate
+      - name: 21 条断言验收表
+        run: sh code/sup/accept-sup.sh "$GITHUB_WORKSPACE/.build/ci-sup/blobd" 18951 ci
+      - name: 契约对账
+        run: python3 code/sup/contract-sup.py "$GITHUB_WORKSPACE/.build/ci-sup/blobd" code/sup/accept-sup.sh
+      - name: 破坏测试（每条断言归因到具体工具）
+        run: sh code/sup/sabotage-sup.sh 18960

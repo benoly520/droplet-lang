@@ -1,0 +1,149 @@
+#!/bin/sh
+# 超集侧的机械变异（v0.32 / P18 第 1 条的后半）：把 `droplet verify` 的算子搬到
+# 超集形态的纯决定上，看同一批样例够不够抓住。
+#
+# 对照的三个数（都记在 docs/VALIDATION.md）：
+#   droplet 侧（语言版 intents.dlt）：6 处变异 / 0 处没被抓住；
+#   C 对照组（mutate-c.sh）：8 个算子 → 6 个程序，样例抓 5，`-Werror` 抓 6 —— 与语言侧打平；
+#   本脚本：算子作用在 dp_decide.c 上，**验的是服务真正链接的那一份**（不是抄本）。
+#
+# 三条口径，用的是本轮那次假绿换来的教训（SPEC §0.8.2）：
+#   ① 每个变异都断言**预期结局**，实际不符就报"误报"并整轮失败 —— 不许"反正红了就算抓住"；
+#   ② 锚点必须唯一（count == 1），否则整轮失败 —— 防止把"根本没碰到目标函数"的假变异当发现；
+#   ③ 先跑干净参照，它必须全绿；参照挂了则本轮结论作废。
+# 等价变异记成 MISS 是刻意的：报告不替人判断"这处改动有没有意义"。
+#
+# 用法：sh code/sup/mutate-dec.sh [构建标签]
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+LABEL=${1:-mutate}
+B=$ROOT/.build/$LABEL
+export TMPDIR=$ROOT/.build
+rm -rf "$B"
+mkdir -p "$B"
+
+cp "$ROOT"/code/sup/dp_decide.h "$ROOT"/code/sup/dp_decide.c "$ROOT"/code/sup/dp_oracle.c "$B/"
+cp "$ROOT"/code/lang/internal/runtime/assets/rt.h "$B/"
+
+echo "== 干净参照 =="
+if ! cc -std=c11 -O2 -Wall -Wextra -Werror -I"$B" -c "$B/dp_decide.c" -o "$B/decide.o" \
+     || ! cc -std=c11 -O2 -Wall -Wextra -Werror -I"$B" -c "$B/dp_oracle.c" -o "$B/oracle.o" \
+     || ! cc -std=c11 -O2 -Wall -Wextra -Werror -I"$B" "$B/oracle.o" "$B/decide.o" -o "$B/bin"; then
+  echo "挂：干净参照编不过，本轮结论全部作废" >&2
+  exit 1
+fi
+CLEAN_FAIL=0
+N=0
+for ID in $("$B/bin" --list | cut -f1); do
+  N=$((N + 1))
+  if ! "$B/bin" --only "$ID" >/dev/null 2>&1; then
+    "$B/bin" --only "$ID" || true
+    CLEAN_FAIL=$((CLEAN_FAIL + 1))
+  fi
+done
+if [ "$CLEAN_FAIL" -ne 0 ]; then
+  echo "挂：干净参照有 $CLEAN_FAIL 条样例不通过 —— 变异实验的前提不成立，本轮作废" >&2
+  exit 1
+fi
+echo "  过：原件 $N 条样例全绿（表里 $N 行）"
+
+python3 - "$B" "$N" <<'PY'
+import pathlib, subprocess, sys
+
+B = pathlib.Path(sys.argv[1])
+N = int(sys.argv[2])
+orig = (B / "dp_decide.c").read_text()
+
+CREATE = """int dec_create_result(bool fresh, int err) {
+  if (err != 0) {
+    return err;
+  }
+  return fresh ? 0 : (int)DP_ERR_CONFLICT;
+}"""
+PORT = "bool dec_port_usable(unsigned long x) { return x >= 1ul && x <= 65535ul; }"
+
+# (编号, 说明, 锚点, 替换, 预期结局)
+MUTS = [
+    ("M1", "常量 +1：端口上界 65535 改成 65536", PORT,
+     "bool dec_port_usable(unsigned long x) { return x >= 1ul && x <= 65536ul; }", "CAUGHT"),
+    ("M2", "边界翻转：下界 >= 改成 >", PORT,
+     "bool dec_port_usable(unsigned long x) { return x > 1ul && x <= 65535ul; }", "CAUGHT"),
+    ("M3", "边界翻转：上界 <= 改成 <", PORT,
+     "bool dec_port_usable(unsigned long x) { return x >= 1ul && x < 65535ul; }", "CAUGHT"),
+    ("M4", "分支删除：清空 err 守卫的 then", CREATE,
+     CREATE.replace("    return err;\n", "", 1), "CAUGHT"),
+    ("M5", "取值反转：fresh 的三目两支互换", CREATE,
+     CREATE.replace("return fresh ? 0 : (int)DP_ERR_CONFLICT;",
+                    "return fresh ? (int)DP_ERR_CONFLICT : 0;", 1), "CAUGHT"),
+    ("M6", "等价变异：x >= 1ul 改成 x != 0ul（无符号下同一回事）", PORT,
+     "bool dec_port_usable(unsigned long x) { return x != 0ul && x <= 65535ul; }", "MISS"),
+    ("M7", "等价变异：err != 0 改成 err > 0 || err < 0", CREATE,
+     CREATE.replace("if (err != 0) {", "if (err > 0 || err < 0) {", 1), "MISS"),
+    ("M8", "清空函数体：dec_port_usable 什么都不返回（编译期就该响）", PORT,
+     "bool dec_port_usable(unsigned long x) { (void)x; }", "COMPILE"),
+]
+
+FLAGS = "-std=c11 -O2 -Wall -Wextra -Werror"
+
+
+def sh(cmd):
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True)
+
+
+caught = miss = compile_hit = wrong = 0
+for mid, name, anchor, repl, expect in MUTS:
+    if orig.count(anchor) != 1:
+        print(f"挂：{mid} 的锚点在 dp_decide.c 里出现 {orig.count(anchor)} 次 —— "
+              f"这是假变异风险，整轮失败")
+        sys.exit(1)
+    d = B / mid
+    d.mkdir(exist_ok=True)
+    (d / "dp_decide.c").write_text(orig.replace(anchor, repl, 1))
+    for f in ("dp_decide.h", "dp_oracle.c", "rt.h"):
+        (d / f).write_text((B / f).read_text())
+
+    steps = [sh(f'cc {FLAGS} -I{d} -c {d}/dp_decide.c -o {d}/decide.o'),
+             sh(f'cc {FLAGS} -I{d} -c {d}/dp_oracle.c -o {d}/oracle.o'),
+             sh(f'cc {FLAGS} -I{d} {d}/oracle.o {d}/decide.o -o {d}/bin')]
+    built = all(s.returncode == 0 for s in steps)
+    errlog = "\n".join(s.stderr for s in steps if s.stderr)
+    (d / "build.log").write_text(errlog)
+
+    if expect == "COMPILE":
+        if built:
+            print(f"  误报 {mid}：预期编不过，实际编过了 —— 归因不符，不算抓住")
+            wrong += 1
+            continue
+        compile_hit += 1
+        first = errlog.strip().splitlines()
+        print(f"  抓住 {mid}（编译期 红）：{name}")
+        print(f"        诊断：{first[0] if first else '(无)'}")
+        continue
+
+    if not built:
+        print(f"  误报 {mid}：预期 {expect}，实际编不过 —— 归因不符，不算抓住")
+        wrong += 1
+        continue
+
+    listing = sh(f'{d}/bin --list').stdout
+    ids = [line.split("\t")[0] for line in listing.splitlines() if line.strip()]
+    flipped = [i for i in ids if sh(f'{d}/bin --only {i}').returncode != 0]
+    got = "CAUGHT" if flipped else "MISS"
+    if got != expect:
+        print(f"  误报 {mid}：预期 {expect}，实际 {got}（翻面 {flipped}）—— 结论不采信")
+        wrong += 1
+        continue
+    if flipped:
+        caught += 1
+        print(f"  抓住 {mid}（样例翻面 红）：{name}")
+        print(f"        是这几条钉住的：#{'、#'.join(flipped)}")
+    else:
+        miss += 1
+        print(f"  漏抓 {mid}（MISS）：{name}")
+        print(f"        没有一条样例翻面 —— 等价变异照实记，不替人判断它有没有意义")
+
+print(f"\nmutate-dec：{caught} 抓住 / {miss} MISS（等价变异）/ {compile_hit} 编译期响 / "
+      f"{wrong} 归因不符")
+sys.exit(1 if wrong else 0)
+PY

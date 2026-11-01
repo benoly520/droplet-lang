@@ -7,6 +7,7 @@
  *   str ：未设或空串 -> 用表里的默认值（token 默认 "" = 不鉴权，这条显式写在表里）。
  */
 #include "dp_conf.h"
+#include "dp_decide.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,7 +26,9 @@ static uint16_t dp_load_port(const char* name, const char* dflt) {
   }
   char* end = NULL;
   unsigned long x = strtoul(v, &end, 10);
-  if (end == v || *end != '\0' || x == 0ul || x > 65535ul) {
+  /* 区间判断住在 dp_decide.c 的 dec_port_usable：样例打的就是这条，
+     改坏了不用等部署，启动即拒绝。 */
+  if (end == v || *end != '\0' || !dec_port_usable(x)) {
     fprintf(stderr, "droplet-sup: 配置 %s=%s 不在 1..65535，拒绝启动\n", name, v);
     return 0u;
   }

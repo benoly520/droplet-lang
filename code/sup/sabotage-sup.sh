@@ -22,28 +22,55 @@ MISS=0
 
 prep() {
   cp "$ROOT"/code/sup/dp_sup.h "$ROOT"/code/sup/dp_conf.h "$ROOT"/code/sup/dp_env.h \
+     "$ROOT"/code/sup/dp_decide.h "$ROOT"/code/sup/dp_decide.c \
      "$ROOT"/code/sup/dp_cfg.c "$ROOT"/code/sup/blobd.c "$ROOT"/code/sup/audit-sup.sh "$B/"
+  cp "$RT"/rt.h "$B/"
 }
 
 # 与 build.sh 同样的三段：编用户 TU -> 符号审计 -> 链接。日志留档。
 try_build() {
   NAME=$1
+  CFG_NAME=${CFG_NAME:-dp_cfg}
   LOG="$B/$NAME.log"
   : > "$LOG"
   # shellcheck disable=SC2086
   if ! cc $FLAGS -I"$B" -I"$RT" -c "$B/$NAME.c" -o "$B/$NAME.o" >>"$LOG" 2>&1; then
     return 1
   fi
-  if [ ! -f "$B/dp_cfg.o" ]; then
+  if [ ! -f "$B/$CFG_NAME.o" ]; then
     # shellcheck disable=SC2086
-    cc $FLAGS -I"$B" -I"$RT" -c "$B/dp_cfg.c" -o "$B/dp_cfg.o" >>"$LOG" 2>&1 || return 1
+    cc $FLAGS -I"$B" -I"$RT" -c "$B/$CFG_NAME.c" -o "$B/$CFG_NAME.o" >>"$LOG" 2>&1 || return 1
+  fi
+  if [ ! -f "$B/dp_decide.o" ]; then
+    # shellcheck disable=SC2086
+    cc $FLAGS -I"$B" -I"$RT" -c "$B/dp_decide.c" -o "$B/dp_decide.o" >>"$LOG" 2>&1 || return 1
   fi
   # shellcheck disable=SC2086
-  if ! sh "$B/audit-sup.sh" "$B/$NAME.o" >>"$LOG" 2>&1; then
+  if ! sh "$B/audit-sup.sh" "$B/$NAME.o" "$B/dp_decide.o" >>"$LOG" 2>&1; then
     return 1
   fi
+  # 与 build.sh 同样的接线检查：两处被样例覆盖的决定都要有引用者
+  for PAIR in "$NAME.o dec_create_result" "$CFG_NAME.o dec_port_usable"; do
+    OBJ=$(printf '%s' "$PAIR" | cut -d' ' -f1)
+    SYM=$(printf '%s' "$PAIR" | cut -d' ' -f2)
+    if ! nm -u "$B/$OBJ" | awk '{print $2}' | grep -qx "$SYM"; then
+      echo "接线红：$OBJ 没有引用 $SYM —— DP_EXAMPLES 验的就不是服务跑的那份" >>"$LOG" 2>&1
+      return 1
+    fi
+  done
   # shellcheck disable=SC2086
-  cc $FLAGS -I"$B" -I"$RT" "$B/$NAME.o" "$B/dp_cfg.o" $SOURCES -o "$B/$NAME" >>"$LOG" 2>&1
+  cc $FLAGS -I"$B" -I"$RT" "$B/$NAME.o" "$B/$CFG_NAME.o" "$B/dp_decide.o" $SOURCES -o "$B/$NAME" >>"$LOG" 2>&1
+}
+
+# 从 $B 里现编一个 oracle（S6 要用它验"样例与 wire 同时抓住同一个 bug"）
+try_oracle() { # try_oracle <前缀> -> 0 表示样例表全绿；非 0 表示有样例翻面
+  NAME=$1
+  LOG="$B/$NAME-oracle.log"
+  : > "$LOG"
+  cc $FLAGS -I"$B" -I"$RT" -c "$B/dp_decide.c" -o "$B/$NAME-dec.o" >>"$LOG" 2>&1 || return 9
+  cc $FLAGS -I"$B" -I"$RT" -c "$ROOT/code/sup/dp_oracle.c" -o "$B/$NAME-orc.o" >>"$LOG" 2>&1 || return 9
+  cc $FLAGS -I"$B" -I"$RT" "$B/$NAME-orc.o" "$B/$NAME-dec.o" -o "$B/$NAME-oracle" >>"$LOG" 2>&1 || return 9
+  "$B/$NAME-oracle" >>"$LOG" 2>&1
 }
 
 # 断言"确实是这个工具抓的"，不接受"反正红了"
@@ -131,25 +158,43 @@ then report_miss 5 "删掉断言 #20"; else
   report_caught s5 5 "contract-sup.py" "从验收表里删掉断言 #20（create_once 失去证明）"
 fi
 
-# ---- S6：把 P16 那个 bug 塞回胶水层（bool 不消费） ----
+# ---- S6：把 P16 那个 bug 塞回决定层（"已存在"不再报 Conflict） ----
+# v0.32 起这个 bug 住在 dp_decide.c，所以同一个破坏会被**两个**工具各自抓住：
+# 样例 #2 在单元级翻面，断言 #20 在 wire 级翻面。两个都必须红，只红一个算归因不全。
 prep
 python3 - "$B" <<'PY6'
 import sys
 b = sys.argv[1]
-s = open(b + "/dp_sup.h", encoding="utf-8").read()
-s = s.replace("  return fresh ? 0 : (int)DP_ERR_CONFLICT; /* P16 的那一局在这里不再可能 */",
+s = open(b + "/dp_decide.c", encoding="utf-8").read()
+s = s.replace("  return fresh ? 0 : (int)DP_ERR_CONFLICT;",
               "  (void)fresh; return 0; /* 把 bool 丢掉：P16 的原始错误回来了 */")
-open(b + "/dp_sup.h", "w", encoding="utf-8").write(s)
+open(b + "/dp_decide.c", "w", encoding="utf-8").write(s)
 PY6
-grep -q '(void)fresh' "$B/dp_sup.h" || { echo "S6 注入失败：dp_created 的写法变了，脚本要跟着改" >&2; exit 1; }
+grep -q '(void)fresh' "$B/dp_decide.c" || { echo "S6 注入失败：dec_create_result 的写法变了，脚本要跟着改" >&2; exit 1; }
+rm -f "$B/dp_decide.o"
 cp "$B/blobd.c" "$B/s6.c"
-if try_build s6; then
-  if sh "$ROOT/code/sup/accept-sup.sh" "$B/s6" "$((PORT0+6))" sab6 >/dev/null 2>&1
-  then report_miss 6 "把丢弃 bool 塞回胶水层"
-  else report_caught s6 6 "accept-sup.sh #20" "把「丢弃 create 的 bool」塞回胶水层（409 变 201）"
+if ! try_build s6; then
+  echo "  S6 连构建都没过，注入方式不对" >&2; sed 's/^/      /' "$B/s6.log" >&2; exit 1
+fi
+ORACLE_RED=0
+try_oracle s6 || ORACLE_RED=$?
+WIRE_RED=0
+if sh "$ROOT/code/sup/accept-sup.sh" "$B/s6" "$((PORT0+6))" sab6 >/dev/null 2>&1; then WIRE_RED=0; else WIRE_RED=1; fi
+if grep -q '#2' "$B/s6-oracle.log" && grep -q 'FAIL  #2' "$B/s6-oracle.log"; then
+  if [ "$WIRE_RED" -eq 1 ]; then
+    report_caught s6 6 "oracle 样例 #2 + accept-sup #20" "把「丢弃 create 的 bool」塞回决定层（单元级与 wire 级同时红）"
+  else
+    echo "  假阴性 #6：样例翻了面但 wire 断言 #20 没红 —— 两级证据不一致，归因不成立" >&2
+    MISS=$((MISS + 1))
   fi
 else
-  echo "  S6 连构建都没过，注入方式不对" >&2; sed 's/^/      /' "$B/s6.log" >&2; exit 1
+  if [ "$WIRE_RED" -eq 1 ]; then
+    echo "  假阴性 #6：wire 红了但样例没翻面（ORACLE 退出码 $ORACLE_RED）—— oracle 没接住这个 bug" >&2
+    sed 's/^/      /' "$B/s6-oracle.log" >&2
+    MISS=$((MISS + 1))
+  else
+    report_miss 6 "把丢弃 bool 塞回决定层"
+  fi
 fi
 
 # ---- S7：拼接出来的环境变量名（上一轮击穿 45 行正则核对器的那个写法）----
@@ -221,6 +266,49 @@ if try_build s9; then report_miss 9 "extern char **environ"; else
   require_log s9 9 "审计红"
   report_caught s9 9 "符号审计（U environ）" "不提 getenv，直接 extern char **environ 读环境表（E6 闭合）"
 fi
+
+# ---- S10：把决定就地重写回胶水层，绕开被样例覆盖的那一份（v0.32 新口子 E9） ----
+# 兼容性没有限制"在 dp_sup.h 里直接写条件"，所以样例可能验的是一份没人跑的复制品。
+# 接住它的不是 grep，是符号表：blobd.o 不再引用 dec_create_result -> 接线红。
+prep
+python3 - "$B" <<'PY10'
+import sys
+b = sys.argv[1]
+s = open(b + "/dp_sup.h", encoding="utf-8").read()
+s = s.replace("  return dec_create_result(fresh, err);",
+              "  (void)dec_port_usable; /* 假装还用着决定层 */\n"
+              "  return (err != 0) ? err : (fresh ? 0 : (int)DP_ERR_CONFLICT);")
+open(b + "/dp_sup.h", "w", encoding="utf-8").write(s)
+PY10
+grep -q '(void)dec_port_usable' "$B/dp_sup.h" \
+  || { echo "S10 注入失败：dp_created 的写法变了，脚本要跟着改" >&2; exit 1; }
+cp "$B/blobd.c" "$B/s10.c"
+if try_build s10; then report_miss 10 "把决定就地重写回胶水层（绕开样例）"; else
+  require_log s10 10 "接线红"
+  report_caught s10 10 "接线检查（nm -u）" "把 create 的决定就地写回胶水层，服务不再引用被样例覆盖的那份"
+fi
+
+# ---- S11：把区间的决定就地抄回机制 TU（第二条口子，接法与 S10 相同） ----
+# 端口那条决定住在 dp_cfg.c（机制 TU）里被调用。行为完全等价，21 条断言照样全过 ——
+# 被绕开的不是 bug 检查，是"样例验的是跑的那一份"这件事本身。所以这里的红必须是接线红。
+prep
+python3 - "$B" <<'PY11'
+import sys
+b = sys.argv[1]
+s = open(b + "/dp_cfg.c", encoding="utf-8").read()
+s = s.replace("!dec_port_usable(x)", "!(x >= 1ul && x <= 65535ul)")
+open(b + "/s11-cfg.c", "w", encoding="utf-8").write(s)
+PY11
+grep -q '!(x >= 1ul && x <= 65535ul)' "$B/s11-cfg.c" \
+  || { echo "S11 注入失败：dp_load_port 的写法变了，脚本要跟着改" >&2; exit 1; }
+grep -q 'dec_port_usable(' "$B/s11-cfg.c" && { echo "S11 注入不彻底：抄本里还在调用决定层" >&2; exit 1; }
+cp "$B/blobd.c" "$B/s11.c"
+CFG_NAME=s11-cfg
+if try_build s11; then report_miss 11 "把区间的决定抄回机制 TU（行为等价、样例失效）"; else
+  require_log s11 11 "接线红：s11-cfg.o 没有引用 dec_port_usable"
+  report_caught s11 11 "接线检查（nm -u）" "把端口区间就地抄回 dp_cfg.c：构建行为不变、21 断言不变，但样例验的不再是跑的那份"
+fi
+CFG_NAME=dp_cfg
 
 echo "sabotage-sup: $CAUGHT 抓住 / $MISS 假阴性"
 [ "$MISS" -eq 0 ]
