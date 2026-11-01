@@ -6,8 +6,8 @@
  * `dp_load_port()` 调的就是这些函数，所以样例翻面 = 服务翻面（接线检查在守这条）。
  *
  * 边界（不许漂）：住在这里的只有**纯决定** —— 函数体里只有条件与常量，
- * 不碰环境变量、不碰文件系统、不碰 arena。读旧版本仍在运行时，读完之后
- * 剩下的是判断，判断住在这里。鉴权与 body 上限还没有搬出来（见 docs/SPEC.md §5）。
+ * 不碰环境变量、不碰文件系统、不碰 arena。读旧版本、读 header、算 ETag 仍在运行时，
+ * 读完之后剩下的是判断，判断住在这里（条件请求、鉴权、body 上限都已搬出）。
  */
 #ifndef DP_DECIDE_H
 #define DP_DECIDE_H
@@ -34,6 +34,16 @@ bool dec_port_usable(unsigned long x);
  * 目标不存在时是 412 不是 404：资源本来就在要建的路径上。 */
 int dec_precondition_result(int read_err, bool exists, bool tag_matches);
 
+/* 鉴权投影：运行时只负责从 header 里取出“有没有 / 对不对”，放不放行在这里。
+ * 两条旁路必须写成显式条件，否则样例钉不住：
+ *   - 没配 token（空串）= 不鉴权（这是表里的默认值，不是遗漏）；
+ *   - /health 公开，便于探活。
+ * token_configured 为真时，必须“带了 token 且相符”才放行。 */
+bool dec_auth_ok(bool token_configured, bool is_health, bool header_present, bool header_matches);
+
+/* body 上限：等于上限允许，超一个字节就拒绝（413）。 */
+bool dec_body_too_large(size_t n, size_t max);
+
 /* ---- 样例表：封闭样例当 oracle ----
  *
  * 每行是一条**封闭**样例：实参与期望全是常量。`dp_oracle.c` 把它展开成逐条求值；
@@ -54,6 +64,14 @@ int dec_precondition_result(int read_err, bool exists, bool tag_matches);
   X(10, dec_precondition_result(DP_ERR_NOT_FOUND, false, false),                             \
     DP_ERR_PRECONDITION_FAILED, "目标不存在 -> 412，不是 404")                                \
   X(11, dec_precondition_result(DP_ERR_IO, false, false), DP_ERR_IO,                         \
-    "读旧版本失败时错误优先，不许被 412 盖掉")
+    "读旧版本失败时错误优先，不许被 412 盖掉")                                                \
+  X(12, dec_auth_ok(false, false, false, false), true, "没配 token -> 不鉴权")                \
+  X(13, dec_auth_ok(true, true, false, false), true, "/health 公开：配了 token 也放行")        \
+  X(14, dec_auth_ok(true, false, false, false), false, "配了 token 且没带 -> 401")             \
+  X(15, dec_auth_ok(true, false, true, false), false, "带了但不相符 -> 401")                   \
+  X(16, dec_auth_ok(true, false, true, true), true, "带了且相符 -> 放行")                      \
+  X(17, dec_body_too_large(8388608, 8388608), false, "等于上限 -> 允许（边界含在区间内）")     \
+  X(18, dec_body_too_large(8388609, 8388608), true, "超一个字节 -> 413")                       \
+  X(19, dec_body_too_large(0, 8388608), false, "空 body -> 允许")
 
 #endif /* DP_DECIDE_H */

@@ -37,7 +37,7 @@ Needs `cc` (C11), `sh`, `python3`, `git`, `flock`, `curl`. No Go, no code genera
 
 ```sh
 sh code/sup/build.sh sup                       # compile user TUs -> symbol audit -> wiring check -> link
-sh code/sup/accept-sup.sh "$PWD/.build/sup/blobd" 18880 sup   # 24 wire assertions
+sh code/sup/accept-sup.sh "$PWD/.build/sup/blobd" 18880 sup   # 26 wire assertions
 ```
 
 Or talk to it directly:
@@ -58,10 +58,14 @@ curl -s           -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blo
 | symbol audit (`audit-sup.sh`) | a *user* translation unit references `getenv` / `environ` / `socket` / `open` … without declaring it |
 | wiring check (`build.sh`, `nm -u`) | the service no longer references a decision that `DP_EXAMPLES` grades — i.e. the examples would grade a copy |
 | sample oracle (`oracle-sup.sh`) | any `DP_EXAMPLES` row fails; zero runnable examples counts as failure; a crash is listed, never a pass |
-| mutation (`mutate-dec.sh`) | a mutant survives and is not a hand-judged equivalent |
-| wire assertions (`accept-table.sh`) | any of 24 external promises is broken (status, headers, body, snapshot, commit) |
+| mutation (`mutate-dec.sh`) | a mutant survives and is not a hand-judged equivalent (13 mutants: 10 caught / 2 equivalent / 1 compile-time) |
+| wire assertions (`accept-table.sh`) | any of 26 external promises is broken (status, headers, body, snapshot, commit, auth) |
 | contract reconciliation (`contract-sup.py`) | a goal cites an assertion number that does not exist, or a goal is left unproven (`""` is an explicit admission) |
-| sabotage (`sabotage-sup.sh`) | one of 12 injected defects is *not* caught by a named tool with a named diagnostic |
+| surface budget (`surface-budget.sh`) | the must-read tables, types and reference service grow past 9,000 tokens / 32 KB |
+| candidate comparison (`compare-sup.sh`) | 0 or more than 1 candidate survives the examples (no solution / ambiguity) |
+| first-pass ruler (`firstpass.sh`) | given a candidate sequence, it computes first-pass and pass@k; **no model, no number** |
+| maintenance cost (`maint-cost.sh`) | a scripted change touches more files or +/- lines than its budget |
+| sabotage (`sabotage-sup.sh`) | one of 14 injected defects is *not* caught by a named tool with a named diagnostic |
 
 The last row is the important one: it checks the checkers. A "caught" that is really a compile error
 from a broken injection is a false green, and this suite exists because that happened once.
@@ -70,12 +74,12 @@ from a broken injection is a false green, and this suite exists because that hap
 
 ```
 code/sup/            the checked layer: four declaration tables, the flagship service, every check
-  blobd.c            DP_ROUTES + DP_GOALS — 125 lines, user-owned
+  blobd.c            DP_ROUTES + DP_GOALS — 229 lines, user-owned
   dp_env.h           DP_ENVS — 18 lines, user-owned
-  dp_decide.h/.c     three pure decisions + DP_EXAMPLES — 87 lines, user-owned, linked by the service
+  dp_decide.h/.c     five pure decisions + 19 DP_EXAMPLES — 114 lines, user-owned, linked by the service
   dp_sup.h dp_cfg.c dp_conf.h dp_oracle.c   mechanism, 344 lines
-code/runtime/        the service runtime, 1469 lines of C (rt_core / rt_http / rt_blob / rt_ver)
-code/webapi/deploy/  24-assertion acceptance table, soak, systemd unit, env example
+code/runtime/        the service runtime, 1468 lines of C (rt_core / rt_http / rt_blob / rt_ver, incl. rt.h)
+code/webapi/deploy/  26-assertion acceptance table, soak, systemd unit, env example
 docs/                SPEC (what this is), VALIDATION (measured numbers), NEXT (handoff)
 ```
 
@@ -83,8 +87,10 @@ docs/                SPEC (what this is), VALIDATION (measured numbers), NEXT (h
 
 This is a checking surface, not a sandbox. Bypassing `build.sh` bypasses the audit (E7);
 `dlopen` + `dlsym` resolves at runtime where `nm -u` cannot see it (E8); the oracle only reaches
-*pure* decisions, so auth, the body limit and snapshot rotation inside the runtime are covered by
-wire assertions alone (the If-Match judgement has been moved out). All of it is written down in
+*pure* decisions (If-Match, auth and the body limit are now among them), so the reads inside the
+runtime — loading the old version, headers, ETag computation, snapshot rotation — are covered by
+wire assertions alone. First-pass rate has a ruler (`firstpass.sh`) but no measured number, because
+no model runs in this repository. All of it is written down in
 [docs/SPEC.md](docs/SPEC.md) §5 and [docs/VALIDATION.md](docs/VALIDATION.md) §4, including what the
 green numbers do **not** prove.
 

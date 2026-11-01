@@ -31,7 +31,7 @@
 
 ```sh
 sh code/sup/build.sh sup                       # 编用户 TU -> 符号审计 -> 接线检查 -> 链接
-sh code/sup/accept-sup.sh "$PWD/.build/sup/blobd" 18880 sup   # 24 条 wire 断言
+sh code/sup/accept-sup.sh "$PWD/.build/sup/blobd" 18880 sup   # 26 条 wire 断言
 ```
 
 或者直接打它：
@@ -52,10 +52,14 @@ curl -s          -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blob
 | 符号审计（`audit-sup.sh`） | **用户** TU 引用了 `getenv` / `environ` / `socket` / `open` … 却没声明 |
 | 接线检查（`build.sh`，`nm -u`） | 服务不再引用被 `DP_EXAMPLES` 覆盖的决定 —— 那说明样例验的是复制品 |
 | 样例 oracle（`oracle-sup.sh`） | `DP_EXAMPLES` 任一行挂；零条可执行样例算失败；崩溃单列，绝不记成通过 |
-| 机械变异（`mutate-dec.sh`） | 变异体存活且不是人工判定的等价变异 |
-| wire 断言（`accept-table.sh`） | 24 条对外承诺任何一条破了（状态码、头、body、快照、提交） |
-| 契约对账（`contract-sup.py`） | 目标引用了不存在的断言编号，或目标留成未证（写 `""` 是显式承认） |
-| 破坏测试（`sabotage-sup.sh`） | 12 条注入的缺陷里有一条**没有**被具名工具以具名诊断抓住 |
+| 机械变异（`mutate-dec.sh`） | 13 个变异体里有一个存活且不是人工判定的等价变异（实测 10 抓 / 2 等价 / 1 编译期响） |
+| wire 断言（`accept-table.sh`） | 26 条对外承诺任何一条破了（状态码、头、body、快照、提交、鉴权） |
+| 契约对账（`contract-sup.py`） | `--contract` 四节缺失，或目标引用了不存在的断言编号，或目标留成未证（写 `""` 是显式承认） |
+| 必读面预算（`surface-budget.sh`） | 必读的表、类型与参考实现超过 9,000 token / 32 KB（实测约 8,167 token，估算） |
+| 候选比较（`compare-sup.sh`） | 0 份或 >1 份候选通过样例（无解 / 歧义） |
+| 首次成功率量尺（`firstpass.sh`） | 给定候选序列时算 first-pass 与 pass@k；**没有模型，就没有数字** |
+| 维护成本（`maint-cost.sh`） | 脚本化改动的文件数或 +/- 行数超过预算 |
+| 破坏测试（`sabotage-sup.sh`） | 14 条注入的缺陷里有一条**没有**被具名工具以具名诊断抓住 |
 
 最后一行最重要：它检查的是检查器本身。“被抓住”如果其实是注入代码写坏了导致的编译失败，那是假绿 ——
 这套东西存在，就是因为这件事真的发生过一次。
@@ -64,19 +68,21 @@ curl -s          -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blob
 
 ```
 code/sup/            受检层：四张声明表、旗舰服务、全部检查
-  blobd.c            DP_ROUTES + DP_GOALS —— 125 行，用户所有
+  blobd.c            DP_ROUTES + DP_GOALS —— 229 行，用户所有
   dp_env.h           DP_ENVS —— 18 行，用户所有
-  dp_decide.h/.c     三个纯决定 + DP_EXAMPLES —— 87 行，用户所有，服务链接的就是这份
+  dp_decide.h/.c     五个纯决定 + 19 条 DP_EXAMPLES —— 114 行，用户所有，服务链接的就是这份
   dp_sup.h dp_cfg.c dp_conf.h dp_oracle.c   机制，344 行
-code/runtime/        服务运行时，1469 行 C（rt_core / rt_http / rt_blob / rt_ver）
-code/webapi/deploy/  24 条断言表、soak、systemd 单元、环境变量样例
+code/runtime/        服务运行时，1468 行 C（rt_core / rt_http / rt_blob / rt_ver，含 rt.h）
+code/webapi/deploy/  26 条断言表、soak、systemd 单元、环境变量样例
 docs/                SPEC（这是什么）、VALIDATION（实测数字）、NEXT（交接）
 ```
 
 ## 已知边界
 
 这是检查面，不是沙箱。绕开 `build.sh` 就绕开审计（E7）；`dlopen` + `dlsym` 在运行时解析，
-`nm -u` 看不见（E8）；oracle 只够得到**纯决定**，所以运行时里的鉴权、body 上限与快照轮转只有 wire 断言兜着（条件请求的判断已经搬出来了）。
+`nm -u` 看不见（E8）；oracle 只够得到**纯决定**（条件请求、鉴权、body 上限现在都在里面），
+所以运行时里的读旧版本、读 header、算 ETag、快照轮转只有 wire 断言兜着。首次成功率有量尺
+（`firstpass.sh`），但仓库里没有模型在环，**没有测出来的数字**。
 这些都写在 [docs/SPEC.md](docs/SPEC.md) §5 与 [docs/VALIDATION.md](docs/VALIDATION.md) §4 里 ——
 连同“这些绿色数字**不能**证明什么”。
 

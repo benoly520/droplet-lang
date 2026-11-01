@@ -415,7 +415,7 @@ static void handle_conn(int fd, dp_handler h, const dp_cfg* cfg) {
       return;
     }
   }
-  if (content_len > cfg->max_body) {
+  if (dec_body_too_large(content_len, cfg->max_body)) {
     send_status(fd, 413, "payload too large");
     return;
   }
@@ -459,18 +459,17 @@ static void handle_conn(int fd, dp_handler h, const dp_cfg* cfg) {
     got += (size_t)n;
   }
 
-  /* 鉴权：/health 放行，便于探活 */
+  /* 鉴权：/health 放行，便于探活。放不放行由 dec_auth_ok 决定（样例覆盖同一份）。 */
   bool is_health = header_is(path, "/health");
-  if (cfg->token.n > 0u && !is_health) {
-    dp_str want = dp_str_lit("Bearer ");
-    bool ok = head.authorization.n == want.n + cfg->token.n &&
-              memcmp(head.authorization.p, want.p, want.n) == 0 &&
-              memcmp(head.authorization.p + want.n, cfg->token.p, cfg->token.n) == 0;
-    if (!ok) {
-      dp_arena_free(a);
-      send_status(fd, 401, "unauthorized");
-      return;
-    }
+  dp_str bearer = dp_str_lit("Bearer ");
+  bool header_present = head.authorization.n > 0u;
+  bool header_matches = head.authorization.n == bearer.n + cfg->token.n &&
+                        memcmp(head.authorization.p, bearer.p, bearer.n) == 0 &&
+                        memcmp(head.authorization.p + bearer.n, cfg->token.p, cfg->token.n) == 0;
+  if (!dec_auth_ok(cfg->token.n > 0u, is_health, header_present, header_matches)) {
+    dp_arena_free(a);
+    send_status(fd, 401, "unauthorized");
+    return;
   }
 
   /* key 合法性是安全边界：非法 key 一律 400，不进 handler */

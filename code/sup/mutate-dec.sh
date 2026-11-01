@@ -67,6 +67,13 @@ PRECON = """int dec_precondition_result(int read_err, bool exists, bool tag_matc
   }
   return tag_matches ? 0 : (int)DP_ERR_PRECONDITION_FAILED;
 }"""
+AUTH = """bool dec_auth_ok(bool token_configured, bool is_health, bool header_present, bool header_matches) {
+  if (!token_configured || is_health) {
+    return true;
+  }
+  return header_present && header_matches;
+}"""
+BODY = "bool dec_body_too_large(size_t n, size_t max) { return n > max; }"
 
 # (编号, 说明, 锚点, 替换, 预期结局)
 MUTS = [
@@ -92,6 +99,14 @@ MUTS = [
                     "(void)tag_matches;\n  return 0;", 1), "CAUGHT"),
     ("M10", "错误吞掉：读旧版本失败也当通过（错误优先那条样例必须翻面）", PRECON,
      PRECON.replace("    return read_err;", "    return 0;", 1), "CAUGHT"),
+    ("M11", "旁路删除：/health 不再公开（配了 token 时探活也要 401）", AUTH,
+     AUTH.replace("if (!token_configured || is_health) {",
+                  "(void)is_health;\n  if (!token_configured) {", 1), "CAUGHT"),
+    ("M12", "鉴权失效：带了不带、对不对都放行", AUTH,
+     AUTH.replace("return header_present && header_matches;",
+                  "(void)header_present;\n  (void)header_matches;\n  return true;", 1), "CAUGHT"),
+    ("M13", "边界翻转：body 上限 8388608 时，等于上限也拒绝（> 改 >=）", BODY,
+     "bool dec_body_too_large(size_t n, size_t max) { return n >= max; }", "CAUGHT"),
 ]
 
 FLAGS = "-std=c11 -O2 -Wall -Wextra -Werror"

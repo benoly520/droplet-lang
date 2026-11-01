@@ -45,7 +45,8 @@
   X(versioned_write, "If-Match 不符必须 412 且空 body；带了且相符就放行", "5,6,7")        \
   X(method_closed, "未声明的动词一律 405 且空 body", "16,17,18")                          \
   X(path_closed, "非法 key 一律 400，不进 handler", "15")                                 \
-  X(body_bounded, "超过 APP_MAX_BODY 一律 413", "19")
+  X(body_bounded, "超过 APP_MAX_BODY 一律 413", "19")                                     \
+  X(auth_required, "配了 token 时：没带或带错一律 401；/health 与空 token 例外", "25,26")
 
 #include "dp_env.h" /* 配置表在这里：名字、字段、kind、默认值 */
 #include "dp_sup.h"
@@ -105,19 +106,122 @@ static int h_keys_create(dp_arena* a, const dp_request* rq, dp_bytes* body) {
 
 /* ---- main ---- */
 
+/* ---- 契约导出：四张表变成机器可读的 JSON ----
+ *
+ * 为什么不是 `--goals` 的制表符：契约的消费者是工具与 AI，不是人眼。
+ * 四节齐全（routes / envs / goals / examples），`contract-sup.py` 逐节核对。
+ * 字符串一律转义：理由列里会出现中文与括号，不能靠"反正没有引号"。
+ */
+static void dp_json_esc(const char* s) {
+  putchar('"');
+  for (const unsigned char* p = (const unsigned char*)s; *p != 0u; p++) {
+    switch (*p) {
+      case '"': fputs("\\\"", stdout); break;
+      case '\\': fputs("\\\\", stdout); break;
+      case '\n': fputs("\\n", stdout); break;
+      case '\r': fputs("\\r", stdout); break;
+      case '\t': fputs("\\t", stdout); break;
+      default:
+        if (*p < 0x20u) {
+          printf("\\u%04x", (unsigned)*p);
+        } else {
+          putchar((int)*p);
+        }
+    }
+  }
+  putchar('"');
+}
+
+/* "1,2,3" -> "1","2","3" */
+static void dp_json_list(const char* csv) {
+  const char* p = csv;
+  int first = 1;
+  while (*p != 0) {
+    const char* q = p;
+    while (*q != 0 && *q != ',') {
+      q++;
+    }
+    if (q > p) {
+      if (!first) {
+        putchar(',');
+      }
+      first = 0;
+      printf("\"%.*s\"", (int)(q - p), p);
+    }
+    p = (*q == ',') ? q + 1 : q;
+  }
+}
+
 int main(int argc, char** argv) {
-  if (argc > 1 && strcmp(argv[1], "--goals") == 0) {
-    /* 契约导出走这里：声明是数据，工具读的是编译产物里的表，不是正则扫源码。 */
-#define DP_GOAL_ROW(ID, TEXT, PROVEN) printf("%s\t%s\t%s\n", #ID, TEXT, PROVEN);
-    DP_GOALS(DP_GOAL_ROW)
-#undef DP_GOAL_ROW
-#define DP_ROUTE_ROW(METHOD, PATH, FN, OK, AUTH, GUARD, WHY)              \
-  printf("route\t%s\t%s\t%s\n", METHOD, PATH, #FN);
+  if (argc > 1 && strcmp(argv[1], "--contract") == 0) {
+    /* 声明是数据：工具读的是编译产物里的表，不是正则扫源码。 */
+    int first = 1;
+    fputs("{\"routes\":[", stdout);
+#define DP_ROUTE_ROW(METHOD, PATH, FN, OK, AUTH, GUARD, WHY) \
+    if (!first) putchar(',');                                \
+    first = 0;                                               \
+    fputs("{\"method\":", stdout);                           \
+    dp_json_esc(METHOD);                                     \
+    fputs(",\"path\":", stdout);                             \
+    dp_json_esc(PATH);                                       \
+    fputs(",\"impl\":", stdout);                             \
+    dp_json_esc(#FN);                                        \
+    fputs(",\"ok\":", stdout);                               \
+    dp_json_esc(#OK);                                        \
+    fputs(",\"auth\":", stdout);                             \
+    dp_json_esc(#AUTH);                                      \
+    fputs(",\"guard\":", stdout);                            \
+    dp_json_esc(#GUARD);                                     \
+    fputs(",\"why\":", stdout);                              \
+    dp_json_esc(WHY);                                        \
+    putchar('}');
     DP_ROUTES(DP_ROUTE_ROW)
 #undef DP_ROUTE_ROW
-#define DP_ENV_ROW(NAME, FIELD, KIND, DFLT) printf("env\t%s\t%s\t%s\n", NAME, #KIND, DFLT);
+    fputs("],\"envs\":[", stdout);
+    first = 1;
+#define DP_ENV_ROW(NAME, FIELD, KIND, DFLT) \
+    if (!first) putchar(',');               \
+    first = 0;                              \
+    fputs("{\"name\":", stdout);            \
+    dp_json_esc(NAME);                      \
+    fputs(",\"field\":", stdout);           \
+    dp_json_esc(#FIELD);                    \
+    fputs(",\"kind\":", stdout);            \
+    dp_json_esc(#KIND);                     \
+    fputs(",\"default\":", stdout);         \
+    dp_json_esc(DFLT);                      \
+    putchar('}');
     DP_ENVS(DP_ENV_ROW)
 #undef DP_ENV_ROW
+    fputs("],\"goals\":[", stdout);
+    first = 1;
+#define DP_GOAL_ROW(ID, TEXT, PROVEN) \
+    if (!first) putchar(',');         \
+    first = 0;                        \
+    fputs("{\"id\":", stdout);        \
+    dp_json_esc(#ID);                 \
+    fputs(",\"text\":", stdout);      \
+    dp_json_esc(TEXT);                \
+    fputs(",\"proven\":[", stdout);   \
+    dp_json_list(PROVEN);             \
+    fputs("]}", stdout);
+    DP_GOALS(DP_GOAL_ROW)
+#undef DP_GOAL_ROW
+    fputs("],\"examples\":[", stdout);
+    first = 1;
+#define DP_EXAMPLE_ROW(ID, CALL, WANT, WHY) \
+    if (!first) putchar(',');               \
+    first = 0;                              \
+    printf("{\"id\":%d,\"call\":", (int)(ID)); \
+    dp_json_esc(#CALL);                     \
+    fputs(",\"want\":", stdout);            \
+    dp_json_esc(#WANT);                     \
+    fputs(",\"why\":", stdout);             \
+    dp_json_esc(WHY);                       \
+    putchar('}');
+    DP_EXAMPLES(DP_EXAMPLE_ROW)
+#undef DP_EXAMPLE_ROW
+    fputs("]}\n", stdout);
     return 0;
   }
   dp_cfg_load();

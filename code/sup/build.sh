@@ -46,7 +46,8 @@ sh "$B/audit-sup.sh" "$B/blobd.o" "$B/dp_decide.o"
 # 这条不看源码文本：改名改不掉，引用关系在 .o 里。
 # 每个被样例覆盖的决定都要一对：谁的 .o 必须引用它。漏一个就是漏一条口子。
 for PAIR in "blobd.o dec_create_result" "dp_cfg.o dec_port_usable" \
-            "rt_http.o dec_precondition_result"; do
+            "rt_http.o dec_precondition_result" "rt_http.o dec_auth_ok" \
+            "rt_http.o dec_body_too_large"; do
   OBJ=$(printf '%s' "$PAIR" | cut -d' ' -f1)
   SYM=$(printf '%s' "$PAIR" | cut -d' ' -f2)
   if ! nm -u "$B/$OBJ" | awk '{print $2}' | grep -qx "$SYM"; then

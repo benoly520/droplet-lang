@@ -1,5 +1,5 @@
 #!/bin/sh
-# 唯一的验收表：24 条断言，没有一条是打印。
+# 唯一的验收表：26 条断言，没有一条是打印。
 #
 # 这张表是"结果验收"的落点：人只看它红不红，不读实现。所以每条都必须有期望值，
 # 退出码就是结论（最后一行 [ "$FAIL" -eq 0 ]）。
@@ -195,6 +195,12 @@ ck 23 4 "$COMMITS" "4 次成功写入 == 4 条提交：DP_COMMIT_CMD 那个子�
 LISTBODY=$(body -H "$A" "$KEYS")
 KEYN=$(printf '%s' "$LISTBODY" | tr ',' '\n' | grep -c '"' || true)
 ck 24 3 "$KEYN" "清单来自目录本身（demo + 两次 POST = 3 个 key），不来自任何注册表文件"
+
+# ---- 鉴权的反面：这一版之前只测了“带对 token 能过”，没测“不带/带错必须不过” ----
+CK25=$(code -H 'Authorization: Bearer wrong' "$KEYS")
+ck 25 401 "$CK25" "错 token -> 401（鉴权决定在 dp_decide.c，样例覆盖同一份）"
+CK26=$(code "$KEYS")
+ck 26 401 "$CK26" "没带 token -> 401"
 
 echo "$LABEL: $PASS 过 / $FAIL 挂"
 if [ "$FAIL" -ne 0 ]; then

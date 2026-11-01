@@ -61,9 +61,10 @@ try_build() {
   if ! sh "$B/audit-sup.sh" "$B/$NAME.o" "$B/dp_decide.o" >>"$LOG" 2>&1; then
     return 1
   fi
-  # 与 build.sh 同样的接线检查：三处被样例覆盖的决定都要有引用者
+  # 与 build.sh 同样的接线检查：五处被样例覆盖的决定都要有引用者
   for PAIR in "$NAME.o dec_create_result" "$CFG_NAME.o dec_port_usable" \
-              "$HTTP_NAME.o dec_precondition_result"; do
+              "$HTTP_NAME.o dec_precondition_result" "$HTTP_NAME.o dec_auth_ok" \
+              "$HTTP_NAME.o dec_body_too_large"; do
     OBJ=$(printf '%s' "$PAIR" | cut -d' ' -f1)
     SYM=$(printf '%s' "$PAIR" | cut -d' ' -f2)
     if ! nm -u "$B/$OBJ" | awk '{print $2}' | grep -qx "$SYM"; then
@@ -321,13 +322,13 @@ cp "$B/blobd.c" "$B/s11.c"
 CFG_NAME=s11-cfg
 if try_build s11; then report_miss 11 "把区间的决定抄回机制 TU（行为等价、样例失效）"; else
   require_log s11 11 "接线红：s11-cfg.o 没有引用 dec_port_usable"
-  report_caught s11 11 "接线检查（nm -u）" "把端口区间就地抄回 dp_cfg.c：构建行为不变、24 断言不变，但样例验的不再是跑的那份"
+  report_caught s11 11 "接线检查（nm -u）" "把端口区间就地抄回 dp_cfg.c：构建行为不变、26 断言不变，但样例验的不再是跑的那份"
 fi
 CFG_NAME=dp_cfg
 
 # ---- S12：把条件请求的判断就地抄回运行时（第三条接线，接法与 S10/S11 相同） ----
 # 判断从运行时搬进用户面之后，运行时只做"读"和"算"。把它抄回去，行为完全等价、
-# 24 条断言照样全过 —— 被绕开的仍然是"样例验的是跑的那一份"这件事本身。
+# 26 条断言照样全过 —— 被绕开的仍然是"样例验的是跑的那一份"这件事本身。
 prep
 python3 - "$B" "$RT/rt_http.c" <<'PY12'
 import sys
@@ -354,6 +355,58 @@ HTTP_SRC="$B/s12-http.c"
 if try_build s12; then report_miss 12 "把条件请求的判断抄回运行时（行为等价、样例失效）"; else
   require_log s12 12 "接线红：s12-http.o 没有引用 dec_precondition_result"
   report_caught s12 12 "接线检查（nm -u）" "把条件请求判断抄回 rt_http.c：行为不变，但样例验的不再是跑的那份"
+fi
+HTTP_NAME=rt_http
+HTTP_SRC=
+
+# ---- S13：把鉴权判断就地抄回运行时（第四条接线）----
+# 行为完全等价：配了 token 且不是 /health 时，没带头或头不对就 401。26 条断言照样全过，
+# 被绕开的仍是"样例验的是跑的那一份"。
+prep
+python3 - "$B" "$RT/rt_http.c" <<'PY13'
+import sys
+b, src = sys.argv[1], sys.argv[2]
+s = open(src, encoding="utf-8").read()
+old = "  if (!dec_auth_ok(cfg->token.n > 0u, is_health, header_present, header_matches)) {"
+new = ("  (void)dec_auth_ok; /* 假装还用着 */\n"
+       "  if (cfg->token.n > 0u && !is_health && !(header_present && header_matches)) {")
+if old not in s:
+    sys.exit("S13 注入失败：鉴权那行的写法变了，脚本要跟着改")
+open(b + "/s13-http.c", "w", encoding="utf-8").write(s.replace(old, new, 1))
+PY13
+grep -q '(void)dec_auth_ok' "$B/s13-http.c" \
+  || { echo "S13 注入失败：抄本没写进 rt_http.c" >&2; exit 1; }
+cp "$B/blobd.c" "$B/s13.c"
+HTTP_NAME=s13-http
+HTTP_SRC="$B/s13-http.c"
+if try_build s13; then report_miss 13 "把鉴权判断抄回运行时（行为等价、样例失效）"; else
+  require_log s13 13 "接线红：s13-http.o 没有引用 dec_auth_ok"
+  report_caught s13 13 "接线检查（nm -u）" "把鉴权判断抄回 rt_http.c：行为不变，但样例验的不再是跑的那份"
+fi
+HTTP_NAME=rt_http
+HTTP_SRC=
+
+# ---- S14：把 body 上限判断就地抄回运行时（第五条接线）----
+prep
+python3 - "$B" "$RT/rt_http.c" <<'PY14'
+import sys
+b, src = sys.argv[1], sys.argv[2]
+s = open(src, encoding="utf-8").read()
+old = "  if (dec_body_too_large(content_len, cfg->max_body)) {"
+new = ("  (void)dec_body_too_large; /* 假装还用着 */\n"
+       "  if (content_len > cfg->max_body) {")
+if old not in s:
+    sys.exit("S14 注入失败：body 上限那行的写法变了，脚本要跟着改")
+open(b + "/s14-http.c", "w", encoding="utf-8").write(s.replace(old, new, 1))
+PY14
+grep -q '(void)dec_body_too_large' "$B/s14-http.c" \
+  || { echo "S14 注入失败：抄本没写进 rt_http.c" >&2; exit 1; }
+cp "$B/blobd.c" "$B/s14.c"
+HTTP_NAME=s14-http
+HTTP_SRC="$B/s14-http.c"
+if try_build s14; then report_miss 14 "把 body 上限判断抄回运行时（行为等价、样例失效）"; else
+  require_log s14 14 "接线红：s14-http.o 没有引用 dec_body_too_large"
+  report_caught s14 14 "接线检查（nm -u）" "把 body 上限判断抄回 rt_http.c：行为不变，但样例验的不再是跑的那份"
 fi
 HTTP_NAME=rt_http
 HTTP_SRC=

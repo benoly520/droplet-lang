@@ -26,3 +26,12 @@ int dec_precondition_result(int read_err, bool exists, bool tag_matches) {
   }
   return tag_matches ? 0 : (int)DP_ERR_PRECONDITION_FAILED;
 }
+
+bool dec_auth_ok(bool token_configured, bool is_health, bool header_present, bool header_matches) {
+  if (!token_configured || is_health) {
+    return true;
+  }
+  return header_present && header_matches;
+}
+
+bool dec_body_too_large(size_t n, size_t max) { return n > max; }
