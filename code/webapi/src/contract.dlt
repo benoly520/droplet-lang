@@ -59,6 +59,6 @@ boundary BlobApi @v1 {
 
   create(key: str) -> Unit
     @post("/v1/keys") @created impl keys_create with idempotency
-    without precondition: "创建新 key 没有既有版本可比；同 key 重复创建由 create 自己报 409"
+    without precondition: "创建新 key 没有既有版本可比；同 key 重复创建时 handlers 把 create 的 false 投成 Conflict（409）"
     invariant "POST 只在 key 不存在时成功"
 }

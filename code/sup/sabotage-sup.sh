@@ -143,7 +143,7 @@ if ! try_build s4; then
   sed 's/^/      /' "$B/s4.log" >&2
   exit 1
 fi
-if python3 "$ROOT/code/sup/contract-sup.py" "$B/s4" "$ROOT/code/sup/accept-sup.sh" >/dev/null 2>&1
+if python3 "$ROOT/code/sup/contract-sup.py" "$B/s4" >/dev/null 2>&1
 then report_miss 4 "目标谎报断言编号 #99"; else
   report_caught s4 4 "contract-sup.py" "目标谎报一个不存在的断言编号 #99（构建照过，核对必红）"
 fi
@@ -151,8 +151,9 @@ fi
 # ---- S5：删掉那条断言，它声称证明的目标就站不住 ----
 cp "$B/blobd.c" "$B/clean.c"
 try_build clean || { echo "参照构建失败，S5 无从比对" >&2; exit 1; }
-grep -q '^ck 20 ' "$ROOT/code/sup/accept-sup.sh" || { echo "S5 注入失败：原脚本里没有 ck 20" >&2; exit 1; }
-sed '/^ck 20 /d' "$ROOT/code/sup/accept-sup.sh" > "$B/accept-no20.sh"
+TABLE=$ROOT/code/webapi/deploy/accept-table.sh
+grep -q '^ck 20 ' "$TABLE" || { echo "S5 注入失败：表里没有 ck 20" >&2; exit 1; }
+sed '/^ck 20 /d' "$TABLE" > "$B/accept-no20.sh"
 if python3 "$ROOT/code/sup/contract-sup.py" "$B/clean" "$B/accept-no20.sh" >/dev/null 2>&1
 then report_miss 5 "删掉断言 #20"; else
   report_caught s5 5 "contract-sup.py" "从验收表里删掉断言 #20（create_once 失去证明）"
@@ -306,7 +307,7 @@ cp "$B/blobd.c" "$B/s11.c"
 CFG_NAME=s11-cfg
 if try_build s11; then report_miss 11 "把区间的决定抄回机制 TU（行为等价、样例失效）"; else
   require_log s11 11 "接线红：s11-cfg.o 没有引用 dec_port_usable"
-  report_caught s11 11 "接线检查（nm -u）" "把端口区间就地抄回 dp_cfg.c：构建行为不变、21 断言不变，但样例验的不再是跑的那份"
+  report_caught s11 11 "接线检查（nm -u）" "把端口区间就地抄回 dp_cfg.c：构建行为不变、24 断言不变，但样例验的不再是跑的那份"
 fi
 CFG_NAME=dp_cfg
 

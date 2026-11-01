@@ -6,7 +6,7 @@ name: CI
 #            偷偷去下载新工具链来"修好"自己。
 #   latest —— 用最新稳定版编一遍，守前向兼容（新版本引入的编译错误/deprecation 先看见）。
 #   sup     —— 超集形态（code/sup）只靠 cc，不经过 code/lang。它测的是"这一层能不能自己站住"：
-#            兼容性、符号审计、接线检查、样例 oracle、变异、21 断言表、11 条破坏测试。
+#            兼容性、符号审计、接线检查、样例 oracle、变异、24 断言表（与语言版共用）、11 条破坏测试。
 #
 # soak.sh 仍不在这里：它要长时间常开的机器。accept*.sh 用一次性临时端口，可以进来。
 
@@ -83,9 +83,9 @@ jobs:
         run: sh code/sup/oracle-sup.sh ci-oracle
       - name: 决定层变异测试
         run: sh code/sup/mutate-dec.sh ci-mutate
-      - name: 21 条断言验收表
+      - name: 24 条断言验收表（与语言版同一张）
         run: sh code/sup/accept-sup.sh "$GITHUB_WORKSPACE/.build/ci-sup/blobd" 18951 ci
-      - name: 契约对账
-        run: python3 code/sup/contract-sup.py "$GITHUB_WORKSPACE/.build/ci-sup/blobd" code/sup/accept-sup.sh
+      - name: 契约对账（默认读那张共用的断言表）
+        run: python3 code/sup/contract-sup.py "$GITHUB_WORKSPACE/.build/ci-sup/blobd"
       - name: 破坏测试（每条断言归因到具体工具）
         run: sh code/sup/sabotage-sup.sh 18960

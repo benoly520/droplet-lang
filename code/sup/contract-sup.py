@@ -32,7 +32,9 @@ if "-o" in sys.argv:
 
 here = re.sub(r"/[^/]*$", "", sys.argv[0])
 if script is None:
-    script = here + "/accept-sup.sh"
+    # v0.33：断言表只有一份（两种介质跑同一张），accept-sup.sh 现在是薄壳。
+    # 默认指到表本体 —— 指到薄壳会 grep 不到任何 ck 行，下面的 die 会替你说明原因。
+    script = here + "/../webapi/deploy/accept-table.sh"
 
 raw = subprocess.run([binary, "--goals"], capture_output=True, text=True)
 if raw.returncode != 0:

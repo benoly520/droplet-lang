@@ -26,6 +26,11 @@ fn keys_list(fs: BlobFs, cfg: App) -> bytes | ApiError {
 }
 
 fn keys_create(key: str, fs: BlobFs, cfg: App) -> Unit | ApiError {
-  fs.create(cfg.root, key)!
+  // create 返回的是"是不是新建成功"，不是错误 —— 丢掉它就是 P16 那个 bug：
+  // 同一 key 连 POST 两次回 201。这里把 false 投成 Conflict（运行时映射 409）。
+  let created = fs.create(cfg.root, key)!
+  if created == false {
+    return ApiError.Conflict
+  }
   return
 }

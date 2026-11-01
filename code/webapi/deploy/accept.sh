@@ -1,84 +1,27 @@
 #!/bin/sh
-# M4 契约验收：五接口 + 412 + 快照 + 版本化提交。
-# 不碰服务真实数据目录：每次在 .build/m4 重建一个临时 git 仓库，跑完留在那里供翻看。
+# 语言介质这一侧的入口（v0.33 起只剩"把二进制弄出来"）。
+#
+# 为什么这么薄：这张仓库原本有两套验收 —— 这一支打 17 行结果（没有期望值，红不红要人眼判），
+# `code/sup/accept-sup.sh` 打 21 条断言。两种介质各维护一张表不可持续（P18 第 3 条），
+# 现在断言表只有一份：`accept-table.sh`（24 条），**两种介质跑同一张**。
+# 需要分支判断的地方就是问题所在：如果这张表对某一侧要改期望，那改的是设计，不是脚本。
+#
+# 数据目录：每次在 .build/accept-dlt 重建一个临时 git 仓库，跑完留在那里供翻看。
+# 用法：sh code/webapi/deploy/accept.sh [端口]（CI 不带参数 = 18799）
 set -eu
 
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT=$(CDPATH= cd -- "$HERE/../../.." && pwd)
+PORT=${1:-18799}
 
 B=$ROOT/.build/m4
 export TMPDIR=$ROOT/.build
 export GOCACHE=$TMPDIR/gocache
 rm -rf "$B"
-mkdir -p "$B/data"
+mkdir -p "$B"
 
 cd "$ROOT/code/lang"
 go build -o "$B/droplet" ./cmd/droplet
 "$B/droplet" build ../webapi/src/contract.dlt ../webapi/src/main.dlt -o "$B/blobd"
 
-cd "$B/data"
-git init -q .
-# 只提交本次写的那个 key：扫全树会撞上正在 rename 的 .tmp.<pid>.<seq>。
-DP_COMMIT_CMD='git add -A -- "$DP_COMMIT_KEY" && git -c user.name=droplet -c user.email=dp@example.com commit -q -m "snapshot $DP_COMMIT_KEY"'
-export DP_COMMIT_CMD
-export DP_COMMIT_DEBOUNCE=0
-export APP_BIND=127.0.0.1 APP_PORT=18799 APP_ROOT="$B/data" APP_TOKEN=secret
-
-"$B/blobd" 2>"$B/srv.log" &
-SRV=$!
-trap 'kill $SRV 2>/dev/null || true' EXIT
-sleep 0.4
-# 端口被上一轮残留实例占着时新实例会立刻退出，而请求照样有响应（来自旧二进制）——
-# 整张表都会"绿"，但它测的不是这一版代码（v0.13 实踩：`| head` 触发 SIGPIPE 杀掉脚本，
-# trap 没跑，残留实例留着）。所以先确认它活着，再谈结果。
-if ! kill -0 "$SRV" 2>/dev/null; then
-  echo "accept: 自建实例启动即退出（多半是端口 18799 被占），srv.log：" >&2
-  cat "$B/srv.log" >&2
-  exit 1
-fi
-
-U=http://127.0.0.1:18799
-A='Authorization: Bearer secret'
-
-code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
-# ETag 由运行时从 body 推导（v0.10）：handler 一个字也不写，所以这里只看响应头。
-tag()  { curl -s -o /dev/null -D - "$@" | tr -d '\r' \
-  | awk -F': ' 'tolower($1)=="etag"{t=$2} END{print (t==""?"(none)":t)}'; }
-row() { printf '%-34s %s\n' "$1" "$2"; }
-# 某响应头的值；(none) 表示运行时没发这个头。204 按 RFC 7230 §3.3.2 不得带 Content-Length。
-hdr() { h=$1; shift; curl -s -o /dev/null -D - "$@" | tr -d '\r' \
-  | awk -F': ' -v k="$h" 'tolower($1)==k{v=$2} END{print (v==""?"(none)":v)}'; }
-
-row 'GET  /health (无 token)'      "$(code "$U/health")"
-row 'GET  /v1/keys (空)'           "$(code -H "$A" "$U/v1/keys")"
-row 'PUT  /v1/blob/demo'           "$(code -X PUT -H "$A" --data-binary 'hello' "$U/v1/blob/demo")"
-
-ETAG=$(tag -H "$A" "$U/v1/blob/demo")
-row 'GET  /v1/blob/demo (ETag)'    "$ETAG"
-row 'PUT  If-Match 命中'           "$(code -X PUT -H "$A" -H "If-Match: $ETAG" --data-binary 'hello2' "$U/v1/blob/demo")"
-row 'PUT  If-Match 不符 -> 412'    "$(code -X PUT -H "$A" -H 'If-Match: deadbeef' --data-binary 'x' "$U/v1/blob/demo")"
-# D3：412 由生成的守卫挡在 handler 之前，body 必须是 0 字节（错误不携带体）。
-row '412 empty body (bytes)'       "$(curl -s -o /dev/null -w '%{size_download}' -X PUT -H "$A" -H 'If-Match: deadbeef' --data-binary 'x' "$U/v1/blob/demo")"
-# B3：@no_content 投 204，且 204 不得带 Content-Length（RFC 7230 §3.3.2）。
-row '204 no Content-Length'        "$(hdr content-length -X PUT -H "$A" --data-binary 'hello3' "$U/v1/blob/demo")"
-row '204 body (bytes)'             "$(curl -s -o /dev/null -w '%{size_download}' -X PUT -H "$A" --data-binary 'hello4' "$U/v1/blob/demo")"
-row 'POST /v1/keys/second'         "$(code -X POST -H "$A" "$U/v1/keys/second")"
-row 'GET  /v1/keys (两个)'         "$(curl -s -H "$A" "$U/v1/keys")"
-# @created 投 201；仍是"有表示就有版本"的规则：空 body 不发 ETag。
-row '201 头 Content-Length: 0'     "$(hdr content-length -X POST -H "$A" "$U/v1/keys/third")"
-row 'GET  /v1/blob/missing -> 404' "$(code -H "$A" "$U/v1/blob/missing")"
-row 'GET  /v1/blob/../evil -> 400' "$(code -H "$A" --path-as-is "$U/v1/blob/../evil")"
-row 'DELETE /v1/blob/demo -> 405'  "$(code -X DELETE -H "$A" "$U/v1/blob/demo")"
-row 'DELETE 405 empty body'        "$(tag -X DELETE -H "$A" "$U/v1/blob/demo")"
-
-dd if=/dev/zero of="$B/big" bs=1M count=9 2>/dev/null
-row 'PUT  9 MiB -> 413'            "$(code -X PUT -H "$A" --data-binary @"$B/big" "$U/v1/blob/big")"
-
-sleep 1
-echo
-echo '--- 快照 ---'
-ls "$B/data/.snapshots" 2>/dev/null || echo '(无)'
-echo '--- git log ---'
-git -C "$B/data" log --oneline 2>/dev/null || echo '(无提交)'
-echo '--- 服务端日志 ---'
-cat "$B/srv.log"
+exec sh "$HERE/accept-table.sh" "$B/blobd" "$PORT" dlt
