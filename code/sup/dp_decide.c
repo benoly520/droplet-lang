@@ -16,3 +16,13 @@ int dec_create_result(bool fresh, int err) {
 }
 
 bool dec_port_usable(unsigned long x) { return x >= 1ul && x <= 65535ul; }
+
+int dec_precondition_result(int read_err, bool exists, bool tag_matches) {
+  if (read_err != 0 && read_err != (int)DP_ERR_NOT_FOUND) {
+    return read_err;
+  }
+  if (!exists) {
+    return (int)DP_ERR_PRECONDITION_FAILED;
+  }
+  return tag_matches ? 0 : (int)DP_ERR_PRECONDITION_FAILED;
+}

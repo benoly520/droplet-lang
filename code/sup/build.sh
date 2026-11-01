@@ -31,6 +31,12 @@ cc -std=c11 -O2 -Wall -Wextra -Werror -I"$B" -c "$B/blobd.c" -o "$B/blobd.o"
 cc -std=c11 -O2 -Wall -Wextra -Werror -I"$B" -c "$B/dp_decide.c" -o "$B/dp_decide.o"
 cc -std=c11 -O2 -Wall -Wextra -Werror -I"$B" -c "$B/dp_cfg.c" -o "$B/dp_cfg.o"
 
+# 运行时也逐 TU 编成 .o：判断搬进用户面之后，接线检查要能看见
+# "运行时确实引用了那份决定"（编译进同一个 cc 调用就看不见了）。
+for T in rt_core rt_http rt_blob rt_ver; do
+  cc -std=c11 -O2 -Wall -Wextra -Werror -I"$B" -c "$B/$T.c" -o "$B/$T.o"
+done
+
 # 审计对象 = 所有用户 TU。v0.32 起 dp_decide.c 是第二个用户 TU，
 # 它的 .o 也进审计：拆 TU 不再是"绕开检查"的办法（E2 的一半在这里被抵掉）。
 sh "$B/audit-sup.sh" "$B/blobd.o" "$B/dp_decide.o"
@@ -39,7 +45,8 @@ sh "$B/audit-sup.sh" "$B/blobd.o" "$B/dp_decide.o"
 # 这里用符号表把"同一份"变成可失败的检查。
 # 这条不看源码文本：改名改不掉，引用关系在 .o 里。
 # 每个被样例覆盖的决定都要一对：谁的 .o 必须引用它。漏一个就是漏一条口子。
-for PAIR in "blobd.o dec_create_result" "dp_cfg.o dec_port_usable"; do
+for PAIR in "blobd.o dec_create_result" "dp_cfg.o dec_port_usable" \
+            "rt_http.o dec_precondition_result"; do
   OBJ=$(printf '%s' "$PAIR" | cut -d' ' -f1)
   SYM=$(printf '%s' "$PAIR" | cut -d' ' -f2)
   if ! nm -u "$B/$OBJ" | awk '{print $2}' | grep -qx "$SYM"; then
@@ -51,7 +58,7 @@ done
 
 cc -std=c11 -O2 -Wall -Wextra -Werror -I"$B" \
    "$B/blobd.o" "$B/dp_cfg.o" "$B/dp_decide.o" \
-   "$B"/rt_core.c "$B"/rt_http.c "$B"/rt_blob.c "$B"/rt_ver.c \
+   "$B"/rt_core.o "$B"/rt_http.o "$B"/rt_blob.o "$B"/rt_ver.o \
    -o "$B/blobd"
 
 echo "构建成功：$B/blobd"

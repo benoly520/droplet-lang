@@ -58,6 +58,15 @@ CREATE = """int dec_create_result(bool fresh, int err) {
   return fresh ? 0 : (int)DP_ERR_CONFLICT;
 }"""
 PORT = "bool dec_port_usable(unsigned long x) { return x >= 1ul && x <= 65535ul; }"
+PRECON = """int dec_precondition_result(int read_err, bool exists, bool tag_matches) {
+  if (read_err != 0 && read_err != (int)DP_ERR_NOT_FOUND) {
+    return read_err;
+  }
+  if (!exists) {
+    return (int)DP_ERR_PRECONDITION_FAILED;
+  }
+  return tag_matches ? 0 : (int)DP_ERR_PRECONDITION_FAILED;
+}"""
 
 # (编号, 说明, 锚点, 替换, 预期结局)
 MUTS = [
@@ -78,6 +87,11 @@ MUTS = [
      CREATE.replace("if (err != 0) {", "if (err > 0 || err < 0) {", 1), "MISS"),
     ("M8", "清空函数体：dec_port_usable 什么都不返回（编译期就该响）", PORT,
      "bool dec_port_usable(unsigned long x) { (void)x; }", "COMPILE"),
+    ("M9", "取值反转：条件请求忽略 ETag 是否相符，一律放行", PRECON,
+     PRECON.replace("return tag_matches ? 0 : (int)DP_ERR_PRECONDITION_FAILED;",
+                    "(void)tag_matches;\n  return 0;", 1), "CAUGHT"),
+    ("M10", "错误吞掉：读旧版本失败也当通过（错误优先那条样例必须翻面）", PRECON,
+     PRECON.replace("    return read_err;", "    return 0;", 1), "CAUGHT"),
 ]
 
 FLAGS = "-std=c11 -O2 -Wall -Wextra -Werror"

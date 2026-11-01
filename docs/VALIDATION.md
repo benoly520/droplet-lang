@@ -12,7 +12,7 @@ sh code/sup/oracle-sup.sh                          # 7 条封闭样例，一条�
 sh code/sup/mutate-dec.sh                          # 8 个变异体，逐条断言结局与归因
 sh code/sup/accept-sup.sh "$PWD/.build/sup/blobd" 18880 sup   # 24 条 wire 断言
 python3 code/sup/contract-sup.py .build/sup/blobd   # 14 条目标 ↔ 断言编号对账
-sh code/sup/sabotage-sup.sh 18900                  # 11 条破坏，每条必须被具体工具抓住
+sh code/sup/sabotage-sup.sh 18900                  # 12 条破坏，每条必须被具体工具抓住
 ```
 
 ASan+UBSan：把 `build.sh` 里的 `cc` 换成 `cc -g -fsanitize=address,undefined` 同口径编译，
@@ -23,12 +23,12 @@ ASan+UBSan：把 `build.sh` 里的 `cc` 换成 `cc -g -fsanitize=address,undefin
 | 项 | 结果 |
 | --- | --- |
 | C 兼容性 | **5 过 / 0 挂**（3 个 C11 语料 × 两种口径 + 一条 "include 本层后正常调 getenv" 探针） |
-| 构建 | 符号审计 0 个未声明引用；接线检查两条绿（`blobd.o → dec_create_result`、`dp_cfg.o → dec_port_usable`） |
-| 样例 oracle | **7 条 / 7 过 / 0 挂 / 0 崩溃** |
-| 决定层变异 | 8 个变异体 → **5 抓住 / 2 MISS（等价变异，人工判定）/ 1 编译期响** |
+| 构建 | 符号审计 0 个未声明引用；接线检查三条绿（`blobd.o → dec_create_result`、`dp_cfg.o → dec_port_usable`、`rt_http.o → dec_precondition_result`） |
+| 样例 oracle | **11 条 / 11 过 / 0 挂 / 0 崩溃** |
+| 决定层变异 | 10 个变异体 → **7 抓住 / 2 MISS（等价变异，人工判定）/ 1 编译期响** |
 | wire 断言 | **24 过 / 0 挂**；ASan+UBSan 下同样 24 / 0，无诊断 |
 | 契约对账 | 5 条路由 / 5 个配置项 / **14 条目标（未证 0、孤儿断言 0）** |
-| 破坏测试 | **11 抓住 / 0 假阴性**，每条带归因（哪个工具、什么诊断） |
+| 破坏测试 | **12 抓住 / 0 假阴性**，每条带归因（哪个工具、什么诊断） |
 
 ### 2.1 接口承诺（24 条断言钉住的那些）
 
@@ -40,7 +40,7 @@ ASan+UBSan：把 `build.sh` 里的 `cc` 换成 `cc -g -fsanitize=address,undefin
 | 10–12 | POST 只在 key 不存在时成功（201 空 body）；同一 key 再 POST = 409；清单来自目录 |
 | 13–17 | 404 / 400 / 405 的映射；错误响应不带表示 |
 | 18–19 | 405 无 ETag；9 MiB body → 413 |
-| 20–21 | 同一 key 连 POST 两次 = 409（P16 那一局）；GET 回来的字节 = 上次 PUT 的字节 |
+| 20–21 | 同一 key 连 POST 两次 = 409（丢 bool 那一局）；GET 回来的字节 = 上次 PUT 的字节 |
 | 22–24 | 覆盖写前留快照（3 份）；4 次成功写入 = 4 条提交；清单 3 个 key 来自目录本身 |
 
 ## 3. 两次真实的失败（留档，不删）
@@ -63,8 +63,8 @@ ASan+UBSan：把 `build.sh` 里的 `cc` 换成 `cc -g -fsanitize=address,undefin
 
 ## 4. 这些数字不能证明什么
 
-1. **覆盖面窄**。oracle 只覆盖 2 个纯决定；运行时里还有鉴权、版本前置、快照轮转等决定没有被样例约束。
-   “7/7 全过”不等于“服务正确”。
+1. **覆盖面窄**。oracle 只覆盖 3 个纯决定；运行时里还有鉴权、版本前置、快照轮转等决定没有被样例约束。
+   “11/11 全过”不等于“服务正确”。
 2. **wire 断言是人写的**。24 条之外的错误不会自己冒出来；漏掉的测试就是没有的测试。
 3. **变异有 2 个 MISS**。我判定它们与实现等价（无符号与非零判断同外延），工具并没有证明这一点。
 4. **运行时在检查面之外**。1472 行共享 C 没有样例、没有变异；它出问题只能靠 wire 断言兜。

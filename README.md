@@ -1,7 +1,11 @@
 # Droplet
 
-**A C superset for AI-written services: the source is valid C11, the declarations are tables,
-and the checks fail when the implementation drifts from what was declared.**
+**A checked C workspace for AI-written services: valid C11 source, declarations as tables,
+and checks that fail when the implementation drifts from what was declared.**
+
+A "superset" here means exactly one thing: valid C is never rejected by this layer. There was a
+bespoke language in this repository; it was removed, and no further language extensions will be
+built (docs/SPEC.md §2.1). What remains is the part that measurably worked.
 
 The division of labour this is built around:
 
@@ -52,7 +56,7 @@ curl -s           -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blo
 | mutation (`mutate-dec.sh`) | a mutant survives and is not a hand-judged equivalent |
 | wire assertions (`accept-table.sh`) | any of 24 external promises is broken (status, headers, body, snapshot, commit) |
 | contract reconciliation (`contract-sup.py`) | a goal cites an assertion number that does not exist, or a goal is left unproven (`""` is an explicit admission) |
-| sabotage (`sabotage-sup.sh`) | one of 11 injected defects is *not* caught by a named tool with a named diagnostic |
+| sabotage (`sabotage-sup.sh`) | one of 12 injected defects is *not* caught by a named tool with a named diagnostic |
 
 The last row is the important one: it checks the checkers. A "caught" that is really a compile error
 from a broken injection is a false green, and this suite exists because that happened once.
@@ -60,12 +64,12 @@ from a broken injection is a false green, and this suite exists because that hap
 ## Layout
 
 ```
-code/sup/            the superset: four declaration tables, the flagship service, every check
+code/sup/            the checked layer: four declaration tables, the flagship service, every check
   blobd.c            DP_ROUTES + DP_GOALS — 125 lines, user-owned
   dp_env.h           DP_ENVS — 18 lines, user-owned
-  dp_decide.h/.c     two pure decisions + DP_EXAMPLES — 62 lines, user-owned, linked by the service
+  dp_decide.h/.c     three pure decisions + DP_EXAMPLES — 87 lines, user-owned, linked by the service
   dp_sup.h dp_cfg.c dp_conf.h dp_oracle.c   mechanism, 344 lines
-code/runtime/        the service runtime, 1472 lines of C (rt_core / rt_http / rt_blob / rt_ver)
+code/runtime/        the service runtime, 1469 lines of C (rt_core / rt_http / rt_blob / rt_ver)
 code/webapi/deploy/  24-assertion acceptance table, soak, systemd unit, env example
 docs/                SPEC (what this is), VALIDATION (measured numbers), NEXT (handoff)
 ```
@@ -74,8 +78,9 @@ docs/                SPEC (what this is), VALIDATION (measured numbers), NEXT (h
 
 This is a checking surface, not a sandbox. Bypassing `build.sh` bypasses the audit (E7);
 `dlopen` + `dlsym` resolves at runtime where `nm -u` cannot see it (E8); the oracle only reaches
-*pure* decisions, so auth and version preconditions living inside the runtime are covered by wire
-assertions alone. All of it is written down in [docs/SPEC.md](docs/SPEC.md) §5 and
-[docs/VALIDATION.md](docs/VALIDATION.md) §4, including what the green numbers do **not** prove.
+*pure* decisions, so auth, the body limit and snapshot rotation inside the runtime are covered by
+wire assertions alone (the If-Match judgement has been moved out). All of it is written down in
+[docs/SPEC.md](docs/SPEC.md) §5 and [docs/VALIDATION.md](docs/VALIDATION.md) §4, including what the
+green numbers do **not** prove.
 
 Chinese version: [README_CN.md](README_CN.md).

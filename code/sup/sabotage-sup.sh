@@ -16,7 +16,6 @@ export TMPDIR=$ROOT/.build
 rm -rf "$B"; mkdir -p "$B"
 
 FLAGS="-std=c11 -O2 -Wall -Wextra -Werror"
-SOURCES="$RT/rt_core.c $RT/rt_http.c $RT/rt_blob.c $RT/rt_ver.c"
 CAUGHT=0
 MISS=0
 
@@ -28,9 +27,12 @@ prep() {
 }
 
 # 与 build.sh 同样的三段：编用户 TU -> 符号审计 -> 链接。日志留档。
+# 运行时也逐 TU 编成 .o（与 build.sh 同步），这样接线检查能看见运行时引用了
+# 哪一份决定；HTTP_NAME / HTTP_SRC 允许某条破坏换掉 rt_http.c。
 try_build() {
   NAME=$1
   CFG_NAME=${CFG_NAME:-dp_cfg}
+  HTTP_NAME=${HTTP_NAME:-rt_http}
   LOG="$B/$NAME.log"
   : > "$LOG"
   # shellcheck disable=SC2086
@@ -45,12 +47,23 @@ try_build() {
     # shellcheck disable=SC2086
     cc $FLAGS -I"$B" -I"$RT" -c "$B/dp_decide.c" -o "$B/dp_decide.o" >>"$LOG" 2>&1 || return 1
   fi
+  for T in rt_core rt_blob rt_ver; do
+    if [ ! -f "$B/$T.o" ]; then
+      # shellcheck disable=SC2086
+      cc $FLAGS -I"$B" -I"$RT" -c "$RT/$T.c" -o "$B/$T.o" >>"$LOG" 2>&1 || return 1
+    fi
+  done
+  if [ ! -f "$B/$HTTP_NAME.o" ]; then
+    # shellcheck disable=SC2086
+    cc $FLAGS -I"$B" -I"$RT" -c "${HTTP_SRC:-$RT/rt_http.c}" -o "$B/$HTTP_NAME.o" >>"$LOG" 2>&1 || return 1
+  fi
   # shellcheck disable=SC2086
   if ! sh "$B/audit-sup.sh" "$B/$NAME.o" "$B/dp_decide.o" >>"$LOG" 2>&1; then
     return 1
   fi
-  # 与 build.sh 同样的接线检查：两处被样例覆盖的决定都要有引用者
-  for PAIR in "$NAME.o dec_create_result" "$CFG_NAME.o dec_port_usable"; do
+  # 与 build.sh 同样的接线检查：三处被样例覆盖的决定都要有引用者
+  for PAIR in "$NAME.o dec_create_result" "$CFG_NAME.o dec_port_usable" \
+              "$HTTP_NAME.o dec_precondition_result"; do
     OBJ=$(printf '%s' "$PAIR" | cut -d' ' -f1)
     SYM=$(printf '%s' "$PAIR" | cut -d' ' -f2)
     if ! nm -u "$B/$OBJ" | awk '{print $2}' | grep -qx "$SYM"; then
@@ -59,7 +72,8 @@ try_build() {
     fi
   done
   # shellcheck disable=SC2086
-  cc $FLAGS -I"$B" -I"$RT" "$B/$NAME.o" "$B/$CFG_NAME.o" "$B/dp_decide.o" $SOURCES -o "$B/$NAME" >>"$LOG" 2>&1
+  cc $FLAGS -I"$B" -I"$RT" "$B/$NAME.o" "$B/$CFG_NAME.o" "$B/dp_decide.o" \
+     "$B/$HTTP_NAME.o" "$B/rt_core.o" "$B/rt_blob.o" "$B/rt_ver.o" -o "$B/$NAME" >>"$LOG" 2>&1
 }
 
 # 从 $B 里现编一个 oracle（S6 要用它验"样例与 wire 同时抓住同一个 bug"）
@@ -310,6 +324,39 @@ if try_build s11; then report_miss 11 "把区间的决定抄回机制 TU（行�
   report_caught s11 11 "接线检查（nm -u）" "把端口区间就地抄回 dp_cfg.c：构建行为不变、24 断言不变，但样例验的不再是跑的那份"
 fi
 CFG_NAME=dp_cfg
+
+# ---- S12：把条件请求的判断就地抄回运行时（第三条接线，接法与 S10/S11 相同） ----
+# 判断从运行时搬进用户面之后，运行时只做"读"和"算"。把它抄回去，行为完全等价、
+# 24 条断言照样全过 —— 被绕开的仍然是"样例验的是跑的那一份"这件事本身。
+prep
+python3 - "$B" "$RT/rt_http.c" <<'PY12'
+import sys
+b, src = sys.argv[1], sys.argv[2]
+s = open(src, encoding="utf-8").read()
+old = "  return dec_precondition_result(err, exists, match);"
+new = ("  (void)dec_precondition_result; /* 假装还用着 */\n"
+       "  if (err != 0 && err != (int)DP_ERR_NOT_FOUND) {\n"
+       "    return err;\n"
+       "  }\n"
+       "  if (!exists) {\n"
+       "    return (int)DP_ERR_PRECONDITION_FAILED;\n"
+       "  }\n"
+       "  return match ? 0 : (int)DP_ERR_PRECONDITION_FAILED;")
+if old not in s:
+    sys.exit("S12 注入失败：dp_precondition_check 的写法变了，脚本要跟着改")
+open(b + "/s12-http.c", "w", encoding="utf-8").write(s.replace(old, new, 1))
+PY12
+grep -q '(void)dec_precondition_result' "$B/s12-http.c" \
+  || { echo "S12 注入失败：抄本没写进 rt_http.c" >&2; exit 1; }
+cp "$B/blobd.c" "$B/s12.c"
+HTTP_NAME=s12-http
+HTTP_SRC="$B/s12-http.c"
+if try_build s12; then report_miss 12 "把条件请求的判断抄回运行时（行为等价、样例失效）"; else
+  require_log s12 12 "接线红：s12-http.o 没有引用 dec_precondition_result"
+  report_caught s12 12 "接线检查（nm -u）" "把条件请求判断抄回 rt_http.c：行为不变，但样例验的不再是跑的那份"
+fi
+HTTP_NAME=rt_http
+HTTP_SRC=
 
 echo "sabotage-sup: $CAUGHT 抓住 / $MISS 假阴性"
 [ "$MISS" -eq 0 ]

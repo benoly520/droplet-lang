@@ -6,6 +6,7 @@
  * 所有输入都按长度处理，不做 NUL 假设；header 总长、body 长度、单行长度都有硬上限。
  */
 #include "rt.h"
+#include "dp_decide.h" /* 条件请求的判断住在用户面：运行时只负责读与算，不负责判 */
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -339,25 +340,21 @@ static dp_str strip_quotes(dp_str v) {
 }
 
 /* 条件请求比对：与响应 ETag 用同一个推导函数（dp_sys_hash64），所以 GET 拿到的
- * 版本号可以直接贴到下一次 PUT。返回 0 = 通过，其余是错误 tag。 */
+ * 版本号可以直接贴到下一次 PUT。这里只做"读"和"算"，判断交给
+ * dec_precondition_result —— 样例覆盖的就是服务调的这一份。 */
 int dp_precondition_check(dp_arena* a, dp_str root, dp_str key, dp_str if_match) {
   if (if_match.n == 0u || key.n == 0u) {
     return 0; /* 没带预条件，就没有要比的东西 */
   }
   int err = 0;
   dp_bytes cur = dp_blob_read(a, root, key, &err);
-  if (err == (int)DP_ERR_NOT_FOUND) {
-    /* 目标不存在时 If-Match 必然失败：这是 412，不是 404（资源本来就在要建的路径上） */
-    return (int)DP_ERR_PRECONDITION_FAILED;
+  bool exists = (err != (int)DP_ERR_NOT_FOUND);
+  bool match = false;
+  if (err == 0) {
+    dp_str cur_tag = dp_sys_u64_str(a, dp_sys_hash64(cur));
+    match = dp_str_eq(cur_tag, strip_quotes(if_match));
   }
-  if (err != 0) {
-    return (int)DP_ERR_IO;
-  }
-  dp_str cur_tag = dp_sys_u64_str(a, dp_sys_hash64(cur));
-  if (!dp_str_eq(cur_tag, strip_quotes(if_match))) {
-    return (int)DP_ERR_PRECONDITION_FAILED;
-  }
-  return 0;
+  return dec_precondition_result(err, exists, match);
 }
 
 /* ---------- 单连接 ---------- */
