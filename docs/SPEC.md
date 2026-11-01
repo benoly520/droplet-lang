@@ -212,6 +212,8 @@ v0.31 把它删了，未声明效果的检查挪到**构建之后的符号审计
 | `dp_conf.h` | 机制 | 由 `DP_ENVS` 生成配置结构 + `extern dp_conf` |
 | `dp_cfg.c` | 机制 | 由 `DP_ENVS` 生成加载器：**唯一允许碰 `getenv` 的 TU** |
 | `audit-sup.sh` | 机制 | 用户 `.o` 的未定义符号白名单（新工具，42 行） |
+| `dp_decide.h` / `dp_decide.c` | **用户**（v0.32） | 纯决定 + 第四张表 `DP_EXAMPLES`；服务与 oracle 链接同一份 |
+| `dp_oracle.c` | 机制（v0.32） | 把 `DP_EXAMPLES` 展开成样例执行器（92 行） |
 
 v0.30 的 7 个用户词汇 + `dp_cfg_load` / `dp_serve_sup` 两条入口约束保留；`DP_GUARD_IF_MATCH`
 从无参形式改成带参的 `DP_GUARD_IF_MATCH(ROOT)`（`blobd.c` 传 `dp_conf.root`），因为守卫的展开
@@ -234,7 +236,8 @@ v0.30 的 7 个用户词汇 + `dp_cfg_load` / `dp_serve_sup` 两条入口约束�
 | 旗舰服务行数 | 125 行（+`dp_env.h` 18 行 + `dp_decide.h/.c` 63 行 = **206**） | 133 行 | 95 行（`contract.dlt` 64 + `main.dlt` 31） |
 | 配置项 | 5（`APP_PORT`/`APP_MAX_BODY` 进表） | 3 | — |
 
-机制文件 `162+53+35+18 = 268` 行（v0.30：`224` 行单文件）+ 审计脚本 42 行。
+机制文件 v0.31 为 `162+53+35+18 = 268` 行（v0.30：`224` 行单文件）+ 审计脚本 42 行；
+v0.32 起机制侧再加 `dp_oracle.c` 92 行，`dp_sup.h` 161 + `dp_cfg.c` 56 + `dp_conf.h` 35 + `dp_oracle.c` 92 = **344** 行。
 
 **本轮最该记下的是自己抓自己**：v0.30 的 7 项破坏测试里，S3/S7（以及本轮最初的 S8）**其实
 是因为注入的代码少了 `#include <stdlib.h>` 而编译失败，却被报告成"符号审计抓住了"**——
