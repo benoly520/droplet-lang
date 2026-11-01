@@ -1,19 +1,18 @@
 #!/bin/sh
-# 一张表跑两种介质（v0.33 / P18 第 3 条）：24 条断言，没有一条是打印。
+# 唯一的验收表：24 条断言，没有一条是打印。
 #
-# 为什么要合并：`.dlt` 那支 accept.sh 原来是 **17 行打印** —— 打印没有期望值，"红不红"要人眼判；
-# 超集那支 accept-sup.sh 是 **21 条断言**。两种介质各维护一张验收表不可持续，这正是 P18 的起点。
-# 合并之后：这张表只有一支脚本，两种介质都调它；各自剩下的只是"怎么把二进制弄出来"的薄壳。
+# 这张表是"结果验收"的落点：人只看它红不红，不读实现。所以每条都必须有期望值，
+# 退出码就是结论（最后一行 [ "$FAIL" -eq 0 ]）。
 #
-# 三条口径，合并时一条都不许丢：
-#   1) 每条断言带期望值，退出码就是结论（最后 [ "$FAIL" -eq 0 ]）；
-#   2) 原来只是打印的检查全部转成断言：快照、提交、清单条目数 -> #22/#23/#24。
-#      #22 顺手把 DP_GOALS 里一直挂"未证"的 snapshot_before_write 变成有断言撑着的那条；
+# 三条口径：
+#   1) 每条断言带期望值，红不红由机器判，不由人眼判；
+#   2) 状态类的事实也要断言：快照数、提交数、清单条目数 -> #22/#23/#24。
+#      #22 同时是 DP_GOALS 里 snapshot_before_write 那条目标的唯一证明；
 #   3) 必须证明观测的是**这一版刚起起来的进程**：端口被上一轮残留实例占着时请求照样有响应，
-#      但测的不是这份代码（v0.13 实踩过）。所以先 kill -0，再谈结果。
+#      但测的不是这份代码。所以先 kill -0，再谈结果。
 #
 # 用法：sh code/webapi/deploy/accept-table.sh <二进制绝对路径> <端口> <标签>
-# 两种介质都跑这一支；不要在这里加分支判断 —— 需要分支说明表里出现了介质差异，那是设计问题。
+# 换别的服务实现时也调这一支；如果它需要对某个实现改期望，那是设计问题，不是脚本问题。
 set -eu
 
 # 注意 ../../../ —— 这支脚本在 code/webapi/deploy/ 下，比 code/sup/ 深一层。
@@ -30,10 +29,11 @@ mkdir -p "$B/data"
 cd "$B/data"
 git init -q .
 # 只提交本次写的那个 key：扫全树会撞上正在 rename 的 .tmp.<pid>.<seq>。
-# **并发**：运行时每次成功写入都拉起一个子进程（DP_COMMIT_DEBOUNCE=0 不合并），所以这条命令会被
+# **并发**：运行时每次成功写入都拉起一个子进程（DP_COMMIT_DEBOUNCE=0），所以这条命令会被
 # 同时跑好几份。直接跑 `git commit` 会抢 HEAD 的 ref 锁 —— CI 第一次跑 v0.33 就挂在这一条上
 # （`fatal: cannot lock ref 'HEAD'`，4 次写入只落地 3 条提交）。用 flock 把命令串起来执行；
 # 这不是放宽 #23，它仍然是"一次成功写入 = 一条提交"，只是让子进程排队而不是互相踩。
+# 第二层竞态见下面的 wait_commits：排队还不够，写入之间也要等前一条提交落地。
 cat > "$B/commit.sh" <<'EOS'
 #!/bin/sh
 git add -A -- "$DP_COMMIT_KEY" &&
@@ -86,6 +86,23 @@ ck() { # ck <编号> <期望> <实际> <说明>
   fi
 }
 
+# 逐写等提交：运行时每次成功写入都拉起一个提交子进程（DP_COMMIT_DEBOUNCE=0），
+# 但子进程是异步的。如果下一次写入在下一次提交拿到锁之前落地，两次提交会看到
+# 同一份内容，先拿到锁的那次提交为空 —— 快照被合并，写入数就不等于提交数了
+# （ASan 构建下稳定复现 3/4）。flock 只排开了 ref 锁，排不开这件事。
+# 所以这里在每次成功写入之后等它的提交落地，再发下一次写：
+# 断言仍然只认"4 次写入 = 恰好 4 条提交"，不把合并当成通过。
+wait_commits() { # wait_commits <至少应有的提交数>
+  W=0
+  while [ "$W" -lt 40 ]; do
+    C=$(git -C "$B/data" rev-list --count HEAD 2>/dev/null || echo 0)
+    [ "$C" -ge "$1" ] && return 0
+    sleep 0.25
+    W=$((W + 1))
+  done
+  return 1
+}
+
 CK1=$(code "$HEALTH")
 ck 1 200 "$CK1" "GET /health 无 token 也放行"
 
@@ -94,6 +111,7 @@ ck 2 200 "$CK2" "GET /v1/keys 空清单"
 
 CK3=$(code -X PUT -H "$A" --data-binary hello "$BLOB")
 ck 3 204 "$CK3" "PUT 不带 If-Match"
+wait_commits 1 || true
 
 ETAG=$(hd etag -H "$A" "$BLOB")
 if [ "$ETAG" = "(none)" ]; then CK4=missing; else CK4=present; fi
@@ -101,6 +119,7 @@ ck 4 present "$CK4" "GET 发 ETag（运行时从 body 推导）"
 
 CK5=$(code -X PUT -H "$A" -H "If-Match: $ETAG" --data-binary hello2 "$BLOB")
 ck 5 204 "$CK5" "PUT If-Match 命中"
+wait_commits 2 || true
 
 CK6=$(code -X PUT -H "$A" -H 'If-Match: deadbeef' --data-binary x "$BLOB")
 ck 6 412 "$CK6" "PUT If-Match 不符 -> 412"
@@ -110,9 +129,11 @@ ck 7 0 "$CK7" "412 空 body"
 
 CK8=$(hd content-length -X PUT -H "$A" --data-binary hello3 "$BLOB")
 ck 8 '(none)' "$CK8" "204 不得带 Content-Length"
+wait_commits 3 || true
 
 CK9=$(nbytes -X PUT -H "$A" --data-binary hello4 "$BLOB")
 ck 9 0 "$CK9" "204 空 body"
+wait_commits 4 || true
 
 CK10=$(code -X POST -H "$A" "$SEC")
 ck 10 201 "$CK10" "POST 新 key -> 201"
@@ -148,7 +169,7 @@ ck 19 413 "$CK19" "PUT 9 MiB -> 413"
 # ---- 本轮新增的两条 ----
 
 CK20=$(code -X POST -H "$A" "$SEC")
-ck 20 409 "$CK20" "同一 key 连 POST 两次 -> 409（P16：语言版这里是 201）"
+ck 20 409 "$CK20" "同一 key 连 POST 两次 -> 409"
 
 CK21=$(body -H "$A" "$BLOB")
 ck 21 hello4 "$CK21" "GET 回来的字节 == 最近一次成功 PUT 的字节"

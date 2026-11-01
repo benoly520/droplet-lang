@@ -54,17 +54,20 @@ if [ -n "${SOAK_URL:-}" ]; then
   T=${SOAK_TOKEN:-}
 else
   export TMPDIR=$ROOT/.build
-  export GOCACHE=$TMPDIR/gocache
   rm -rf "$OUT/data"
   mkdir -p "$OUT/data"
   # 长稳要盖到提交子进程这条路，否则只测了 blob 读写。
   git -C "$OUT/data" init -q .
-  DP_COMMIT_CMD='git add -A -- "$DP_COMMIT_KEY" && git -c user.name=droplet -c user.email=dp@example.com commit -q -m "soak $DP_COMMIT_KEY"'
+  # 提交命令会被并发拉起：用 flock 串行，否则 git 会抢 HEAD 的 ref 锁（v0.33 在 CI 上踩过）。
+  cat > "$OUT/commit.sh" <<'EOS'
+#!/bin/sh
+git add -A -- "$DP_COMMIT_KEY" &&
+git -c user.name=droplet -c user.email=dp@example.com commit -q -m "soak $DP_COMMIT_KEY"
+EOS
+  DP_COMMIT_CMD="flock \"$OUT/commit.lock\" sh \"$OUT/commit.sh\""
   export DP_COMMIT_CMD
-  cd "$ROOT/code/lang"
-  [ -x "$ROOT/.build/m4/droplet" ] || go build -o "$ROOT/.build/m4/droplet" ./cmd/droplet
-  "$ROOT/.build/m4/droplet" build ../webapi/src/contract.dlt ../webapi/src/main.dlt \
-    -o "$OUT/blobd" >/dev/null
+  sh "$ROOT/code/sup/build.sh" soak-bin >/dev/null
+  cp "$ROOT/.build/soak-bin/blobd" "$OUT/blobd"
   DP_COMMIT_DEBOUNCE=${SOAK_DEBOUNCE:-60}
   export DP_COMMIT_DEBOUNCE
   export APP_BIND=127.0.0.1 APP_PORT="$PORT" APP_ROOT="$OUT/data" APP_TOKEN=soak

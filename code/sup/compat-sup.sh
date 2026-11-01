@@ -1,7 +1,7 @@
 #!/bin/sh
 # 超集兼容性实测：证明"加一层不改 C"。
 #
-# 上一版的说法被实测推翻过（SPEC §0.8.2 记着）：一份合法 C11 程序 include dp_sup.h
+# 上一版的说法被实测推翻过：一份合法 C11 程序 include dp_sup.h
 # 之后编译失败，因为头文件末尾把 getenv 改名成了不存在的符号。那是
 # incompatible extension。这一版的要求变成可测的：
 #   A) 同一批合法 C 程序，"搜索路径里没有本层" 与 "有本层" 两种口径都要过，输出必须一致；
@@ -116,7 +116,7 @@ int main(void) {
 EOF
 cp "$ROOT"/code/sup/dp_sup.h "$ROOT"/code/sup/dp_conf.h "$ROOT"/code/sup/dp_env.h \
    "$ROOT"/code/sup/dp_decide.h "$ROOT"/code/sup/dp_decide.c "$B/"
-RT=$ROOT/code/lang/internal/runtime/assets
+RT=$ROOT/code/runtime
 cp "$RT"/rt.h "$RT"/rt_core.c "$RT"/rt_http.c "$RT"/rt_blob.c "$RT"/rt_ver.c "$B/"
 cp "$ROOT"/code/sup/dp_cfg.c "$B/"
 

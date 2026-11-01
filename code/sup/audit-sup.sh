@@ -13,7 +13,7 @@
 set -eu
 
 # 用户代码不该直接碰的东西：配置读取、进程、原始 socket、裸文件与目录操作。
-# （运行时 rt_*.c 合法地使用它们，所以只审计用户 TU —— 边界记在 SPEC §0.8.4 E4。）
+# （运行时 rt_*.c 合法地使用它们，所以只审计用户 TU —— 边界见 docs/SPEC.md §5。）
 DENY='getenv environ setenv unsetenv system popen pclose execl execlp execle execv execvp fork vfork socket socketpair bind connect listen accept send sendto recv recvfrom open openat read write unlink rename mkdir rmdir chdir'
 
 if [ "$#" -eq 0 ]; then

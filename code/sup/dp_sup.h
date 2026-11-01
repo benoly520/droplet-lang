@@ -1,4 +1,4 @@
-/* Droplet 超集层（SPEC §0.8）。v0.31 起兑现"超集"这两个字的字面意思：
+/* Droplet 超集层。这里有"超集"两个字的字面意思：
  *
  *   **任何合法的 C11 程序，在把本层放进搜索路径之后，仍然编译、仍然按 C 的语义运行。**
  *
@@ -13,7 +13,7 @@
  * 都必须在符号表里留下名字，改不了。兼容性实测见 code/sup/compat-sup.sh。
  *
  * 代价也记账（不是免费）：检查从"编译器现场"挪到"构建之后"，
- * 绕开 build.sh 直接 cc 就绕开了审计 —— 记 SPEC §0.8.4 E7。
+ * 绕开 build.sh 直接 cc 就绕开了审计 —— 见 docs/SPEC.md §5 的 E7。
  *
  * 用法（唯一形态，见 code/sup/blobd.c）：
  *     #define DP_ROUTES(X) X("GET", "/health", h_health, DP_OK_JSON, DP_AUTH_PUBLIC, \

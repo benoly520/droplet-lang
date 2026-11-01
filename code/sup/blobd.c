@@ -1,11 +1,10 @@
-/* Droplet 超集形态的旗舰服务（SPEC §0.8）：合法 C11 + 三张声明表。
+/* Droplet：旗舰服务。合法 C11 + 四张声明表，没有任何自定义前端。
  *
- * 与 code/webapi 下 .dlt 那套的关系：同一张 wire 契约，两种介质。这一版是 v0.30 改判后的
- * 主形态；.dlt 那套仍在仓库里作为对照与待删候选（docs/NEXT.md P18）。
+ * 这是仓库里唯一的服务实现（原来那门自造语言已删除，理由见 docs/SPEC.md §2）。
  *
  * 本文件里**一个状态码数字都没有**，一个环境变量名都不出现（配置名只住在 dp_env.h 表里），
  * 而且**一次 getenv 都不写**：写了会被构建后的符号审计抓住，不再是靠宏改名。
- * P16 那个 bug（同一 key 连 POST 两次回 201）在这里由 dp_created() 的构造排除。
+ * "同一 key 连 POST 两次回 201"那个 bug 在这里由 dp_created() 的构造排除。
  */
 #include <stdio.h>
 #include <string.h>

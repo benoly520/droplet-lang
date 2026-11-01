@@ -1,13 +1,9 @@
 #!/bin/sh
-# 超集侧的机械变异（v0.32 / P18 第 1 条的后半）：把 `droplet verify` 的算子搬到
-# 超集形态的纯决定上，看同一批样例够不够抓住。
+# 机械变异：把算子作用在 dp_decide.c 上，看同一批封闭样例够不够抓住。
+# 关键不在算子多，而在**验的是服务真正链接的那一份**（不是抄本）。
+# 数字记在 docs/VALIDATION.md。
 #
-# 对照的三个数（都记在 docs/VALIDATION.md）：
-#   droplet 侧（语言版 intents.dlt）：6 处变异 / 0 处没被抓住；
-#   C 对照组（mutate-c.sh）：8 个算子 → 6 个程序，样例抓 5，`-Werror` 抓 6 —— 与语言侧打平；
-#   本脚本：算子作用在 dp_decide.c 上，**验的是服务真正链接的那一份**（不是抄本）。
-#
-# 三条口径，用的是本轮那次假绿换来的教训（SPEC §0.8.2）：
+# 三条口径（来自一次假绿换来的教训）：
 #   ① 每个变异都断言**预期结局**，实际不符就报"误报"并整轮失败 —— 不许"反正红了就算抓住"；
 #   ② 锚点必须唯一（count == 1），否则整轮失败 —— 防止把"根本没碰到目标函数"的假变异当发现；
 #   ③ 先跑干净参照，它必须全绿；参照挂了则本轮结论作废。
@@ -24,7 +20,7 @@ rm -rf "$B"
 mkdir -p "$B"
 
 cp "$ROOT"/code/sup/dp_decide.h "$ROOT"/code/sup/dp_decide.c "$ROOT"/code/sup/dp_oracle.c "$B/"
-cp "$ROOT"/code/lang/internal/runtime/assets/rt.h "$B/"
+cp "$ROOT"/code/runtime/rt.h "$B/"
 
 echo "== 干净参照 =="
 if ! cc -std=c11 -O2 -Wall -Wextra -Werror -I"$B" -c "$B/dp_decide.c" -o "$B/decide.o" \

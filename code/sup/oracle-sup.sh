@@ -1,12 +1,11 @@
 #!/bin/sh
-# 超集侧的样例 oracle（v0.32 / P18 第 1 条）：把 DP_EXAMPLES 当成可执行证据跑起来。
+# 样例 oracle：把 DP_EXAMPLES 当成可执行证据跑起来。
 #
-# 这一步补的是超集形态唯一缺的语言能力 —— `droplet verify` 的"封闭样例当 oracle"。
-# 与被对照实验否掉的那版（docs/validation/c-control/intent_c.c + decisions.c）的
-# 唯一区别是**验的是哪一份代码**：那份是运行时条件的手抄，这里链接的是
-# dp_decide.c —— 服务里的 dp_created() 与 dp_load_port() 调的就是它。
+# 这一步补的是"封闭样例当可执行证据"：样例不是给人看的例子，是会红会绿的判据。
+# 唯一要紧的是**验的是哪一份代码**：这里链接的是
+# dp_decide.c —— 服务里的 dp_created() 与 dp_load_port() 调的就是它（接线检查在守）。
 #
-# 三条口径（与 verify / explore 对齐，写在 SPEC §0.8.6）：
+# 三条口径（写在 docs/SPEC.md §4）：
 #   ① 逐条报 ok / FAIL，不汇总成"通过"；
 #   ② 一条样例都没有 = 整轮失败（没有证据不算证据）；
 #   ③ 一条样例一个进程：崩溃只丢这一条，且崩溃单列，不当成通过。
@@ -21,7 +20,7 @@ export TMPDIR=$ROOT/.build
 rm -rf "$B"
 mkdir -p "$B"
 
-RT=$ROOT/code/lang/internal/runtime/assets
+RT=$ROOT/code/runtime
 FLAGS="-std=c11 -O2 -Wall -Wextra -Werror"
 
 cp "$ROOT"/code/sup/dp_decide.h "$ROOT"/code/sup/dp_decide.c "$ROOT"/code/sup/dp_oracle.c "$B/"

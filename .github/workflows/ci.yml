@@ -1,14 +1,16 @@
 name: CI
 
-# 三档，各管一件事：
-#   floor —— 用 go.mod 声明的下限（1.22）编一遍、跑全部用例。任何 1.23+ 的 API 混进来，
-#            或有人顺手把 go 指令抬高，这一档立刻红。GOTOOLCHAIN=local 保证它**不会**
-#            偷偷去下载新工具链来"修好"自己。
-#   latest —— 用最新稳定版编一遍，守前向兼容（新版本引入的编译错误/deprecation 先看见）。
-#   sup     —— 超集形态（code/sup）只靠 cc，不经过 code/lang。它测的是"这一层能不能自己站住"：
-#            兼容性、符号审计、接线检查、样例 oracle、变异、24 断言表（与语言版共用）、11 条破坏测试。
+# 一档：这个仓库现在只有一个介质 —— 合法 C11 加声明表，纯 cc，不依赖任何自定义前端。
+# 这条流水线跑的就是"结果能不能被验收"：
+#   compat   合法 C 在无本层/有本层两种口径下都要编得过且输出一致（超集的字面判据）
+#   build    编用户 TU → 符号审计 → 接线检查 → 链接（任何一步红就停）
+#   oracle   DP_EXAMPLES 的封闭样例，一条一个进程
+#   mutate   对纯决定做机械变异，逐条断言预期结局与归因
+#   accept   24 条 wire 断言（服务对外的承诺）
+#   contract DP_GOALS 与断言编号对账（目标是否都被证明、断言是否都有归属）
+#   sabotage 11 条破坏测试，每条必须由具体工具以具体诊断抓住
 #
-# soak.sh 仍不在这里：它要长时间常开的机器。accept*.sh 用一次性临时端口，可以进来。
+# soak.sh 不在这里：它要一台长时间常开的机器。
 
 on:
   push:
@@ -20,58 +22,8 @@ permissions:
   contents: read
 
 jobs:
-  floor:
-    name: Go 1.22（工具链下限）
-    runs-on: ubuntu-latest
-    env:
-      GOTOOLCHAIN: local
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22.x'
-          cache: false
-      - name: 报告实际工具链
-        run: go version
-      - name: go build
-        working-directory: code/lang
-        run: go build -o "$RUNNER_TEMP/droplet" ./cmd/droplet
-      - name: go vet
-        working-directory: code/lang
-        run: go vet ./...
-      - name: go test
-        working-directory: code/lang
-        run: go test ./...
-      - name: accept（HTTP 契约验收，测的是 wire）
-        run: sh code/webapi/deploy/accept.sh
-
-  latest:
-    name: Go latest（前向兼容）
-    runs-on: ubuntu-latest
-    env:
-      GOTOOLCHAIN: local
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: 'stable'
-          cache: false
-      - name: 报告实际工具链
-        run: go version
-      - name: go build
-        working-directory: code/lang
-        run: go build -o "$RUNNER_TEMP/droplet" ./cmd/droplet
-      - name: go vet
-        working-directory: code/lang
-        run: go vet ./...
-      - name: go test
-        working-directory: code/lang
-        run: go test ./...
-      - name: accept（HTTP 契约验收，测的是 wire）
-        run: sh code/webapi/deploy/accept.sh
-
   sup:
-    name: 超集形态（code/sup，纯 cc）
+    name: 超集（纯 cc）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -83,9 +35,9 @@ jobs:
         run: sh code/sup/oracle-sup.sh ci-oracle
       - name: 决定层变异测试
         run: sh code/sup/mutate-dec.sh ci-mutate
-      - name: 24 条断言验收表（与语言版同一张）
+      - name: 24 条断言验收表
         run: sh code/sup/accept-sup.sh "$GITHUB_WORKSPACE/.build/ci-sup/blobd" 18951 ci
-      - name: 契约对账（默认读那张共用的断言表）
+      - name: 契约对账（目标 ↔ 断言编号）
         run: python3 code/sup/contract-sup.py "$GITHUB_WORKSPACE/.build/ci-sup/blobd"
       - name: 破坏测试（每条断言归因到具体工具）
         run: sh code/sup/sabotage-sup.sh 18960

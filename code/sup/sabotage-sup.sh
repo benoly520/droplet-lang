@@ -1,5 +1,5 @@
 #!/bin/sh
-# 超集形态的破坏测试（docs/NEXT.md P16 的验收标准）：每个破坏动作期望"某个工具红"。
+# 破坏测试（docs/SPEC.md §6 的判据）：每个破坏动作期望"某个工具红"。
 #
 # 这一版比上一版多一道规矩：**每条都要断言是哪个工具抓的**。上一版里 S3/S7/S8 其实是因为
 # 注入的代码少了 #include <stdlib.h> 而编译失败，却被报告成"符号审计抓住了"——那是
@@ -10,7 +10,7 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 PORT0=${1:-18900}
-RT=$ROOT/code/lang/internal/runtime/assets
+RT=$ROOT/code/runtime
 B=$ROOT/.build/sabotage
 export TMPDIR=$ROOT/.build
 rm -rf "$B"; mkdir -p "$B"
@@ -159,7 +159,7 @@ then report_miss 5 "删掉断言 #20"; else
   report_caught s5 5 "contract-sup.py" "从验收表里删掉断言 #20（create_once 失去证明）"
 fi
 
-# ---- S6：把 P16 那个 bug 塞回决定层（"已存在"不再报 Conflict） ----
+# ---- S6：把"已存在也报成功"那个 bug 塞回决定层 ----
 # v0.32 起这个 bug 住在 dp_decide.c，所以同一个破坏会被**两个**工具各自抓住：
 # 样例 #2 在单元级翻面，断言 #20 在 wire 级翻面。两个都必须红，只红一个算归因不全。
 prep
@@ -168,7 +168,7 @@ import sys
 b = sys.argv[1]
 s = open(b + "/dp_decide.c", encoding="utf-8").read()
 s = s.replace("  return fresh ? 0 : (int)DP_ERR_CONFLICT;",
-              "  (void)fresh; return 0; /* 把 bool 丢掉：P16 的原始错误回来了 */")
+              "  (void)fresh; return 0; /* 把 bool 丢掉：原始错误回来了 */")
 open(b + "/dp_decide.c", "w", encoding="utf-8").write(s)
 PY6
 grep -q '(void)fresh' "$B/dp_decide.c" || { echo "S6 注入失败：dec_create_result 的写法变了，脚本要跟着改" >&2; exit 1; }

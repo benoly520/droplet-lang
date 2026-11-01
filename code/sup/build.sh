@@ -1,5 +1,5 @@
 #!/bin/sh
-# 超集形态的构建：合法 C11 + 声明表，纯 cc，不经过 code/lang（H8 的 7 行余量一行不动）。
+# 超集形态的构建：合法 C11 + 声明表，纯 cc。运行时是 code/runtime 的共享 C，不是语言生成的。
 #
 # v0.31 起这一步分三段，顺序是有意义的：
 #   1) 用户 TU 单独编成 .o（这样才看得见它引用了哪些外部符号）；
@@ -17,7 +17,7 @@ B=$ROOT/.build/$LABEL
 export TMPDIR=$ROOT/.build
 mkdir -p "$B"
 
-RT=$ROOT/code/lang/internal/runtime/assets
+RT=$ROOT/code/runtime
 cp "$RT"/rt.h "$RT"/rt_core.c "$RT"/rt_http.c "$RT"/rt_blob.c "$RT"/rt_ver.c "$B/"
 cp "$ROOT"/code/sup/dp_sup.h "$ROOT"/code/sup/dp_conf.h "$ROOT"/code/sup/dp_cfg.c \
    "$ROOT"/code/sup/dp_env.h "$ROOT"/code/sup/dp_decide.h "$ROOT"/code/sup/dp_decide.c \
@@ -35,8 +35,8 @@ cc -std=c11 -O2 -Wall -Wextra -Werror -I"$B" -c "$B/dp_cfg.c" -o "$B/dp_cfg.o"
 # 它的 .o 也进审计：拆 TU 不再是"绕开检查"的办法（E2 的一半在这里被抵掉）。
 sh "$B/audit-sup.sh" "$B/blobd.o" "$B/dp_decide.o"
 
-# 服务必须**真的引用**那些被样例覆盖的决定，否则 oracle 验的又是一份复制品
-# —— 对照组输掉的就是这一点（VALIDATION §7.3 ③），这里用符号表把它变成可失败的检查。
+# 服务必须**真的引用**那些被样例覆盖的决定，否则 oracle 验的又是一份复制品。
+# 这里用符号表把"同一份"变成可失败的检查。
 # 这条不看源码文本：改名改不掉，引用关系在 .o 里。
 # 每个被样例覆盖的决定都要一对：谁的 .o 必须引用它。漏一个就是漏一条口子。
 for PAIR in "blobd.o dec_create_result" "dp_cfg.o dec_port_usable"; do

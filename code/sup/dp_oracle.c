@@ -1,6 +1,6 @@
-/* Droplet 超集：样例 oracle 的执行器（机制所有，v0.32 / P18 第 1 条）。
+/* Droplet：样例 oracle 的执行器（机制所有）。
  *
- * 把 DP_EXAMPLES 展开成逐条求值。与 `droplet verify` 对齐的四条纪律：
+ * 把 DP_EXAMPLES 展开成逐条求值。四条纪律：
  *   ① 每条样例都报 PASS / FAIL，不汇总成"通过"；
  *   ② 零条可执行样例 = 未通过（没有证据不等于有证据）。空表在 C11 里本就编不过，
  *      所以真正的门禁在 oracle-sup.sh：`--list` 出 0 行即整轮失败；

@@ -1,101 +1,81 @@
 # Droplet
 
-<p align="left"><strong>English</strong> · <a href="README_CN.md">简体中文</a></p>
+**A C superset for AI-written services: the source is valid C11, the declarations are tables,
+and the checks fail when the implementation drifts from what was declared.**
 
-A server-side programming language **designed for AI-generated, human-maintained services**.
+The division of labour this is built around:
 
-More precisely: **the enabling layer for a generate-and-verify paradigm** — where a program is not written but *selected* as the proven solution among many candidates, and the human's job shifts from writing implementations to stating intent.
+| Actor | Does | Does not |
+| --- | --- | --- |
+| AI | writes the implementation and the declarations, runs the checks | explain itself, certify itself |
+| Compiler / build script / checkers | fail the build or the acceptance run when something is wrong | judge whether the business logic is right |
+| Human | accepts the result: does it run, is the table green, does breaking it turn something red | read the implementation line by line |
 
-Droplet optimizes for one thing above all: **making AI mistakes impossible to keep silent, and making verification cheap enough that an agent will actually run it.** Not "a safer, more abstract, more elegant language" — a language where errors cannot stay hidden, checks finish in milliseconds, and the runtime is light enough to fit on the smallest production instance.
+So the deliverable is not syntax — it is **a chain of failing checks from a declaration to the
+running binary**. If you cannot make it fail, you have not checked anything.
 
-> Status: **D0 implemented, D1–D3 complete** — D1 landed sum variant values (`T.V` / `T.V { … }`), flattened `entry`, runtime-derived ETags, and typed `env` configuration (an `env App { … }` block becomes a record the handler receives as `cfg`; a missing required key fails at startup and source never spells an environment-variable name). D2 removed the `Response` record entirely: **success is a value** — an entry returns `bytes` (with a body) or `Unit` (without), a bare `return` means the return type's unit value, and HTTP status codes live only in the error-variant → status table (`NotFound`→404, `NotAllowed`→405, `PreconditionFailed`→412, …). Writing `Response{status: 200, body: X}` is now a `check`-time `E1` telling you it *is* `X`. D3 made `boundary` the single source of the HTTP face: methods carry `@<verb>("/path") impl <fn>`, the route table *is* the service entry (a bare `entry` next to routes is an error), and every write route must state its precondition — `with precondition` or `without precondition: "reason"`, silence is a compile error. Generated guards call the runtime's single `dp_precondition_check`, so the 22-line If-Match block that used to live in the HTTP layer is gone. Success codes are projected from declarations too — `@created` → 201, `@no_content` → 204, default 200, and the number never appears in source (a 204 must be declared on a `Unit` success type, and the runtime omits `Content-Length` for it per RFC 7230). A 95-line example service (contract + handler) compiles to a C11 binary that boots in under 2 MB RSS and speaks HTTP/1.1; 142 Go tests cover lexer, parser, checker, generator, host-capability signatures, runtime dead-code audit, error-tag/runtime agreement, contract export, the expression printer (a canonical form that re-parses to the same AST, now used to export `requires` / `example` expressions into the contract), and the static half of `E10` — intent expressions are type-checked, constant-decided (a tautology is an empty declaration, a contradiction is unreachable), and `requires` is checked at call sites whose arguments are constants. `droplet verify` turns closed `example` clauses into an executable oracle: each one is compiled into a throwaway binary and reported PASS / FAIL / skipped-with-reason, and "no runnable example" counts as failure rather than success. The same driver then mutates the implementation mechanically on two axes — constants ±1 and boundary flips on expressions, branch bodies cleared and guard returns deleted on statements — and attributes each change to the example that caught it (`CAUGHT`) or reports `MISS` when no example constrains that position; the tool exits non-zero on a surviving mutant, but never blocks the build. Two classes are deliberately *not* implemented (effect injection, write deletion): they need to observe that a capability call or a write really happened, and the tool has no such channel — building them would turn it into a service runner. `droplet explore` then goes the other way round: given several candidate implementations of the same intent, it runs each one against the same examples, aligns them by the canonical form of the example expression, and reports the survivors, the examples where candidates disagree, and — when nothing survives — which example rejected whom. More than one survivor is a failure (judgement A: the tool never picks one for you). As of v0.27 the repository has its first executable intent outside test fixtures: `code/webapi/intents.dlt` is a route-free intent model (two of the service's goals reduced to pure predicates, six `example` clauses — `requires_auth` written as a full truth table mirroring `rt_http.c`), guarded by `TestWebapiIntentsAreExecutable` in CI; measured result: 6 of 6 cases executable, 6 of 6 mutants caught. Its scope is stated rather than blurred: it verifies an *extraction*, not `src/contract.dlt` — the service itself still cannot be verified, because `verify` refuses any program that has routes (`internal/verify/verify.go:69`) and never collects `example` clauses written on `boundary` methods. As of v0.29 there is also a **control group**: the same service rewritten directly in C, with no language in between (artifacts in `docs/validation/c-control/`, findings in VALIDATION §7 and SPEC appendix D.10). Three of the four disciplines favour the language — silence cannot be a decision (deleting the 7-line If-Match guard in C passes `-Wall -Wextra -Werror` and fails only 1 of 19 assertions), closure is structural rather than pattern-matched (a 45-line reconciler catches an undeclared environment read, but one ordinary refactor that builds the name with `snprintf` defeats it), and obligations and implementation live in two different media (an external change diffs 1 line of `boundaries`, a pure refactor diffs 0); the fourth is a **tie** — C plus examples plus `-Werror` reaches the same 6/6 mutation coverage. And the control group won the important round: the contract declares `invariant "POST only succeeds when the key is absent"`, yet the language-built service answers **201 / 201** to two POSTs of the same key (`main.dlt` discards the `bool` from `fs.create(...)!`) while the hand-written C answers **201 / 409**. SPEC §5.10-3 is therefore reclassified from "not implemented" to "refuted by our own flagship service", tracked as **P16**, now first in line together with P12. v0.30 changes direction on the strength of those results: **this project is a superset of C, not a new language** (SPEC §0.8 — four rounds of the author's questions, plus two accounts nobody had written down: birth cost (`new tokens × frequency × anchors`) is near zero on the superset route while H1 has never been measured, and only one of the teaching surface and the checking surface can be made small). The new form lives in `code/sup/`: the source is valid C11 (`cc -std=c11 -Wall -Wextra -Werror` compiles it directly) and the superset is just three declaration tables (routes / environment / goals) — 224 lines of mechanism, no runtime change, and `code/lang` untouched (H8 still 7993/8000, 7 lines spare, 142 tests). Both media were run against the same 21-assertion table: the superset **21 pass / 0 fail**, the language-built service **20 pass / 1 fail** (#20 is the round described above). The sabotage suite catches **all seven cases (S1–S7), zero false negatives** — drift between table and implementation in either direction is caught by the compiler (`-Wunused-function`, `used but never defined`), undeclared environment reads by a macro that renames `getenv` at compile time (concatenated names fail too, because the macro rewrites the *symbol*, not the string), and a goal citing an assertion that does not exist is caught by `contract-sup.py`. For the first time the path from a declared goal to a running implementation has a tool at both ends. Costs and holes are recorded as measured: the service grew from 95 to 133 lines (the extra 38 are all "why this route has no precondition" and "which assertion proves this goal"); `#undef getenv`, making a handler non-`static` or splitting into a second translation unit, and `extern char **environ` remain open escape hatches (E1 / E2 / E6); the language form's two unfixed items are handled together with P18. The "take route A" decision made the previous day in §0.7.5 is retired in place, and the 4727 lines of the `.dlt` front-end are listed as recoverable — but only after `verify` / `explore` / mutation are rebuilt inside the superset (P18). v0.31 makes good on the word *superset*, after the author asked whether the layer really was one and a measurement said **no**: the macro at the bottom of `dp_sup.h` renamed `getenv` into a symbol that does not exist, so an ordinary C11 program failed to compile as soon as the layer sat on its include path — by definition an incompatible extension. That macro is gone, and the claim is now a rerunnable gate: `compat-sup.sh` builds three legal C11 programs (covering `_Generic`, compound literals, `_Static_assert`, anonymous unions, VLAs, designated initializers, `malloc`, old-style `main()`, variadic macros, `goto`) with and without the layer on the search path and requires identical output, plus a probe that `#include`s the layer and calls `getenv` the normal C way — **5 pass / 0 fail**. Undeclared effects are still caught, just in a different place: every line that reads the environment now lives in one mechanism translation unit (`dp_cfg.c`), and `audit-sup.sh` fails the link if the user's object file pulls in `getenv` / `environ` / `exec*` / `socket` / `unlink` / … without declaring them. The same 21-assertion table is still **21 pass / 0 fail**, ASan+UBSan included, and the sabotage suite grew from seven cases to **nine, all caught, with attribution**: two escape hatches closed this way (reading libc's real names, `extern char **environ`), two new ones opened and recorded rather than glossed — bypassing `build.sh` bypasses the audit (E7), and `dlopen` + `dlsym("getenv")` resolves at runtime where `nm -u` cannot see it (E8). The round also caught a false green inside its own harness: three "caught" cases had really only failed to compile because the injected code was missing `#include <stdlib.h>`; every sabotage now asserts *which tool* caught it *with which diagnostic*, keeps the build log, and fails the whole run if that diagnostic is absent. `code/lang` is untouched again (H8 still 7993/8000, 142 tests), the language form still fails #20 (recorded in D0), and this round did **not** shrink the teaching surface — H1 remains unmeasured (P7). v0.32 closes the one capability the superset form did not have (P18 item 1), after the author asked whether the older form could now be deleted — the answer measured against the repo’s own criterion is *not yet*, and nothing was deleted. `code/sup/` gains a fourth table, `DP_EXAMPLES`: two pure decisions (`dec_create_result` — error first, then “already exists” → Conflict; `dec_port_usable` — 1..65535), declared with seven closed examples in `dp_decide.h` (45 lines, user-owned), implemented in `dp_decide.c` (18 lines), executed by `dp_oracle.c` (92 lines, one X-macro expanded twice into id / call / want / why). The three rules are copied from `droplet verify` without loosening: report each row separately, zero runnable examples is a failure, one example per process (a crash costs that row alone and is listed as a crash, never as a pass). What actually differs from the C control group is the interesting part: there, the examples graded a hand copy of the runtime’s conditions (VALIDATION §7.3-③ — the copy was verified, the original shipped). Here the decision was *moved*, not copied — `dp_sup.h`’s `dp_created()` and `dp_cfg.c`’s `dp_load_port()` call the same object the oracle links, and `build.sh` refuses to link unless the symbol table agrees (`nm -u`: `blobd.o` must reference `dec_create_result`, `dp_cfg.o` must reference `dec_port_usable`). Measured: oracle **7 rows / 7 pass / 0 fail / 0 crash**; `mutate-dec.sh` **8 mutants → 5 caught by examples, 1 caught at compile time by `-Werror`, 2 recorded as MISS** (equivalent mutants, judged by hand and labelled as such rather than converted into a win); sabotage suite 9 → **11 cases, all caught** — S6 now demands the P16 bug turn red twice, at unit level (example #2) *and* on the wire (assertion #20), and S10/S11 exist because the new table opened a new hatch: **E9**, re-inlining a decision at its call site so the examples grade a copy nobody runs. S11’s injected variant is behaviourally identical and still passes all 21 assertions — only the wiring check sees it. Costs as measured: user surface 143 → **206 lines**, `code/sup` 1098 → **1550 lines**, and H1 gained another term while still never being measured. Compatibility is still **5 pass / 0 fail**, the 21-assertion table is still **21 / 0** (ASan+UBSan included), the language-built service still fails #20, `code/lang` is untouched (H8 7993/8000, 142 tests). For the first time the whole `code/sup` suite runs in CI, as a third job (`sup`: compat / build / oracle / mutate / accept / contract / sabotage). Still missing: no `explore` counterpart, the 1472 shared runtime lines stay outside the oracle’s reach (auth `rt_http.c:465`, version precondition `rt_blob.c:356`), and P18 items 2–4 are untouched — so the deletion condition is genuinely unmet. v0.33 merges the two acceptance tables into one (P18 item 3, plus the first half of item 4): `code/webapi/deploy/accept-table.sh` (**174 lines / 24 assertions**) is now the only table, and the two media reach it through thin launchers — `code/sup/accept-sup.sh` (19 lines) and `code/webapi/deploy/accept.sh` (27 lines, which builds the `.dlt` binary first). **There is no “which medium is this” branch in the table** — that is the point: while two tables evolved separately, “both media agree” only meant two scripts happened to print the same thing. Nothing was dropped in the merge, and three former `echo` lines became real assertions: **#22** snapshots == 3, **#23** four successful writes == four commits, **#24** the listing holds three keys and comes from the directory. That turned the one goal still marked unproven into a proven one (`snapshot_before_write`) and added `commit_per_write`, moving the contract from **13 goals / 1 unproven / 0 orphans** to **14 / 0 / 0**. The merge also forced a real fix: the language form would finally run #20, which had answered 201 since v0.30; instead of exempting it (which would reintroduce a medium branch), `main.dlt` now consumes the `bool` from `fs.create(...)` and returns `Conflict` when it is false. Measured: superset **24 / 0**, language **24 / 0**, ASan+UBSan **24 / 0**, sabotage **11 caught / 0 false negatives**, contract rc=0, compatibility **5 / 0**, oracle 7/7/0/0, mutation unchanged; `.dlt` sources 95 → 100 lines and `code/lang` untouched (H8 7993/8000, 142 tests). **#20 going green is not P16 solved** — putting `fs.create(...)!` back still compiles and still answers 201; what catches it today is the assertion table (after the fact), not the language (before it), so P16 stays open. The first CI run caught something the local machine never did: the `latest` job's language form passed 23 but failed #23 with three commits, and `srv.log` held `fatal: cannot lock ref 'HEAD'` — the runtime spawns the commit command concurrently (`DP_COMMIT_DEBOUNCE=0`), so four `git commit`s raced for the same ref lock and the loser vanished silently. Fixed the same day by making `DP_COMMIT_CMD` a `flock`-serialised script and widening the poll window from 3 s to 10 s; **#23 still demands exactly 4**. Still missing: P18 item 2 (the contract JSON's four sections) and an `explore` counterpart — the deletion condition is still unmet, though one objection to it is gone. The `parse` verb and its AST-JSON package were deleted in v0.23 to buy back size budget (271 lines: the projection had no consumer, and the guards it carried covered its own fallback path); the trade-off is recorded in IMPL-PLAN §8.6. On top of that it now generates the inputs the source never declared: for every u64 / i64 / bool parameter it builds a boundary value pool, varies one parameter at a time from a non-zero base, evaluates each candidate on the same inputs, and reports counterexample pairs (`pct(1, 0) → a crashes, b returns 0`). Each input runs in its own process so a division-by-zero or a stack overflow costs one input instead of the batch, and a crash is itself a comparable result; probe units are compiled at -O0 because at -O2 the compiler folds the call into the switch and is free to optimise undefined behaviour into any value. The remaining gaps are stated rather than glossed over: numeric and boolean arguments only, scalar returns only, one parameter varied at a time, and no randomness. The implemented language is still a deliberate subset of the design — every gap (opaque secrets, feature-flag lifetimes, …) carries a reason and a fill-in milestone in [docs/D0-DEVIATIONS.md](docs/D0-DEVIATIONS.md). Full proposal: [docs/SPEC.md](docs/SPEC.md) (Chinese). Where things stand and what is next: [docs/NEXT.md](docs/NEXT.md).
+## Status
+
+One medium. The former bespoke language (its own lexer, parser, checker, generator — 4727 lines of
+`.dlt` front-end) was removed: measured against a hand-written C control group it did not win the
+one comparison that mattered (turning a declared goal into something that fails when the
+implementation violates it), and its own flagship service violated its own declared invariant.
+The superset form kept the part that did work. Everything under `code/` is C11 plus shell/Python.
 
 ## Quick start
 
+Needs `cc` (C11), `sh`, `python3`, `git`, `flock`, `curl`. No Go, no code generator.
+
 ```sh
-mkdir -p .build
-(cd code/lang && go build -o ../../.build/droplet ./cmd/droplet)
-
-# smallest closed loop: source → C → binary → stdout
-.build/droplet build code/lang/examples/hello.dlt -o .build/hello && .build/hello   # world
-
-# the example service: contract + handler → binary → HTTP
-.build/droplet contract code/webapi/src/contract.dlt code/webapi/src/main.dlt      # JSON contract + variant tags
-.build/droplet build    code/webapi/src/contract.dlt code/webapi/src/main.dlt -o .build/blobd
-mkdir -p .build/data    # APP_ROOT is required (no default) and must already exist; missing either → the server exits at startup
-APP_ROOT=.build/data APP_TOKEN=t .build/blobd &
-curl -s -X PUT -H 'Authorization: Bearer t' --data 'hello' localhost:8787/v1/blob/demo
-curl -s        -H 'Authorization: Bearer t' localhost:8787/v1/blob/demo              # hello
+sh code/sup/build.sh sup                       # compile user TUs -> symbol audit -> wiring check -> link
+sh code/sup/accept-sup.sh "$PWD/.build/sup/blobd" 18880 sup   # 24 wire assertions
 ```
 
-`sh code/webapi/deploy/accept.sh` runs the 17 boundary checks (412 with an empty body / 204 without Content-Length / 201 / 405 / 413 / 501 / derived ETag …); `sh code/webapi/deploy/soak.sh` is the long-running leak observation.
+Or talk to it directly:
 
-## Core idea
-
-LLMs fail on server code mostly because correctness hides in places the model cannot see: effect-free-looking functions that touch the database, contracts encoded in string tags, errors that may be dropped, state that outlives a request, configuration that only fails at deploy time.
-
-Droplet's answer is to make those facts **visible in the signature and checkable at compile time** — so an agent can find and fix its own mistakes instead of relying on a human reviewer to catch them.
-
-## Hard constraints
-
-| # | Constraint | Target |
-| --- | --- | --- |
-| H1 | Teaching surface (spec + all rules + core API, machine-readable) | ≤ 2000 tokens — **so the language needs no retraining** |
-| H2 | Core keywords | ≤ 14 |
-| H3 | Core primitives | ≤ 24 |
-| H4 | Idle-service RSS in production | ≤ 3 MB |
-| H5 | Idle CPU / per-request overhead | ≤ 0.5% of one core / ≤ 2 µs |
-| H6 | **Marginal** memory cost per added route / task | reported by `droplet mem`, budgeted in CI |
-| H7 | **Repeated-writing budget**: the same field of a record literal written with the same constant ≥3 times, or the same keyword-and-brackets-only line ≥3 times | 0 occurrences — a gap in *syntax*, not in docs |
-| H8 | **Implementation-size budget**: lines per source file; compiler (excl. tests) + embedded runtime | ≤ 800 lines per file; ≤ 8000 lines total |
-
-H1 and H4–H8 squeeze the language from both sides (see SPEC §9 for the full mechanism-level reduction list and CI gates): one limits **how much you must teach the model**, the others limit **how much you may hide in the runtime — and how much each new feature adds to it**. A 3 MB idle service that balloons to 80 MB after 20 routes has not met the budget; the real bill is `routes × marginal bytes × instances`. Both disciplines point the same way — an invisible mechanism is invisible precisely because it decides something for you at runtime, and every decision costs memory. **What AI cannot verify is usually also what costs the most.**
-
-H7 and H8 close the remaining two loopholes: H7 makes verbosity a *compiler* error (fix the syntax, don't add a doc section), and H8 keeps the verifier itself small enough to be read and repaired by an agent — a checker nobody can read only certifies trust.
-
-## Paradigm (SPEC §0)
-
-Past paradigms all optimise one scarce resource: **human comprehension bandwidth**. Abstraction, encapsulation, design patterns, type systems — all of them are "save human brain" designs. The cost structure has flipped: **candidate code is nearly free, verification is the bottleneck.** Droplet's role is to make the new loop affordable:
-
-```
-intent (properties + contracts + boundary + examples)
-   → candidates (AI, many, random)        ← randomness lives ONLY here
-   → verifier (types / effects / resources / properties / replay / mutation)
-   → survivor(s) → deterministic, human-readable, diffable source code
+```sh
+mkdir -p /tmp/blobd-data && APP_ROOT=/tmp/blobd-data APP_TOKEN=secret \
+  APP_BIND=127.0.0.1 APP_PORT=8787 .build/sup/blobd &
+curl -s -X POST  -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/keys/demo -i
+curl -s -X PUT   -H 'Authorization: Bearer secret' --data-binary 'hello' http://127.0.0.1:8787/v1/blob/demo -i
+curl -s           -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blob/demo
 ```
 
-Three non-negotiables: the **runtime stays deterministic** (probabilistic semantics would destroy substitutability, the foundation of five decades of programming), the **deliverable stays human-readable**, and **verification stays sub-second**. New composition rule under investigation: property-union + effect-subset + additive resource budget — this, not syntax, is where any originality would live.
+## What is actually checked
 
-In one sentence: **old paradigms were designed to save human brain; the new one is designed for verifiability; and the new one cannot run *unless* a language makes intent a first-class construct, makes verification millisecond-cheap, and makes the runtime small enough for the smallest instance. Droplet is that "unless."**
+| Check | Fails when |
+| --- | --- |
+| table ↔ implementation reconciliation | the table names a missing function (`used but never defined`), or an implementation is not referenced by the table (`-Wunused-function` + `-Werror`) |
+| symbol audit (`audit-sup.sh`) | a *user* translation unit references `getenv` / `environ` / `socket` / `open` … without declaring it |
+| wiring check (`build.sh`, `nm -u`) | the service no longer references a decision that `DP_EXAMPLES` grades — i.e. the examples would grade a copy |
+| sample oracle (`oracle-sup.sh`) | any `DP_EXAMPLES` row fails; zero runnable examples counts as failure; a crash is listed, never a pass |
+| mutation (`mutate-dec.sh`) | a mutant survives and is not a hand-judged equivalent |
+| wire assertions (`accept-table.sh`) | any of 24 external promises is broken (status, headers, body, snapshot, commit) |
+| contract reconciliation (`contract-sup.py`) | a goal cites an assertion number that does not exist, or a goal is left unproven (`""` is an explicit admission) |
+| sabotage (`sabotage-sup.sh`) | one of 11 injected defects is *not* caught by a named tool with a named diagnostic |
 
-**Convergence rule (decided, SPEC §7.8.3):** if the surviving candidates differ in externally observable behaviour, the build **fails** (`E12`) and a human adds a constraint. The language deliberately provides **no** way to auto-pick a candidate — no `strategy: minimal`, no default, no last-known-good fallback — because automatic convergence would turn required intent into optional documentation, and the whole enabling layer with it. Exploration is served by `droplet explore`, whose output is explicitly not a releasable artifact. The honest cost of this choice — under-specification becomes *the human's* new bottleneck — is measured, not argued away (`E12` frequency and average time-to-constrain are §11.3 metrics, and a falsification path for claim P-D).
+The last row is the important one: it checks the checkers. A "caught" that is really a compile error
+from a broken injection is a false green, and this suite exists because that happened once.
 
-**Honest caveat (SPEC appendix C):** the draft audited itself for inherited assumptions and found three structural ones it had never questioned — *programs are text*, *functions are the unit of thought*, *deployment is not a language concern*. Two of them are open experiments (V1 state-machine-first, V2 AST-identity diffs) that must run before the core is frozen.
+## Layout
 
-## Design pillars
+```
+code/sup/            the superset: four declaration tables, the flagship service, every check
+  blobd.c            DP_ROUTES + DP_GOALS — 125 lines, user-owned
+  dp_env.h           DP_ENVS — 18 lines, user-owned
+  dp_decide.h/.c     two pure decisions + DP_EXAMPLES — 62 lines, user-owned, linked by the service
+  dp_sup.h dp_cfg.c dp_conf.h dp_oracle.c   mechanism, 344 lines
+code/runtime/        the service runtime, 1472 lines of C (rt_core / rt_http / rt_blob / rt_ver)
+code/webapi/deploy/  24-assertion acceptance table, soak, systemd unit, env example
+docs/                SPEC (what this is), VALIDATION (measured numbers), NEXT (handoff)
+```
 
-- **No escape hatches** — no `any`/`as`/`unsafe`/`#[allow]` equivalents. An agent optimizing for "make the build pass" will systematically abuse any exit that exists.
-- **Effects in the signature** — what a function can touch (which database, which external host, the clock) is a type-level fact; no ambient authority, no global `fetch`, no implicit environment reads.
-- **Affine types + explicit regions** — resource leaks and transactions that span network calls become compile errors; the same model gives static memory bounds for bare-metal targets.
-- **Boundaries are declared, not assumed** — RPC/queue/HTTP payloads, versions, and idempotency requirements live in one `boundary` construct that generates stubs, handlers, serializers and machine-readable contracts.
-- **Typed configuration and opaque secrets** — a missing key in an environment fails the build, not the pager. Secrets cannot be printed or logged.
-- **Resource budgets are types** — per-request memory caps and cache sizes are checkable facts, which kills unbounded queries and unbounded caches at compile time.
-- **Errors are values that cannot be dropped** — propagate, handle, or record an explicit `ignore(reason)`.
-- **Intent is the input surface, not a comment** — `requires` / `effects` / `cap` / `idempotent` / `invariant` / `example` are checked, mutated against, and used to converge (SPEC §5.10). An `entry` or `boundary` method with no verifiable intent does not compile (`E11`); an intent that catches no mutation is a hard error (`E10`).
-- **Single static binary, no interpreter, no VM, no JIT, no daemon.**
+## Known limits
 
-## Roadmap
+This is a checking surface, not a sandbox. Bypassing `build.sh` bypasses the audit (E7);
+`dlopen` + `dlsym` resolves at runtime where `nm -u` cannot see it (E8); the oracle only reaches
+*pure* decisions, so auth and version preconditions living inside the runtime are covered by wire
+assertions alone. All of it is written down in [docs/SPEC.md](docs/SPEC.md) §5 and
+[docs/VALIDATION.md](docs/VALIDATION.md) §4, including what the green numbers do **not** prove.
 
-| Stage | Deliverable | Gate |
-| --- | --- | --- |
-| S0 | Spec freeze | hard constraints satisfied on paper |
-| S1 | **Semantics validation without a compiler** (checker prototype in a host language + ablation experiments) | first-pass rate beats baseline; false positives < 5% |
-| S2 | Bootstrap: real syntax + C backend + `droplet check`/`mem`/`bench` | real service runs; idle RSS ≤ 3 MB measured |
-| S3 | Minimum usable server stack | non-author users running in production |
-| S4 | Bare-metal backend | "one language from MCU to server" validated |
-
-**S1 is the point of no return**: it tests the central claim — that a small enough language lets AI write correct code without being retrained — before we spend years on a compiler.
-
-## License
-
-MIT © benoly520
+Chinese version: [README_CN.md](README_CN.md).
