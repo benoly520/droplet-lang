@@ -5,20 +5,22 @@
 
 ## 0. 现在在哪
 
-- `main` 上只有一个介质：**合法 C11 + 四张声明表 + 一套检查**（`code/sup/` + `code/runtime/` + 26 条 wire 断言）。
+- `main` 上只有一个介质：**合法 C11 + 四张声明表 + 一套检查**（`code/sup/` + `code/runtime/` + 27 条 wire 断言）。
 - 原来那门自造语言（`.dlt`、编译器 4727 行）**已删除**。理由见 SPEC §2：实测没有赢，且它自己声明的
   invariant 被自己的服务违反。
-- 所有数字都是跑出来的，不是估的：兼容性 5/0、wire 26/0（ASan 同）、oracle 19/19、变异 10 抓 / 2 等价 MISS /
-  1 编译期、破坏测试 14/0、契约 15 目标 / 未证 0 / 孤儿 0；必读面 8,167 token（估算）。
+- 所有数字都是跑出来的，不是估的：兼容性 5/0、wire 27/0（ASan 同）、oracle 19/19、变异 10 抓 / 2 等价 MISS /
+  1 编译期、破坏测试 17/0、契约 16 目标 / 未证 0 / 孤儿 0；必读面 8,197 token（估算）。
 - 首次成功率有了**第一个数**：决定层 3 次独立生成，pass@1=3/3（12/12 样例，首次即过）；
   陌生维护者 1 次：5 文件 / 18 个 +/- 行、`check --full` 全绿。样本极小，见 EXPERIMENT。
 - 三条回路已经是命令：`check.sh`（作者/维护，一条命令一个退出码）、`brief.sh`（题面包）、
   `submit-sup.sh`（提交口）、`report.sh`（人类验收页）。
-- “人不读实现、只验结果”落成四道门：`req/REQ.tsv` + `req-check.py`（条款↔目标↔断言/样例，
-  孤儿 = 红）、`freeze.sh` + `req/FROZEN`（题面哈希，改题必须显式 --update）、
-  `mutation-score.py`（L 26/26 改期望必红；S 20 条实现变异，覆盖 26/26）、
-  `report.sh` 按条款出一页。保证的是“已知错法会被指名抓住 + 改题不会静默通过”，
-  不是“实现 100% 正确”（SPEC §9）。
+- “人不读实现、只验结果”落成五道门（v0.36 起）：最前面是**翻译层** —— `req/SRC.md` 逐句编号、
+  `req/REQ.tsv` 带源句/类型（回归 / 新增 / 缺口）、`req/TRANS.tsv` 记“选了哪种读法、排除了什么、
+  反例是什么”，`req/AMBIG.tsv` 与 `req/GAP.tsv` 里“未定 / 未闭”直接红；`req-check.py --baseline`
+  要求新增条款在旧实现上**先红**（防“把现状抄成需求”）。其后是 `freeze.sh` + `req/FROZEN`
+  （12 项哈希，含 5 份译稿，改题必须显式 --update）、`mutation-score.py`（L 27/27 改期望必红；
+  S 22 条实现变异，覆盖 27/27）、`report.sh` 按条款出一页。保证的是“已知错法会被指名抓住 +
+  改题不会静默通过 + 每次翻译留痕”，不是“实现 100% 正确”（SPEC §9、req/README.md）。
 - **不再做语言扩展**（决定，见 SPEC §2.1）：不加语法、不做编译器分支、不做注解检查器。
   “超集”只保留一条含义：合法 C11 不被拒绝。往后只加检查与覆盖面，不加语法。
 
@@ -66,16 +68,19 @@ python3 code/sup/mutation-score.py --binary .build/check/blobd  # 每条断言�
 ## 3. 一轮工作怎么算完
 
 1. `sh code/sup/build.sh sup` 绿（审计 + 接线）。
-2. `accept-sup.sh` 26/0。
+2. `accept-sup.sh` 27/0。
 3. `contract-sup.py` rc=0，且未证 = 0、孤儿 = 0。
 4. 改了检查或决定：`oracle-sup.sh`、`mutate-dec.sh` 绿。
-5. 改了检查本身：`sabotage-sup.sh` 仍然 14/14，且每条归因正确。
+5. 改了检查本身：`sabotage-sup.sh` 仍然 17/17，且每条归因正确。
 6. 改了必读面或参考实现：`surface-budget.sh` 在预算内。
 7. 改了决定层：`compare-sup.sh --self-test` 4/4（歧义判定没退化）。
 8. 改动了 `.o` 的引用关系：确认接线检查没有变空（`nm -u` 那五行仍打印“接线绿”）；运行时逐 TU 编 .o 就是为了这个。
-9. 改了需求或验收表：`req-check.py` 退出 0（孤儿断言/样例/目标 = 0），且条款与目标声明一致。
+9. 改了需求或验收表：`req-check.py` 退出 0（孤儿源句/断言/样例/目标 = 0），条款与目标声明一致，
+   每个条款在 `TRANS.tsv` 里恰好一行且四个字段不空，歧义全“已定”、缺口全“已闭”。
 10. 动了题面（验收表/声明头/契约）：`freeze.sh --update` 由人显式重跑；否则提交口会以“题被改过”拒绝。
-11. 改了实现或断言：`mutation-score.py` 仍 L 26/26、S 20/20、覆盖不低于 floor 24。
+11. 改了实现或断言：`mutation-score.py` 仍 L 27/27、S 22/22、覆盖不低于 floor 24。
+11b. 新增了条款（类型 `新增`）：`req-check.py --baseline <改动前的二进制>` 必须给出
+    “回归全绿 + 新增在基线上为红”。没有这一步，这条“新需求”可能只是把现状抄了一遍。
 12. 人验收只看 `report.sh --accept`：条款全绿、未证 0、冻结与登记链一致。
 
 ## 4. 坑（踩过的）
@@ -109,4 +114,4 @@ python3 code/sup/mutation-score.py --binary .build/check/blobd  # 每条断言�
 | 本文件 | 交接与待办 |
 | `code/sup/` | 超集机制 + 旗舰服务 + 全部检查脚本 + 三条回路 + `lab/` 实验题面 |
 | `code/runtime/` | 服务运行时（1468 行共享 C，含 rt.h） |
-| `code/webapi/deploy/` | 26 条断言表、soak、systemd 单元与环境样例 |
+| `code/webapi/deploy/` | 27 条断言表、soak、systemd 单元与环境样例 |

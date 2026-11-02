@@ -1,22 +1,24 @@
-# Droplet 需求登记：条款 -> 目标 -> 断言 -> 样例
+# Droplet 需求登记：源句 -> 条款 -> 目标 -> 断言/样例
 #
-# 列：编号 <TAB> 条款 <TAB> 目标（DP_GOALS 的 id，可多个）<TAB> 断言编号（可多个）<TAB> 样例编号（可多个）
-# “-” 表示这一栏没有。每一行都必须至少有一条断言或样例撑着；
-# 断言必须真的在 accept-table.sh 里，样例必须真的在 DP_EXAMPLES 里。
+# 列：编号 <TAB> 条款 <TAB> 源句 <TAB> 类型 <TAB> 目标 <TAB> 断言 <TAB> 样例
+#   源句：req/SRC.md 里的 S 编号，逗号分隔；每条条款至少引一句，每句至少被一条条款认领。
+#   类型：回归 = 现状已满足、留作护栏；新增 = 实现前必须是红的（先红后绿）；缺口 = 当前机制表达不了。
+#   “-” 表示这一栏没有。除“缺口”外，每条条款都必须至少有一条断言或样例撑着。
 # 改这一张表等于改“需求是什么”，必须和 req/FROZEN 一起更新（见 req/README.md）。
-R1	探活不鉴权：GET /health 无需 token，恒回 200	health_open	1	-
-R2	同一 key 的 GET 字节等于最近一次成功 PUT 的字节	read_back	3,21	-
-R3	每次覆盖写之前必须留下上一版本快照	snapshot_before_write	22	-
-R4	清单来自数据目录本身，不来自任何注册表文件	list_from_dir	2,11,24	-
-R5	POST 只在 key 不存在时创建：201 空 body，重复 409	create_once	10,12,20	1,2,3
-R6	每次成功写入恰好留下一条版本化提交	commit_per_write	23	-
-R7	错误响应不携带 body	error_no_body	7,14,17	-
-R8	不存在的 key 必须 404	not_found_status	13	-
-R9	ETag 由 body 推导；同一份表示只有一个版本号	single_version	4,18	-
-R10	204 不得带 Content-Length，也不得带 body	no_content_framing	8,9	-
-R11	If-Match 相符放行、不符 412 且空 body	versioned_write	5,6,7	8,9,10,11
-R12	未声明的动词一律 405，空 body，无 ETag	method_closed	16,17,18	-
-R13	非法 key 一律 400，不进 handler	path_closed	15	-
-R14	超过 APP_MAX_BODY 一律 413	body_bounded	19	17,18,19
-R15	配了 token 时，缺 token 或错 token 一律 401；/health 与空 token 例外	auth_required	25,26	12,13,14,15,16
-R16	启动端口只接受 1..65535，0 与 65536 不可用	-	-	4,5,6,7
+R1	探活不鉴权：GET /health 无需 token，恒回 200	S1	回归	health_open	1	-
+R2	同一 key 的 GET 字节等于最近一次成功 PUT 的字节	S2	回归	read_back	3,21	-
+R3	每次覆盖写之前必须留下上一版本快照	S2	回归	snapshot_before_write	22	-
+R4	清单来自数据目录本身，不来自任何注册表文件	S3	回归	list_from_dir	2,11,24	-
+R5	POST 只在 key 不存在时创建：201 空 body，重复 409	S4	回归	create_once	10,12,20	1,2,3
+R6	每次成功写入恰好留下一条版本化提交	S5	回归	commit_per_write	23	-
+R7	错误响应不携带 body	S6	回归	error_no_body	7,14,17	-
+R8	不存在的 key 必须 404	S7	回归	not_found_status	13	-
+R9	ETag 由 body 推导；同一份表示只有一个版本号	S8	回归	single_version	4,18	-
+R10	204 不得带 Content-Length，也不得带 body	S9	回归	no_content_framing	8,9	-
+R11	If-Match 相符放行、不符 412 且空 body	S10	回归	versioned_write	5,6,7	8,9,10,11
+R12	未声明的动词一律 405，空 body，无 ETag	S8	回归	method_closed	16,17,18	-
+R13	非法 key 一律 400，不进 handler	S7	回归	path_closed	15	-
+R14	超过 APP_MAX_BODY 一律 413	S12	回归	body_bounded	19	17,18,19
+R15	配了 token 时，缺 token 或错 token 一律 401；/health 与空 token 例外	S11	回归	auth_required	25,26	12,13,14,15,16
+R16	启动端口只接受 1..65535，0 与 65536 不可用	S13	回归	-	-	4,5,6,7
+R17	清单响应是 JSON 对象：顶层键 keys，值为字典序字符串数组	S14	新增	list_envelope	27	-

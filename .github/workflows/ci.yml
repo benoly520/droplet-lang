@@ -6,18 +6,18 @@ name: CI
 #   build    编用户 TU → 符号审计 → 接线检查 → 链接（任何一步红就停）
 #   oracle   DP_EXAMPLES 的封闭样例，一条一个进程
 #   mutate   对纯决定做机械变异，逐条断言预期结局与归因
-#   accept   26 条 wire 断言（服务对外的承诺）
+#   accept   27 条 wire 断言（服务对外的承诺）
 #   contract DP_GOALS 与断言编号对账（目标是否都被证明、断言是否都有归属）
 #   req      需求条款 ↔ 目标 ↔ 断言/样例 的登记链（孤儿断言/样例/目标 = 红）
 #   freeze   题面（验收表/声明头/契约）与 req/FROZEN 一致，改题必须显式 --update
-#   score    变异覆盖分：26 条断言每条都至少被一条实现变异弄红
+#   score    变异覆盖分：27 条断言每条都至少被一条实现变异弄红
 #   surface  必读面的字节/token 预算（面有没有悄悄膨胀）
 #   compare  候选比较：样例能不能把唯一正确的一份挑出来（含自检）
 #   firstpass 首次成功率量尺（含自检；没有模型数据，数字不在这里产生）
 #   maint    三种典型改动的文件/行数预算
 #   loop     作者回路：check.sh 一条命令一个退出码；brief 题面包不含实现；submit 能收也能拒
 #   report   人类验收页：目标 -> 断言 -> 红绿，一屏
-#   sabotage 14 条破坏测试，每条必须由具体工具以具体诊断抓住
+#   sabotage 17 条破坏测试，每条必须由具体工具以具体诊断抓住
 #
 # soak.sh 不在这里：它要一台长时间常开的机器。
 
@@ -44,7 +44,7 @@ jobs:
         run: sh code/sup/oracle-sup.sh ci-oracle
       - name: 决定层变异测试
         run: sh code/sup/mutate-dec.sh ci-mutate
-      - name: 26 条断言验收表
+      - name: 27 条断言验收表
         run: sh code/sup/accept-sup.sh "$GITHUB_WORKSPACE/.build/ci-sup/blobd" 18951 ci
       - name: 契约对账（目标 ↔ 断言编号）
         run: python3 code/sup/contract-sup.py "$GITHUB_WORKSPACE/.build/ci-sup/blobd"

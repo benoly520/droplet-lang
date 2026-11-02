@@ -322,13 +322,13 @@ cp "$B/blobd.c" "$B/s11.c"
 CFG_NAME=s11-cfg
 if try_build s11; then report_miss 11 "把区间的决定抄回机制 TU（行为等价、样例失效）"; else
   require_log s11 11 "接线红：s11-cfg.o 没有引用 dec_port_usable"
-  report_caught s11 11 "接线检查（nm -u）" "把端口区间就地抄回 dp_cfg.c：构建行为不变、26 断言不变，但样例验的不再是跑的那份"
+  report_caught s11 11 "接线检查（nm -u）" "把端口区间就地抄回 dp_cfg.c：构建行为不变、27 断言不变，但样例验的不再是跑的那份"
 fi
 CFG_NAME=dp_cfg
 
 # ---- S12：把条件请求的判断就地抄回运行时（第三条接线，接法与 S10/S11 相同） ----
 # 判断从运行时搬进用户面之后，运行时只做"读"和"算"。把它抄回去，行为完全等价、
-# 26 条断言照样全过 —— 被绕开的仍然是"样例验的是跑的那一份"这件事本身。
+# 27 条断言照样全过 —— 被绕开的仍然是"样例验的是跑的那一份"这件事本身。
 prep
 python3 - "$B" "$RT/rt_http.c" <<'PY12'
 import sys
@@ -360,7 +360,7 @@ HTTP_NAME=rt_http
 HTTP_SRC=
 
 # ---- S13：把鉴权判断就地抄回运行时（第四条接线）----
-# 行为完全等价：配了 token 且不是 /health 时，没带头或头不对就 401。26 条断言照样全过，
+# 行为完全等价：配了 token 且不是 /health 时，没带头或头不对就 401。27 条断言照样全过，
 # 被绕开的仍是"样例验的是跑的那一份"。
 prep
 python3 - "$B" "$RT/rt_http.c" <<'PY13'
@@ -410,6 +410,64 @@ if try_build s14; then report_miss 14 "把 body 上限判断抄回运行时（�
 fi
 HTTP_NAME=rt_http
 HTTP_SRC=
+
+# ---- S15/S16/S17：题面与译稿的破坏（翻译层，v0.36）----
+# 这三条测的不是实现，是“题能不能被悄悄改简单”。所以先建一份**干净的临时树**证明三道门
+# 原本都绿，再逐条注入 —— 注入本身坏了（比如文件没被改）必须当场退出，不许算抓住。
+QT=$B/qtree
+rm -rf "$QT"; mkdir -p "$QT"
+cp -a "$ROOT/code" "$QT/code"
+cp -a "$ROOT/req" "$QT/req"
+QT_REF=$B/clean   # S5 已经建好的干净参照二进制
+
+if sh "$QT/code/sup/freeze.sh" --check "$QT_REF" >/dev/null 2>&1    && python3 "$QT/code/sup/req-check.py" "$QT_REF" >/dev/null 2>&1; then
+  echo "  参照：临时树 freeze + req-check 全绿（破坏才有比对基准）"
+else
+  echo "  参照临时树本身就红，破坏测试无从比对" >&2
+  sh "$QT/code/sup/freeze.sh" --check "$QT_REF" 2>&1 | sed 's/^/      /' >&2 || true
+  exit 1
+fi
+
+# S15：从验收表里删掉 ck 27 —— 新增条款的断言没了，题被改简单
+grep -q '^ck 27 ' "$QT/code/webapi/deploy/accept-table.sh" \
+  || { echo "S15 注入失败：表里没有 ck 27" >&2; exit 1; }
+sed -i '/^ck 27 /d' "$QT/code/webapi/deploy/accept-table.sh"
+if sh "$QT/code/sup/freeze.sh" --check "$QT_REF" >/dev/null 2>&1
+then report_miss 15 "从验收表删掉断言 #27（题被改简单）"
+else
+  sh "$QT/code/sup/freeze.sh" --check "$QT_REF" 2>&1 | grep -q 'accept-table.sh 被改过' \
+    || { echo "  S15 红了但不是 freeze 指名 accept-table.sh（拒绝把别的红算成抓住）" >&2; exit 1; }
+  report_caught s15 15 "freeze.sh --check" "从验收表删掉断言 #27：哈希不符 -> “题被改过”"
+fi
+
+# S16：删掉 R17 的译法记录 —— 检查还在、还是绿的，但没人说过它为什么这么写
+rm -rf "$QT/code" "$QT/req"
+cp -a "$ROOT/code" "$QT/code"
+cp -a "$ROOT/req" "$QT/req"
+grep -q '^R17' "$QT/req/TRANS.tsv" || { echo "S16 注入失败：TRANS 里没有 R17" >&2; exit 1; }
+sed -i '/^R17/d' "$QT/req/TRANS.tsv"
+if python3 "$QT/code/sup/req-check.py" "$QT_REF" >/dev/null 2>&1
+then report_miss 16 "删掉 R17 的 TRANS 行（没有译法记录）"
+else
+  python3 "$QT/code/sup/req-check.py" "$QT_REF" 2>&1 | grep -q 'R17 在 TRANS.tsv 里没有译法记录' \
+    || { echo "  S16 红了但不是 req-check 指名缺译法记录" >&2; exit 1; }
+  report_caught s16 16 "req-check.py（TRANS 台账）" "删掉 R17 的译法记录：条款没有“为什么这么检查”的账 -> 红"
+fi
+
+# S17：把一条歧义从“已定”改成“未定” —— 读法没定就先去实现，等于让 AI 替人拍板
+rm -rf "$QT/req"
+cp -a "$ROOT/req" "$QT/req"
+grep -q '^A2' "$QT/req/AMBIG.tsv" || { echo "S17 注入失败：AMBIG 里没有 A2" >&2; exit 1; }
+sed -i '/^A2/s/\t已定$/\t未定/' "$QT/req/AMBIG.tsv"
+awk -F '\t' '$1 == "A2" && $NF == "未定" { f = 1 } END { exit f ? 0 : 1 }' "$QT/req/AMBIG.tsv" \
+  || { echo "S17 注入失败：A2 状态没改成未定" >&2; exit 1; }
+if python3 "$QT/code/sup/req-check.py" "$QT_REF" >/dev/null 2>&1
+then report_miss 17 "把歧义 A2 改成未定"
+else
+  python3 "$QT/code/sup/req-check.py" "$QT_REF" 2>&1 | grep -q '还没有定论' \
+    || { echo "  S17 红了但不是 req-check 指名歧义未定" >&2; exit 1; }
+  report_caught s17 17 "req-check.py（AMBIG 台账）" "歧义改成未定：读法没定论就不许往下走 -> 红"
+fi
 
 echo "sabotage-sup: $CAUGHT 抓住 / $MISS 假阴性"
 [ "$MISS" -eq 0 ]

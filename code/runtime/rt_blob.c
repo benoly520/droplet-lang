@@ -392,8 +392,8 @@ static int cmp_str(const void* a, const void* b) {
 
 dp_bytes dp_blob_list(dp_arena* a, dp_str root, int* err) {
   dp_bytes out;
-  out.p = (const uint8_t*)"[]";
-  out.n = 2u;
+  out.p = (const uint8_t*)"{\"keys\":[]}";
+  out.n = 11u;
   if (err) {
     *err = 0;
   }
@@ -442,13 +442,18 @@ dp_bytes dp_blob_list(dp_arena* a, dp_str root, int* err) {
 
   qsort(names, cnt, sizeof(dp_str), cmp_str);
 
-  size_t total = 2u + (cnt > 0u ? cnt - 1u : 0u);
+  /* S14/R17：清单是一个对象，顶层键 keys，值是字典序字符串数组。
+   * 前缀 {"keys":[ 9 字节，后缀 ]} 2 字节；空目录也要是合法 JSON。 */
+  const char* pfx = "{\"keys\":[";
+  size_t pfx_n = 9u;
+  size_t total = pfx_n + 2u + (cnt > 0u ? cnt - 1u : 0u);
   for (size_t i = 0; i < cnt; i++) {
     total += names[i].n + 2u; /* 引号 */
   }
   char* buf = (char*)dp_alloc(a, total + 1u);
   size_t o = 0;
-  buf[o++] = '[';
+  memcpy(buf + o, pfx, pfx_n);
+  o += pfx_n;
   for (size_t i = 0; i < cnt; i++) {
     if (i > 0u) {
       buf[o++] = ',';
@@ -459,6 +464,7 @@ dp_bytes dp_blob_list(dp_arena* a, dp_str root, int* err) {
     buf[o++] = '"';
   }
   buf[o++] = ']';
+  buf[o++] = '}';
 
   out.p = (const uint8_t*)buf;
   out.n = o;

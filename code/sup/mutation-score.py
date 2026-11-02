@@ -4,7 +4,7 @@
 两个方向，缺一不可：
 
   L（验收表自检）—— 把第 N 条断言的期望值改成不可能成立，跑整张表。
-     必须恰好红 #N、其余 25 条绿。红别的 = 表之间有隐藏耦合；不红 = 这条断言
+     必须恰好红 #N、其余全绿。红别的 = 表之间有隐藏耦合；不红 = 这条断言
      根本没被执行（或者期望值与实际值无关）。
 
   S（实现灵敏度）—— 在源码里注入“看起来像真 bug”的改动，逐条跑验收表。
@@ -12,7 +12,7 @@
      否则归因不符（红在别处 = 我们的解释不成立，不算抓住）。
      每条变异都在自己的临时树里构建，绝不碰工作区。
 
-覆盖分 = 至少被一条 S 变异弄红的断言数 / 26。低于 floor 就是红。
+覆盖分 = 至少被一条 S 变异弄红的断言数 / 断言总数（从验收表数出来，不写死）。低于 floor 就是红。
 它证明的是“断言能分辨实现的好坏”，不证明“实现一定对”——后者要靠需求条款本身正确。
 
 用法：
@@ -182,6 +182,17 @@ MUTS = [
          "  if (!dec_auth_ok(cfg->token.n > 0u, is_health, header_present, header_matches)) {",
          "  volatile bool _auth_gate = dec_auth_ok(cfg->token.n > 0u, is_health, header_present, header_matches);\n"
          "  (void)_auth_gate;\n  if (false) {")]),
+    # 新增条款（S14/R17）自己也要能被弄红：否则 #27 只是摆设。
+    dict(id="S21", note="清单退回裸数组（外壳没了）", expect={27}, edits=[
+        ("code/runtime/rt_blob.c", '  const char* pfx = "{\\"keys\\":[";\n  size_t pfx_n = 9u;',
+         '  const char* pfx = "[";\n  size_t pfx_n = 1u;'),
+        ("code/runtime/rt_blob.c", "  buf[o++] = ']';\n  buf[o++] = '}';", "  buf[o++] = ']';")]),
+    dict(id="S22", note="清单排完又倒过来（顺序承诺被破坏）", expect={27}, edits=[
+        ("code/runtime/rt_blob.c", "  qsort(names, cnt, sizeof(dp_str), cmp_str);",
+         "  qsort(names, cnt, sizeof(dp_str), cmp_str);\n"
+         "  for (size_t i = 0; i < cnt / 2u; i++) {\n"
+         "    dp_str t = names[i];\n    names[i] = names[cnt - 1u - i];\n"
+         "    names[cnt - 1u - i] = t;\n  }")]),
 ]
 
 
@@ -245,22 +256,28 @@ def main():
     s_ok = 0
     covered = set()
 
+    # 断言总数从验收表里数出来，不写死：加一条断言不该改这个脚本。
+    nassert = max((int(m) for m in re.findall(r"^ck (\d+) ", table, re.M)), default=0)
+    if not nassert:
+        print("mutation-score: 验收表里没数出断言编号", file=sys.stderr)
+        return 2
+
     # ---- 参照必须先全绿：否则下面的“红”都不可归因 ----
     ref = accept(binary, TABLE, "msref", args.l_port, ROOT)
     ok, bad = parse_accept(ref.stdout + ref.stderr)
-    if ref.returncode != 0 or bad or len(ok) != 26:
+    if ref.returncode != 0 or bad or len(ok) != nassert:
         problems.append("参照不绿：%d 过 / %d 挂（先修实现，再谈变异）"
                         % (len(ok), len(bad)))
         print("\n".join(problems), file=sys.stderr)
         return 1
-    print("mutation-score：参照 26/26 绿")
+    print("mutation-score：参照 %d/%d 绿" % (nassert, nassert))
 
     if args.phase in ("L", "all"):
         tree = fresh_tree("L")
         tpath = os.path.join(tree, "code", "webapi", "deploy", "accept-table.sh")
         orig_mode = os.stat(tpath).st_mode
         print("\n== L：验收表自检（改期望值，必须恰好红它自己）==")
-        for n in range(1, 27):
+        for n in range(1, nassert + 1):
             pat = re.compile(r"^(ck %d )(\S+)" % n, re.M)
             if len(pat.findall(table)) != 1:
                 problems.append("L #%d：验收表里找到 %d 处，断言编号不唯一"
@@ -274,9 +291,9 @@ def main():
             if r.returncode == 0:
                 problems.append("L #%d：期望改成不可能，整张表仍然全绿 —— 这条断言没被执行" % n)
                 print("  L #%-2d 假绿" % n)
-            elif b == {n} and len(o) == 25:
+            elif b == {n} and len(o) == nassert - 1:
                 l_live += 1
-                print("  L #%-2d 活（红 #%d，其余 25 绿）" % (n, n))
+                print("  L #%-2d 活（红 #%d，其余 %d 绿）" % (n, n, nassert - 1))
             else:
                 problems.append("L #%d：期望红 {%d}，实际红 %s（绿 %d）"
                                 % (n, n, sorted(b), len(o)))
@@ -285,7 +302,7 @@ def main():
         with open(tpath, "w", encoding="utf-8") as f:
             f.write(table)
         os.chmod(tpath, orig_mode)
-        print("  L 小计：%d/26 条断言“改期望必红”" % l_live)
+        print("  L 小计：%d/%d 条断言“改期望必红”" % (l_live, nassert))
 
     if args.phase in ("S", "all"):
         print("\n== S：实现变异（声明的红集合必须是实际红集合的子集）==")
@@ -330,11 +347,12 @@ def main():
 
         print("  S 小计：%d/%d 条变异归因相符" % (s_ok, len(MUTS)))
 
-    cover = sorted(covered & set(range(1, 27)))
+    cover = sorted(covered & set(range(1, nassert + 1)))
     if args.phase in ("S", "all"):
-        print("\n断言覆盖：%d/26 至少被一条实现变异弄红（floor %d）" % (len(cover), args.floor))
+        print("\n断言覆盖：%d/%d 至少被一条实现变异弄红（floor %d）"
+              % (len(cover), nassert, args.floor))
         if len(cover) < args.floor:
-            miss = sorted(set(range(1, 27)) - covered)
+            miss = sorted(set(range(1, nassert + 1)) - covered)
             problems.append("覆盖分低于 floor：%d < %d；没被弄红的断言 %s"
                             % (len(cover), args.floor, miss))
     if problems:
@@ -344,10 +362,10 @@ def main():
         return 1
     parts = []
     if args.phase in ("L", "all"):
-        parts.append("L %d/26" % l_live)
+        parts.append("L %d/%d" % (l_live, nassert))
     if args.phase in ("S", "all"):
         parts.append("S %d/%d" % (s_ok, len(MUTS)))
-        parts.append("覆盖 %d/26" % len(cover))
+        parts.append("覆盖 %d/%d" % (len(cover), nassert))
     print("mutation-score：绿（%s）" % "；".join(parts))
     return 0
 

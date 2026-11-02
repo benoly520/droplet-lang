@@ -9,7 +9,7 @@
 #   1) 构建：编译器对账 + 符号审计 + 接线检查（候选必须真的被服务引用）
 #   2) 题面：与 req/FROZEN 一致（验收表/声明头/契约没被改过）
 #   3) 样例：19 条全过，一条一个进程
-#   4) 验收：26 条 wire 断言全过
+#   4) 验收：27 条 wire 断言全过
 #   5) 契约：四节自洽、编号不悬空
 # 任何一项红 -> 拒绝，并指名红在哪一项。全绿 -> 接受。
 # 题面一项单列在前面：题被改过时，后面全绿也不作数。
@@ -60,4 +60,4 @@ step oracle   sh "$T/code/sup/oracle-sup.sh" submit-oracle
 step accept   sh "$T/code/sup/accept-sup.sh" "$T/.build/submit/blobd" "$PORT" submit
 step contract python3 "$T/code/sup/contract-sup.py" "$T/.build/submit/blobd"
 
-echo "提交结果：接受（构建 / 题面冻结 / 19 样例 / 26 断言 / 契约 全绿）"
+echo "提交结果：接受（构建 / 题面冻结 / 19 样例 / 27 断言 / 契约 全绿）"

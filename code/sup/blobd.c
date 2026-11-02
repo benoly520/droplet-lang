@@ -46,7 +46,8 @@
   X(method_closed, "未声明的动词一律 405 且空 body", "16,17,18")                          \
   X(path_closed, "非法 key 一律 400，不进 handler", "15")                                 \
   X(body_bounded, "超过 APP_MAX_BODY 一律 413", "19")                                     \
-  X(auth_required, "配了 token 时：没带或带错一律 401；/health 与空 token 例外", "25,26")
+  X(auth_required, "配了 token 时：没带或带错一律 401；/health 与空 token 例外", "25,26") \
+  X(list_envelope, "清单响应是 JSON 对象：顶层键 keys，值为字典序数组", "27")
 
 #include "dp_env.h" /* 配置表在这里：名字、字段、kind、默认值 */
 #include "dp_sup.h"

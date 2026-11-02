@@ -67,16 +67,17 @@ curl -s           -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blo
 | wiring check (`build.sh`, `nm -u`) | the service no longer references a decision that `DP_EXAMPLES` grades — i.e. the examples would grade a copy |
 | sample oracle (`oracle-sup.sh`) | any `DP_EXAMPLES` row fails; zero runnable examples counts as failure; a crash is listed, never a pass |
 | mutation (`mutate-dec.sh`) | a mutant survives and is not a hand-judged equivalent (13 mutants: 10 caught / 2 equivalent / 1 compile-time) |
-| wire assertions (`accept-table.sh`) | any of 26 external promises is broken (status, headers, body, snapshot, commit, auth) |
+| wire assertions (`accept-table.sh`) | any of 27 external promises is broken (status, headers, body, snapshot, commit, auth, list envelope) |
 | contract reconciliation (`contract-sup.py`) | a goal cites an assertion number that does not exist, or a goal is left unproven (`""` is an explicit admission) |
 | surface budget (`surface-budget.sh`) | the must-read tables, types and reference service grow past 9,000 tokens / 32 KB |
 | candidate comparison (`compare-sup.sh`) | 0 or more than 1 candidate survives the examples (no solution / ambiguity) |
 | first-pass ruler (`firstpass.sh`) | given a candidate sequence, it computes first-pass and pass@k; **no model, no number** |
 | maintenance cost (`maint-cost.sh`) | a scripted change touches more files or +/- lines than its budget |
-| requirement registry (`req-check.py`) | a requirement has no assertion/example, or an assertion/example/goal is unclaimed, or a requirement disagrees with its goals' declared proof |
-| question freeze (`freeze.sh`) | the acceptance table, declaration headers or contract differ from `req/FROZEN` (the question was edited) |
+| translation layer (`req/SRC.md` + `req/TRANS.tsv` + `req/AMBIG.tsv` + `req/GAP.tsv`) | a clause has no recorded reading, its counterexample column is empty, an ambiguity is undecided, a gap is unclosed, or (with `--baseline`) a `新增` clause was already green on the old binary — i.e. the status quo was transcribed as a requirement |
+| requirement registry (`req-check.py`) | a requirement has no assertion/example, or a source sentence/assertion/example/goal is unclaimed, or a requirement disagrees with its goals' declared proof |
+| question freeze (`freeze.sh`) | the acceptance table, declaration headers, the five translation files or the contract differ from `req/FROZEN` (the question was edited) |
 | mutation score (`mutation-score.py`) | changing assertion N's expectation does not turn it red, a mutant reddens an undeclared assertion, or coverage falls below the floor |
-| sabotage (`sabotage-sup.sh`) | one of 14 injected defects is *not* caught by a named tool with a named diagnostic |
+| sabotage (`sabotage-sup.sh`) | one of 17 injected defects is *not* caught by a named tool with a named diagnostic (3 of them edit the question or the translation instead of the code) |
 
 The last row is the important one: it checks the checkers. A "caught" that is really a compile error
 from a broken injection is a false green, and this suite exists because that happened once.
@@ -89,12 +90,12 @@ code/sup/            the checked layer: four declaration tables, the flagship se
   dp_env.h           DP_ENVS — 18 lines, user-owned
   dp_decide.h/.c     five pure decisions + 19 DP_EXAMPLES — 114 lines, user-owned, linked by the service
   check.sh report.sh brief.sh submit-sup.sh   the three loops: author, human acceptance, submission
-  req-check.py freeze.sh mutation-score.py   registry / question freeze / assertion sensitivity
+  req-check.py freeze.sh mutation-score.py   registry + translation / question freeze / assertion sensitivity
   dp_sup.h dp_cfg.c dp_conf.h dp_oracle.c   mechanism, 344 lines
 code/runtime/        the service runtime, 1468 lines of C (rt_core / rt_http / rt_blob / rt_ver, incl. rt.h)
 code/sup/lab/        the experiment packet: two decisions that do not exist in this repo
-code/webapi/deploy/  26-assertion acceptance table, soak, systemd unit, env example
-req/                 requirement registry (16 clauses), frozen question hashes, README
+code/webapi/deploy/  27-assertion acceptance table, soak, systemd unit, env example
+req/                 14 source sentences, 17 clauses, translation ledgers (TRANS/AMBIG/GAP), frozen hashes, README
 docs/                SPEC, VALIDATION (numbers), EXPERIMENT (two trials), NEXT (handoff)
 ```
 

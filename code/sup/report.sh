@@ -1,7 +1,7 @@
 #!/bin/sh
 # 人类验收页：一屏看完“需求条款有没有证据”，不用读实现。
 #
-# 为什么按条款组织：这个工程的承诺是"人只看结果"。结果不是 26 个数字，而是
+# 为什么按条款组织：这个工程的承诺是"人只看结果"。结果不是几十个数字，而是
 # **每一条需求由哪几条断言/样例证明、这一版是不是绿的**。断言编号是给机器的，
 # 需求条款是给人的；中间那层（DP_GOALS）已经由 req-check 对过账。
 #
@@ -120,19 +120,55 @@ def cut(s, n):
 
 reqs = []
 root = os.getcwd()  # report.sh 已经 cd 到仓库根
-reqfile = os.path.join(root, "req", "REQ.tsv")
-for line in open(reqfile, encoding="utf-8"):
-    if not line.strip() or line.lstrip().startswith("#"):
-        continue
-    f = line.rstrip("\n").split("\t")
-    if len(f) != 5:
-        continue
-    rid, text, gs, as_, es = [x.strip() for x in f]
-    def ids(s):
-        if s in ("", "-"):
-            return []
-        return [x for x in s.split(",") if x]
-    reqs.append((rid, text, ids(gs), ids(as_), ids(es)))
+
+
+def tsv(path, ncol):
+    out = []
+    p = os.path.join(root, "req", path)
+    if not os.path.exists(p):
+        return out
+    for line in open(p, encoding="utf-8"):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        f = line.rstrip("\n").split("\t")
+        if len(f) != ncol:
+            continue
+        out.append([x.strip() for x in f])
+    return out
+
+
+def ids(s):
+    if s in ("", "-"):
+        return []
+    return [x for x in s.split(",") if x]
+
+
+def run(xs):
+    """1,2,3,7 -> 1–3,7：证据列太长会被切掉，连续编号压成区间。"""
+    xs = sorted(int(x) for x in xs)
+    out, i = [], 0
+    while i < len(xs):
+        j = i
+        while j + 1 < len(xs) and xs[j + 1] == xs[j] + 1:
+            j += 1
+        out.append(str(xs[i]) if i == j else
+                   ("%d–%d" % (xs[i], xs[j]) if j - i >= 2 else "%d,%d" % (xs[i], xs[j])))
+        i = j + 1
+    return ",".join(out)
+
+
+reqs = [(r[0], r[1], ids(r[2]), r[3], ids(r[4]), ids(r[5]), ids(r[6]))
+        for r in tsv("REQ.tsv", 7)]
+nsrc = len(re.findall(r"^S\d+\s", open(os.path.join(root, "req", "SRC.md"),
+                                       encoding="utf-8").read(), re.M))
+trans = tsv("TRANS.tsv", 5)
+ambig = tsv("AMBIG.tsv", 7)
+gaps = tsv("GAP.tsv", 4)
+unresolved = [a[0] for a in ambig if a[6] != "已定"]
+open_gaps = [g[0] for g in gaps if g[3] != "已闭"]
+kinds = {}
+for r in reqs:
+    kinds[r[3]] = kinds.get(r[3], 0) + 1
 
 goals = contract["goals"]
 routes = contract["routes"]
@@ -143,7 +179,7 @@ unproven = [g for g in goals if not g["proven"]]
 rows = []
 bad_req = 0
 unrun_req = 0
-for rid, text, gs, as_, es in reqs:
+for rid, text, ss, typ, gs, as_, es in reqs:
     bad = any(a_st.get(int(a)) is False for a in as_) or \
           any(e_st.get(int(e)) is False for e in es)
     unknown = (bool(as_) and not acc) or \
@@ -157,23 +193,34 @@ for rid, text, gs, as_, es in reqs:
         res = "绿"
     ev = []
     if as_:
-        ev.append("断言 " + ",".join("#" + a for a in as_))
+        ev.append("断言 " + run(as_))
     if es:
-        ev.append("样例 " + ",".join("#" + e for e in es))
-    rows.append((rid, text, "；".join(ev), res))
+        ev.append("样例 " + run(es))
+    if not ev:
+        ev.append("（缺口：无证据）")
+    rows.append((rid, "/".join(ss), typ, text, "；".join(ev), res))
 
 print()
 print("Droplet 验收报告")
 print("  介质：合法 C11 + 4 张表   |   路由 %d   |   配置 %d   |   样例 %d   |   目标 %d（未证 %d）   |   条款 %d"
       % (len(routes), len(envs), len(examples), len(goals), len(unproven), len(reqs)))
 print()
-print("  " + pad("条款", 7) + pad("需求", 46) + pad("证据", 31) + "结果")
-print("  " + "-" * 90)
-for rid, text, ev, res in rows:
-    print("  " + pad(rid, 7) + pad(cut(text, 44), 46) + pad(cut(ev, 29), 31) + res)
+print("  " + pad("条款", 6) + pad("源句", 7) + pad("类型", 5) + pad("需求", 40) + pad("证据", 35) + "结果")
+print("  " + "-" * 93)
+for rid, ss, typ, text, ev, res in rows:
+    print("  " + pad(rid, 6) + pad(ss, 7) + pad(typ, 5)
+          + pad(cut(text, 38), 40) + pad(cut(ev, 34), 35) + res)
 print()
 print("  路由：" + " / ".join(f"{r['method']} {r['path']}" for r in routes))
 print("  样例：%d 条封闭样例覆盖纯决定；读写、轮转与 wire 语义由断言兜着" % len(examples))
+print("  译稿：源句 %d → 条款 %d（回归 %d / 新增 %d / 缺口 %d），逐条语义对账 %d 份"
+      % (nsrc, len(reqs), kinds.get("回归", 0), kinds.get("新增", 0),
+         kinds.get("缺口", 0), len(trans)))
+print("  歧义 %d（未定 %d）；缺口登记 %d（未闭 %d）"
+      % (len(ambig), len(unresolved), len(gaps), len(open_gaps)))
+if unresolved or open_gaps:
+    print("  译稿是红的：未定歧义 " + (",".join(unresolved) or "-")
+          + "，未闭缺口 " + (",".join(open_gaps) or "-"))
 if unproven:
     print("  未证目标（DP_GOALS.proven 为空）：" + ", ".join(g["id"] for g in unproven))
 else:

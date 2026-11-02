@@ -59,16 +59,17 @@ curl -s          -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blob
 | 接线检查（`build.sh`，`nm -u`） | 服务不再引用被 `DP_EXAMPLES` 覆盖的决定 —— 那说明样例验的是复制品 |
 | 样例 oracle（`oracle-sup.sh`） | `DP_EXAMPLES` 任一行挂；零条可执行样例算失败；崩溃单列，绝不记成通过 |
 | 机械变异（`mutate-dec.sh`） | 13 个变异体里有一个存活且不是人工判定的等价变异（实测 10 抓 / 2 等价 / 1 编译期响） |
-| wire 断言（`accept-table.sh`） | 26 条对外承诺任何一条破了（状态码、头、body、快照、提交、鉴权） |
+| wire 断言（`accept-table.sh`） | 27 条对外承诺任何一条破了（状态码、头、body、快照、提交、鉴权、清单外壳） |
 | 契约对账（`contract-sup.py`） | `--contract` 四节缺失，或目标引用了不存在的断言编号，或目标留成未证（写 `""` 是显式承认） |
-| 必读面预算（`surface-budget.sh`） | 必读的表、类型与参考实现超过 9,000 token / 32 KB（实测约 8,167 token，估算） |
+| 必读面预算（`surface-budget.sh`） | 必读的表、类型与参考实现超过 9,000 token / 32 KB（实测约 8,197 token，估算） |
 | 候选比较（`compare-sup.sh`） | 0 份或 >1 份候选通过样例（无解 / 歧义） |
 | 首次成功率量尺（`firstpass.sh`） | 给定候选序列时算 first-pass 与 pass@k；**没有模型，就没有数字** |
 | 维护成本（`maint-cost.sh`） | 脚本化改动的文件数或 +/- 行数超过预算 |
-| 需求登记（`req-check.py`） | 条款没有断言/样例撑着；或断言/样例/目标没人认领；或条款与目标声明的证明不一致 |
-| 题面冻结（`freeze.sh`） | 验收表、声明头或契约与 `req/FROZEN` 不一致（题被改过） |
+| 翻译层（`req/SRC.md` + `req/TRANS.tsv` + `req/AMBIG.tsv` + `req/GAP.tsv`） | 条款没有译法记录、反例栏空着、歧义“未定”、缺口“未闭”；或加了 `--baseline` 后“新增”条款在旧实现上就是绿的（把现状抄成了需求） |
+| 需求登记（`req-check.py`） | 条款没有断言/样例撑着；或源句/断言/样例/目标没人认领；或条款与目标声明的证明不一致 |
+| 题面冻结（`freeze.sh`） | 验收表、声明头、**5 份译稿**或契约与 `req/FROZEN` 不一致（题被改过） |
 | 变异覆盖分（`mutation-score.py`） | 改第 N 条断言的期望它不红；或实现变异红了没声明的断言；或覆盖低于 floor |
-| 破坏测试（`sabotage-sup.sh`） | 14 条注入的缺陷里有一条**没有**被具名工具以具名诊断抓住 |
+| 破坏测试（`sabotage-sup.sh`） | 17 条注入的缺陷里有一条**没有**被具名工具以具名诊断抓住（含 3 条改题/改译稿的） |
 
 最后一行最重要：它检查的是检查器本身。“被抓住”如果其实是注入代码写坏了导致的编译失败，那是假绿 ——
 这套东西存在，就是因为这件事真的发生过一次。
@@ -81,12 +82,12 @@ code/sup/            受检层：四张声明表、旗舰服务、全部检查
   dp_env.h           DP_ENVS —— 18 行，用户所有
   dp_decide.h/.c     五个纯决定 + 19 条 DP_EXAMPLES —— 114 行，用户所有，服务链接的就是这份
   check.sh report.sh brief.sh submit-sup.sh   三条回路：作者、人类验收、提交口
-  req-check.py freeze.sh mutation-score.py   登记链 / 题面冻结 / 断言灵敏度
+  req-check.py freeze.sh mutation-score.py   登记链+翻译层 / 题面冻结 / 断言灵敏度
   dp_sup.h dp_cfg.c dp_conf.h dp_oracle.c   机制，344 行
 code/runtime/        服务运行时，1468 行 C（rt_core / rt_http / rt_blob / rt_ver，含 rt.h）
 code/sup/lab/        实验题面包：两条本仓库里不存在的决定
-code/webapi/deploy/  26 条断言表、soak、systemd 单元、环境变量样例
-req/                 需求登记（16 条条款）、冻结清单 FROZEN、README（四道门怎么用）
+code/webapi/deploy/  27 条断言表、soak、systemd 单元、环境变量样例
+req/                 源句 SRC.md、17 条条款、译稿 TRANS/AMBIG/GAP、冻结清单 FROZEN、README（五道门）
 docs/                SPEC、VALIDATION（实测数字）、EXPERIMENT（两个实验）、NEXT（交接）
 ```
 

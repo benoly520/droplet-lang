@@ -3,7 +3,7 @@
 #
 # 为什么需要：只验结果的前提是**题不能动**。如果提交者（或维护者顺手）改了验收表、
 # 改了声明头、改了契约里的目标，那么“全绿”可能只是把题改简单了。这里把题面的
-# 六份文件 + 编译产物里的四张表（--contract）钉进 req/FROZEN：
+# 十一份文件（题面 6 + 译稿 5）+ 编译产物里的四张表（--contract）钉进 req/FROZEN：
 #
 #   * 提交口（submit-sup.sh）每次先核对 FROZEN，不一致 -> 以“题被改过”拒绝；
 #   * check.sh 的快速回路也核对，防止题在作者不知情时漂移；
@@ -36,7 +36,12 @@ code/sup/dp_decide.h
 code/sup/dp_env.h
 code/sup/dp_sup.h
 code/sup/dp_conf.h
-code/runtime/rt.h'
+code/runtime/rt.h
+req/SRC.md
+req/REQ.tsv
+req/TRANS.tsv
+req/AMBIG.tsv
+req/GAP.tsv'
 FROZEN=req/FROZEN
 
 if [ -z "$BIN" ]; then
@@ -152,4 +157,4 @@ if [ "$BAD" -ne 0 ]; then
   echo "冻结：题面与 FROZEN 不一致 —— 提交口会拒绝；人类确认后跑 --update" >&2
   exit 1
 fi
-echo "题面冻结：$N 项一致（验收表 / 声明头 5 份 / 契约）"
+echo "题面冻结：$N 项一致（验收表 / 声明头 5 份 / 需求译稿 5 份 / 契约）"

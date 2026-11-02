@@ -10,27 +10,28 @@ sh code/sup/compat-sup.sh                          # 5 条：合法 C 在"无本
 sh code/sup/build.sh sup                           # 编译 -> 符号审计 -> 接线检查 -> 链接
 sh code/sup/oracle-sup.sh                          # 19 条封闭样例，一条一个进程
 sh code/sup/mutate-dec.sh                          # 13 个变异体，逐条断言结局与归因
-sh code/sup/accept-sup.sh "$PWD/.build/sup/blobd" 18880 sup   # 26 条 wire 断言
-python3 code/sup/contract-sup.py .build/sup/blobd   # 5 路由 / 5 配置 / 15 目标 / 19 样例对账
-python3 code/sup/req-check.py .build/sup/blobd     # 16 条款 / 26 断言 / 19 样例 / 15 目标的登记链
-sh code/sup/freeze.sh --check .build/sup/blobd     # 题面 7 项与 req/FROZEN 一致
-python3 code/sup/mutation-score.py --binary .build/sup/blobd   # L 26 条表自检 + S 20 条实现变异
+sh code/sup/accept-sup.sh "$PWD/.build/sup/blobd" 18880 sup   # 27 条 wire 断言
+python3 code/sup/contract-sup.py .build/sup/blobd   # 5 路由 / 5 配置 / 16 目标 / 19 样例对账
+python3 code/sup/req-check.py .build/sup/blobd     # 14 源句 / 17 条款 / 27 断言 / 19 样例 / 16 目标的登记链
+python3 code/sup/req-check.py .build/new/blobd --baseline .build/baseline-blobd  # 先红后绿（基线核对）
+sh code/sup/freeze.sh --check .build/sup/blobd     # 题面 12 项（含 5 份译稿）与 req/FROZEN 一致
+python3 code/sup/mutation-score.py --binary .build/sup/blobd   # L 27 条表自检 + S 22 条实现变异
 sh code/sup/surface-budget.sh                      # 必读面字节 / token 预算
 sh code/sup/compare-sup.sh --self-test             # 候选比较：唯一 / 无解 / 歧义，4 条自检
 sh code/sup/firstpass.sh --self-test               # 首次成功率量尺，3 条自检（不产生模型数字）
 sh code/sup/maint-cost.sh                          # 三种改动的文件数 / +/- 行数
-sh code/sup/sabotage-sup.sh 18900                  # 14 条破坏，每条必须被具体工具抓住
+sh code/sup/sabotage-sup.sh 18900                  # 17 条破坏，每条必须被具体工具抓住
 sh code/sup/check.sh --full                        # 作者/维护回路：一条命令一个退出码（13 项）
-sh code/sup/brief.sh .build/briefpack              # 题面包（不含实现，预算内）
+sh code/sup/brief.sh .build/briefpack              # 题面包：surface + contract + req/ 译稿，不含实现
 sh code/sup/submit-sup.sh code/sup/dp_decide.c 18882   # 提交口：参考实现必须被接受（含题面冻结）
 sh code/sup/report.sh .build/check/blobd --accept 18881  # 人类验收页
 sh code/sup/lab/make-packet.sh /tmp/lab/packet     # 实验题面（两条仓库里不存在的决定）
 ```
 
 ASan+UBSan：把 `build.sh` 里的 `cc` 换成 `cc -g -fsanitize=address,undefined` 同口径编译，
-再跑同一张 26 断言表。
+再跑同一张 27 断言表。
 
-## 2. 实测（2026-11-02，`main` = v0.35 之后）
+## 2. 实测（2026-11-02，`main` = v0.36 之后）
 
 | 项 | 结果 |
 | --- | --- |
@@ -38,21 +39,21 @@ ASan+UBSan：把 `build.sh` 里的 `cc` 换成 `cc -g -fsanitize=address,undefin
 | 构建 | 符号审计 0 个未声明引用；接线检查**五条绿**（`blobd.o → dec_create_result`、`dp_cfg.o → dec_port_usable`、`rt_http.o → dec_precondition_result` / `dec_auth_ok` / `dec_body_too_large`） |
 | 样例 oracle | **19 条 / 19 过 / 0 挂 / 0 崩溃** |
 | 决定层变异 | 13 个变异体 → **10 抓住 / 2 MISS（等价变异，人工判定）/ 1 编译期响 / 0 归因不符** |
-| wire 断言 | **26 过 / 0 挂**；ASan+UBSan 下同样 26 / 0，无诊断 |
-| 契约对账 | 5 条路由 / 5 个配置项 / **15 条目标（未证 0、孤儿断言 0）** / 19 条样例 |
-| 需求登记 | **16 条条款 / 26 条断言 / 19 条样例 / 15 条目标**；孤儿断言 0、孤儿样例 0、孤儿目标 0；退出 0 |
-| 题面冻结 | **7 项一致**（验收表 + 5 份声明头 + 契约哈希）；篡改验收表一行 -> 冻结红，提交口拒绝（freeze） |
-| 变异覆盖分 | L **26/26** 条断言“改期望必红”（其余 25 条绿）；S **20/20** 条变异归因相符；断言覆盖 **26/26**（floor 24） |
-| 必读面预算 | **29,525 B ≈ 8,167 token（估算）**，占 200k 上下文 4.1%；预算 9,000 token / 32 KB |
+| wire 断言 | **27 过 / 0 挂**；ASan+UBSan 下同样 27 / 0，无诊断 |
+| 契约对账 | 5 条路由 / 5 个配置项 / **16 条目标（未证 0、孤儿断言 0）** / 19 条样例 |
+| 需求登记 | **14 个源句 / 17 条条款 / 27 条断言 / 19 条样例 / 16 条目标**；孤儿源句 0、孤儿断言 0、孤儿样例 0、孤儿目标 0；TRANS 17 份、歧义 2（未定 0）、缺口 0；退出 0 |
+| 题面冻结 | **12 项一致**（验收表 + 5 份声明头 + 5 份译稿 + 契约哈希）；篡改验收表一行 -> 冻结红，提交口拒绝（freeze）|
+| 变异覆盖分 | L **27/27** 条断言“改期望必红”（其余 26 条绿）；S **22/22** 条变异归因相符；断言覆盖 **27/27**（floor 24） |
+| 必读面预算 | **29,624 B ≈ 8,197 token（估算）**，占 200k 上下文 4.1%；预算 9,000 token / 32 KB |
 | 候选比较 | 自检 **4/4**：单份=唯一；等价改写=歧义；原件+两个错版=唯一；只有错版=无解 |
 | 首次成功率 | 量尺自检 **3/3**；**没有模型数据，数字未测量** |
 | 维护成本 | 改默认端口 **2 文件 / 4 个 +/- 行**；加配置项 **1 / 3**；改边界策略 **3 / 6** |
-| 破坏测试 | **14 抓住 / 0 假阴性**，每条带归因（哪个工具、什么诊断） |
-| 作者回路 | `check.sh` 快档 **6/6 绿**；题面包 7,190 token（估算）、无实现文件；提交口接受参考实现、拒绝丢 bool 的候选 |
+| 破坏测试 | **17 抓住 / 0 假阴性**，每条带归因（哪个工具、什么诊断）；#15–#17 验的是题面与译稿：删掉 `ck 27` -> freeze 红、删掉 R17 的译法记录 -> req-check 红、把歧义 A2 改成“未定” -> req-check 红 |
+| 作者回路 | `check.sh` 快档 **6/6 绿**；题面包 9,886 token（估算，v0.36 起含 `req/` 五份译稿；预算 12,000）、无实现文件；提交口接受参考实现、拒绝丢 bool 的候选 |
 | 实验（决定层） | **3 次独立生成，pass@1 = 3/3**（12/12 样例，首次即过）；详见 [EXPERIMENT.md](EXPERIMENT.md) |
-| 实验（维护） | **1 次陌生改动：5 文件 / 18 个 +/- 行，`check --full` 全绿（当时 10 项；当前基线 13 项）**，断言 26 条未删未放宽 |
+| 实验（维护） | **1 次陌生改动：5 文件 / 18 个 +/- 行，`check --full` 全绿（当时 10 项；当前基线 13 项）**，断言未删未放宽（当时 26 条） |
 
-### 2.1 接口承诺（26 条断言钉住的那些）
+### 2.1 接口承诺（27 条断言钉住的那些）
 
 | # | 承诺 |
 | --- | --- |
@@ -65,6 +66,7 @@ ASan+UBSan：把 `build.sh` 里的 `cc` 换成 `cc -g -fsanitize=address,undefin
 | 20–21 | 同一 key 连 POST 两次 = 409（丢 bool 那一局）；GET 回来的字节 = 上次 PUT 的字节 |
 | 22–24 | 覆盖写前留快照（3 份）；4 次成功写入 = 4 条提交；清单 3 个 key 来自目录本身 |
 | 25–26 | 配了 token 时，错 token / 没带 token 一律 401（鉴权判断在 `dp_decide.c`，样例 #12–#16 覆盖同一份） |
+| 27 | 清单 body 精确等于 `{"keys":["demo","second","third"]}`：对象外壳 + 字典序（v0.36 的一句新需求 `S14`/`R17`） |
 
 ### 2.2 候选比较说明了什么
 
@@ -96,7 +98,7 @@ ASan+UBSan：把 `build.sh` 里的 `cc` 换成 `cc -g -fsanitize=address,undefin
 
 1. **覆盖面窄**。oracle 覆盖 5 个纯决定（19 条样例），但读写、快照轮转、提交调度仍在运行时；
    “19/19 全过”不等于“服务正确”。
-2. **wire 断言是人写的**。26 条之外的错误不会自己冒出来；漏掉的测试就是没有的测试。
+2. **wire 断言是人写的**。27 条之外的错误不会自己冒出来；漏掉的测试就是没有的测试。
 3. **变异有 2 个 MISS**。我判定它们与实现等价（无符号与非零判断同外延），工具并没有证明这一点。
 4. **运行时在检查面之外**。1468 行共享 C 没有样例、没有变异；它出问题只能靠 wire 断言兜。
 5. **没有长稳结论**。`soak.sh` 只跑过压缩时间自测（60 秒级），72 小时那条线仍是空的。
@@ -108,8 +110,42 @@ ASan+UBSan：把 `build.sh` 里的 `cc` 换成 `cc -g -fsanitize=address,undefin
    实测一次跨层维护（405 -> 501）是 5 文件 / 18 个 +/- 行，因为映射住在运行时，
    样例碰不到，只能靠 wire 断言与目标措辞同步（EXPERIMENT §2）。
 9. **需求登记只对齐“已经写下的条款”**。需求文档本身漏写、写错、或把两件事混成一条，
-   四道门都发现不了；`req-check` 证明的是“条款与证据的链子没断”，不是“条款完整”。
-10. **变异覆盖 26/26 只覆盖 20 种已知错法**。它证明每条断言至少能被一种有意义的改动弄红，
+   五道门都发现不了；`req-check` 证明的是“条款与证据的链子没断”，不是“条款完整”。
+   翻译层（`TRANS`/`AMBIG`/`--baseline`）能把“抄现状”“默默选一种读法”“把表达不了的写成断言”
+   变成红，但它验的是**这次译得对不对得上旧实现**，不验译文本身。
+10. **变异覆盖 27/27 只覆盖 22 种已知错法**。它证明每条断言至少能被一种有意义的改动弄红，
     不证明断言集合覆盖了所有可能的错法。S 变异由人列清单，清单之外的新错法仍然没有证据。
 11. **冻结保护的是文件与契约哈希**。它拦“改题后再走提交口/快速回路”；如果有人完全绕过
     这些命令直接部署二进制，冻结不拦（与 §5 的 E7 同类口子）。
+
+## 5. 翻译层端到端：一句新需求走完五道门（2026-11-02，v0.36）
+
+文本需求只给一句：**“清单响应必须是一个 JSON 对象，顶层键 `keys`，值是按字典序排列的字符串数组。”**
+下面每一步都是实际跑过的命令与看到的输出。
+
+| 步 | 命令 | 看到什么 |
+| --- | --- | --- |
+| 1 源句 | 手写 `req/SRC.md` | 追加 `S14`；此前 13 句冻结不动 |
+| 2 条款 | `req/REQ.tsv` 加 `R17`，源句 `S14`，类型 `新增`，目标 `list_envelope`，断言 `27` | 与 16 条 `回归` 条款并排 |
+| 3 译法 | `req/TRANS.tsv` 加 `R17` 行；`req/AMBIG.tsv` 加 `A2`（“字典序”= 字节序，已定） | 排除栏写明不约束空白/转义；反例栏写“只查前缀会漏数字数组” |
+| 4 题面 | `accept-table.sh` 加 `ck 27`；`DP_GOALS` 加 `list_envelope` | 27 条断言、16 条目标 |
+| 5 基线先红 | `python3 code/sup/req-check.py .build/envelope-src/blobd --baseline .build/baseline-blobd --port 18600` | `回归 16 条全绿；新增 1 条在基线上为红`（旧实现回裸数组） |
+| 6 换题 | `freeze.sh --check` 先红（验收表、契约、5 份译稿都不在旧哈希里）-> 人类 `freeze.sh --update` | `题面冻结：12 项一致` |
+| 7 实现 | `dp_blob_list` 输出 `{"keys":[…]}`，空目录回 `{"keys":[]}` | 只改运行时一个函数 |
+| 8 验收 | `accept-sup.sh <新二进制> 18601` | `27 过 / 0 挂`，`#27 -> {"keys":["demo","second","third"]}` |
+| 9 变异 | `mutation-score.py --binary <新二进制> --floor 24` | `L 27/27；S 22/22；覆盖 27/27`，`S21`（退回裸数组）与 `S22`（排完再倒序）都恰好红 `#27` |
+| 10 一页 | `report.sh <二进制> --accept <端口>` | `R17 S14 新增 断言 #27 -> 绿`；页脚 `源句 14 → 条款 17（回归 16 / 新增 1）` |
+
+三个只有跑了才会说出来的事实：
+
+1. **“按字典序”这条翻译本来是错的**。`dp_blob_list` 早就 `qsort` 过了 —— 如果照原文直接登记成
+   一条独立断言，它在基线上就是绿的，`--baseline` 报“新增条款在基线上全绿”，把这条“抄现状”的
+   翻译挡在实现之前。真正没做到的是外壳。这一条不是事后诸葛：它是这一层设计时担心的第一个陷阱，
+   在这一轮真的踩到了。
+2. **精确 body 比结构检查更省事也更狠**。`ck 27` 直接比整串字节。前缀或“是 JSON 对象”这类检查
+   会被 `{"keys":[1,2,3]}` 骗过去；写进 `TRANS` 的反例栏之后，这个选择不再是随手写的断言。
+3. **换题是一个动作**。第 6 步的红不是失败 —— 它证明 `req/` 里的译稿确实被算进题面：
+   改译稿而不重新冻结，提交口直接拒。
+
+不能证明的：这轮验的是“**这一句**译成一条会红的检查”，不是“这句需求翻译得最好”。
+`AMBIG` 里两条都标了“已定”，但那是人的判断，工具只检查它有没有被写下来。
