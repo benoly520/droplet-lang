@@ -14,15 +14,22 @@
   陌生维护者 1 次：5 文件 / 18 个 +/- 行、`check --full` 全绿。样本极小，见 EXPERIMENT。
 - 三条回路已经是命令：`check.sh`（作者/维护，一条命令一个退出码）、`brief.sh`（题面包）、
   `submit-sup.sh`（提交口）、`report.sh`（人类验收页）。
+- “人不读实现、只验结果”落成四道门：`req/REQ.tsv` + `req-check.py`（条款↔目标↔断言/样例，
+  孤儿 = 红）、`freeze.sh` + `req/FROZEN`（题面哈希，改题必须显式 --update）、
+  `mutation-score.py`（L 26/26 改期望必红；S 20 条实现变异，覆盖 26/26）、
+  `report.sh` 按条款出一页。保证的是“已知错法会被指名抓住 + 改题不会静默通过”，
+  不是“实现 100% 正确”（SPEC §9）。
 - **不再做语言扩展**（决定，见 SPEC §2.1）：不加语法、不做编译器分支、不做注解检查器。
   “超集”只保留一条含义：合法 C11 不被拒绝。往后只加检查与覆盖面，不加语法。
 
 ## 1. 五分钟上手
 
 ```sh
-sh code/sup/check.sh --full                    # 一条命令一个退出码（构建/样例/契约/预算/验收/变异/破坏）
-sh code/sup/report.sh .build/check/blobd --accept 18881   # 人类：目标 -> 断言 -> 红绿
-sh code/sup/submit-sup.sh 你的.c               # 整条面接受或拒绝
+sh code/sup/check.sh --full                    # 一条命令一个退出码（13 项）
+sh code/sup/report.sh .build/check/blobd --accept 18881   # 人类：条款 -> 断言/样例 -> 红绿
+sh code/sup/submit-sup.sh 你的.c               # 整条面接受或拒绝（含题面冻结）
+python3 code/sup/req-check.py .build/check/blobd          # 登记链：孤儿 = 红
+python3 code/sup/mutation-score.py --binary .build/check/blobd  # 每条断言都会红吗
 ```
 
 需要：`cc`（C11）、`sh`、`python3`、`git`、`flock`、`curl`。不需要 Go。
@@ -66,6 +73,10 @@ sh code/sup/submit-sup.sh 你的.c               # 整条面接受或拒绝
 6. 改了必读面或参考实现：`surface-budget.sh` 在预算内。
 7. 改了决定层：`compare-sup.sh --self-test` 4/4（歧义判定没退化）。
 8. 改动了 `.o` 的引用关系：确认接线检查没有变空（`nm -u` 那五行仍打印“接线绿”）；运行时逐 TU 编 .o 就是为了这个。
+9. 改了需求或验收表：`req-check.py` 退出 0（孤儿断言/样例/目标 = 0），且条款与目标声明一致。
+10. 动了题面（验收表/声明头/契约）：`freeze.sh --update` 由人显式重跑；否则提交口会以“题被改过”拒绝。
+11. 改了实现或断言：`mutation-score.py` 仍 L 26/26、S 20/20、覆盖不低于 floor 24。
+12. 人验收只看 `report.sh --accept`：条款全绿、未证 0、冻结与登记链一致。
 
 ## 4. 坑（踩过的）
 

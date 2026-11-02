@@ -7,10 +7,12 @@
 #
 # 判据（顺序即优先级）：
 #   1) 构建：编译器对账 + 符号审计 + 接线检查（候选必须真的被服务引用）
-#   2) 样例：19 条全过，一条一个进程
-#   3) 验收：26 条 wire 断言全过
-#   4) 契约：四节自洽、编号不悬空
+#   2) 题面：与 req/FROZEN 一致（验收表/声明头/契约没被改过）
+#   3) 样例：19 条全过，一条一个进程
+#   4) 验收：26 条 wire 断言全过
+#   5) 契约：四节自洽、编号不悬空
 # 任何一项红 -> 拒绝，并指名红在哪一项。全绿 -> 接受。
+# 题面一项单列在前面：题被改过时，后面全绿也不作数。
 #
 # 用法：sh code/sup/submit-sup.sh <候选.c> [端口]
 set -eu
@@ -31,6 +33,7 @@ T=$ROOT/.build/submit
 rm -rf "$T"
 mkdir -p "$T"
 cp -a "$ROOT/code" "$T/code"
+cp -a "$ROOT/req" "$T/req"
 cp "$CAND" "$T/code/sup/dp_decide.c"
 LOGD=$T/logs
 mkdir -p "$LOGD"
@@ -52,8 +55,9 @@ step() { # step <名字> <命令...>：失败即拒绝
 
 echo "submit：$CAND"
 step build    sh "$T/code/sup/build.sh" submit
+step freeze   sh "$T/code/sup/freeze.sh" --check "$T/.build/submit/blobd"
 step oracle   sh "$T/code/sup/oracle-sup.sh" submit-oracle
 step accept   sh "$T/code/sup/accept-sup.sh" "$T/.build/submit/blobd" "$PORT" submit
 step contract python3 "$T/code/sup/contract-sup.py" "$T/.build/submit/blobd"
 
-echo "提交结果：接受（构建 / 19 样例 / 26 断言 / 契约 全绿）"
+echo "提交结果：接受（构建 / 题面冻结 / 19 样例 / 26 断言 / 契约 全绿）"

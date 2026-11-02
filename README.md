@@ -39,13 +39,13 @@ The superset form kept the part that did work. Everything under `code/` is C11 p
 Needs `cc` (C11), `sh`, `python3`, `git`, `flock`, `curl`. No Go, no code generator.
 
 ```sh
-sh code/sup/check.sh                            # one command, one exit code (build / samples / contract / budget)
-sh code/sup/report.sh .build/check/blobd --accept 18881   # human page: goal -> assertions -> red/green
+sh code/sup/check.sh                            # one command, one exit code (build/samples/contract/registry/freeze/budget)
+sh code/sup/report.sh .build/check/blobd --accept 18881   # human page: requirement -> assertions/samples -> red/green
 ```
 
 The authoring loop is three commands: `brief.sh` emits a task packet (declarations, contract, commands —
 no implementation), `check.sh` gives the first failing gate, `submit-sup.sh candidate.c` runs the whole
-surface in a scratch tree and accepts or rejects it. `check.sh --full` adds acceptance, mutation and
+surface in a scratch tree (including the question-freeze check) and accepts or rejects it. `check.sh --full` adds acceptance, mutation and
 sabotage for maintainers.
 
 Or talk to it directly:
@@ -73,6 +73,9 @@ curl -s           -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blo
 | candidate comparison (`compare-sup.sh`) | 0 or more than 1 candidate survives the examples (no solution / ambiguity) |
 | first-pass ruler (`firstpass.sh`) | given a candidate sequence, it computes first-pass and pass@k; **no model, no number** |
 | maintenance cost (`maint-cost.sh`) | a scripted change touches more files or +/- lines than its budget |
+| requirement registry (`req-check.py`) | a requirement has no assertion/example, or an assertion/example/goal is unclaimed, or a requirement disagrees with its goals' declared proof |
+| question freeze (`freeze.sh`) | the acceptance table, declaration headers or contract differ from `req/FROZEN` (the question was edited) |
+| mutation score (`mutation-score.py`) | changing assertion N's expectation does not turn it red, a mutant reddens an undeclared assertion, or coverage falls below the floor |
 | sabotage (`sabotage-sup.sh`) | one of 14 injected defects is *not* caught by a named tool with a named diagnostic |
 
 The last row is the important one: it checks the checkers. A "caught" that is really a compile error
@@ -86,10 +89,12 @@ code/sup/            the checked layer: four declaration tables, the flagship se
   dp_env.h           DP_ENVS — 18 lines, user-owned
   dp_decide.h/.c     five pure decisions + 19 DP_EXAMPLES — 114 lines, user-owned, linked by the service
   check.sh report.sh brief.sh submit-sup.sh   the three loops: author, human acceptance, submission
+  req-check.py freeze.sh mutation-score.py   registry / question freeze / assertion sensitivity
   dp_sup.h dp_cfg.c dp_conf.h dp_oracle.c   mechanism, 344 lines
 code/runtime/        the service runtime, 1468 lines of C (rt_core / rt_http / rt_blob / rt_ver, incl. rt.h)
 code/sup/lab/        the experiment packet: two decisions that do not exist in this repo
 code/webapi/deploy/  26-assertion acceptance table, soak, systemd unit, env example
+req/                 requirement registry (16 clauses), frozen question hashes, README
 docs/                SPEC, VALIDATION (numbers), EXPERIMENT (two trials), NEXT (handoff)
 ```
 

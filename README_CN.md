@@ -32,13 +32,13 @@
 需要 `cc`（C11）、`sh`、`python3`、`git`、`flock`、`curl`。不需要 Go，也不需要代码生成器。
 
 ```sh
-sh code/sup/check.sh                           # 一条命令一个退出码（构建 / 样例 / 契约 / 预算）
-sh code/sup/report.sh .build/check/blobd --accept 18881   # 人类验收页：目标 -> 断言 -> 红绿
+sh code/sup/check.sh                           # 一条命令一个退出码（构建/样例/契约/登记/冻结/预算）
+sh code/sup/report.sh .build/check/blobd --accept 18881   # 人类验收页：条款 -> 断言/样例 -> 红绿
 ```
 
 作者回路是三段：`brief.sh` 出题面包（声明 + 契约 + 命令，不含实现）、`check.sh` 给第一个失败项、
-`submit-sup.sh 候选.c` 在临时树里跑整条面并接受/拒绝。维护者用 `check.sh --full`
-追加验收、变异与破坏测试。
+`submit-sup.sh 候选.c` 在临时树里跑整条面并接受/拒绝（含题面冻结）。维护者用 `check.sh --full`
+追加验收、变异、破坏与变异覆盖分。
 
 或者直接打它：
 
@@ -65,6 +65,9 @@ curl -s          -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blob
 | 候选比较（`compare-sup.sh`） | 0 份或 >1 份候选通过样例（无解 / 歧义） |
 | 首次成功率量尺（`firstpass.sh`） | 给定候选序列时算 first-pass 与 pass@k；**没有模型，就没有数字** |
 | 维护成本（`maint-cost.sh`） | 脚本化改动的文件数或 +/- 行数超过预算 |
+| 需求登记（`req-check.py`） | 条款没有断言/样例撑着；或断言/样例/目标没人认领；或条款与目标声明的证明不一致 |
+| 题面冻结（`freeze.sh`） | 验收表、声明头或契约与 `req/FROZEN` 不一致（题被改过） |
+| 变异覆盖分（`mutation-score.py`） | 改第 N 条断言的期望它不红；或实现变异红了没声明的断言；或覆盖低于 floor |
 | 破坏测试（`sabotage-sup.sh`） | 14 条注入的缺陷里有一条**没有**被具名工具以具名诊断抓住 |
 
 最后一行最重要：它检查的是检查器本身。“被抓住”如果其实是注入代码写坏了导致的编译失败，那是假绿 ——
@@ -78,10 +81,12 @@ code/sup/            受检层：四张声明表、旗舰服务、全部检查
   dp_env.h           DP_ENVS —— 18 行，用户所有
   dp_decide.h/.c     五个纯决定 + 19 条 DP_EXAMPLES —— 114 行，用户所有，服务链接的就是这份
   check.sh report.sh brief.sh submit-sup.sh   三条回路：作者、人类验收、提交口
+  req-check.py freeze.sh mutation-score.py   登记链 / 题面冻结 / 断言灵敏度
   dp_sup.h dp_cfg.c dp_conf.h dp_oracle.c   机制，344 行
 code/runtime/        服务运行时，1468 行 C（rt_core / rt_http / rt_blob / rt_ver，含 rt.h）
 code/sup/lab/        实验题面包：两条本仓库里不存在的决定
 code/webapi/deploy/  26 条断言表、soak、systemd 单元、环境变量样例
+req/                 需求登记（16 条条款）、冻结清单 FROZEN、README（四道门怎么用）
 docs/                SPEC、VALIDATION（实测数字）、EXPERIMENT（两个实验）、NEXT（交接）
 ```
 

@@ -8,6 +8,9 @@ name: CI
 #   mutate   对纯决定做机械变异，逐条断言预期结局与归因
 #   accept   26 条 wire 断言（服务对外的承诺）
 #   contract DP_GOALS 与断言编号对账（目标是否都被证明、断言是否都有归属）
+#   req      需求条款 ↔ 目标 ↔ 断言/样例 的登记链（孤儿断言/样例/目标 = 红）
+#   freeze   题面（验收表/声明头/契约）与 req/FROZEN 一致，改题必须显式 --update
+#   score    变异覆盖分：26 条断言每条都至少被一条实现变异弄红
 #   surface  必读面的字节/token 预算（面有没有悄悄膨胀）
 #   compare  候选比较：样例能不能把唯一正确的一份挑出来（含自检）
 #   firstpass 首次成功率量尺（含自检；没有模型数据，数字不在这里产生）
@@ -45,6 +48,12 @@ jobs:
         run: sh code/sup/accept-sup.sh "$GITHUB_WORKSPACE/.build/ci-sup/blobd" 18951 ci
       - name: 契约对账（目标 ↔ 断言编号）
         run: python3 code/sup/contract-sup.py "$GITHUB_WORKSPACE/.build/ci-sup/blobd"
+      - name: 需求登记（条款 ↔ 目标 ↔ 断言/样例）
+        run: python3 code/sup/req-check.py "$GITHUB_WORKSPACE/.build/ci-sup/blobd"
+      - name: 题面冻结（验收表/声明头/契约没被改过）
+        run: sh code/sup/freeze.sh --check "$GITHUB_WORKSPACE/.build/ci-sup/blobd"
+      - name: 变异覆盖分（每条断言都能被弄红）
+        run: python3 code/sup/mutation-score.py --binary "$GITHUB_WORKSPACE/.build/ci-sup/blobd" --l-port 18340 --s-port 18440
       - name: 必读面预算
         run: sh code/sup/surface-budget.sh
       - name: 候选比较自检（唯一/无解/歧义）

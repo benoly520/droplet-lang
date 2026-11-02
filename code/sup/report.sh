@@ -1,15 +1,16 @@
 #!/bin/sh
-# 人类验收页：一屏看完"目标有没有证据"，不用读实现。
+# 人类验收页：一屏看完“需求条款有没有证据”，不用读实现。
 #
-# 为什么是这一张：这个工程的承诺是"人只看结果"。结果不是 26 个数字，而是
-# **每条服务目标由哪几条断言证明、这些断言这一版是不是绿的**。所以报告按目标组织，
-# 不按断言编号组织 —— 编号是给机器的，目标是给人的。
+# 为什么按条款组织：这个工程的承诺是"人只看结果"。结果不是 26 个数字，而是
+# **每一条需求由哪几条断言/样例证明、这一版是不是绿的**。断言编号是给机器的，
+# 需求条款是给人的；中间那层（DP_GOALS）已经由 req-check 对过账。
 #
 # 口径：
-#   * 目标、断言编号、路由、样例全部从编译产物的 `--contract` 里读，不从源码正则猜；
-#   * 断言的红绿来自 `accept-table.sh` 的实际运行（--accept 时），没跑就写"未跑"，
-#     绝不用"上次是绿的"代替；
-#   * 未证目标（proven 为空）单独计数 —— 沉默不算决定。
+#   * 条款、断言编号、样例编号全部来自 req/REQ.tsv；
+#   * 样例红绿来自 oracle-sup.sh 的实际运行，断言红绿来自 accept-table.sh 的实际运行
+#     （--accept 时）；没跑就写"未跑"，绝不用"上次是绿的"代替；
+#   * 题面冻结状态由 freeze.sh --check 现场核对；
+#   * 未证目标（DP_GOALS 里 proven 为空）单独计数 —— 沉默不算决定。
 #
 # 用法：
 #   sh code/sup/report.sh [二进制] [--accept <端口>]
@@ -41,36 +42,67 @@ if [ ! -x "$BIN" ]; then
   echo "挂：找不到可执行的服务二进制 $BIN（先跑 sh code/sup/build.sh）" >&2
   exit 2
 fi
+BIN=$(CDPATH= cd -- "$(dirname -- "$BIN")" && pwd)/$(basename "$BIN")
 
 TMP=$ROOT/.build/report
 rm -rf "$TMP"; mkdir -p "$TMP"
 "$BIN" --contract > "$TMP/contract.json"
 
+# 样例：19 条封闭样例，一条一个进程；这里要的是逐条红绿。
+ORA_LOG=$TMP/oracle.log
+if sh code/sup/oracle-sup.sh report-oracle >"$ORA_LOG" 2>&1; then
+  ORA_OK=1
+else
+  ORA_OK=0
+fi
+
 ACC=""
 if [ -n "$PORT" ]; then
   LOG=$TMP/accept.log
-  if sh code/sup/accept-sup.sh "$(CDPATH= cd -- "$(dirname -- "$BIN")" && pwd)/$(basename "$BIN")" "$PORT" report >"$LOG" 2>&1; then
+  if sh code/sup/accept-sup.sh "$BIN" "$PORT" report >"$LOG" 2>&1; then
     ACC=green
   else
     ACC=red
   fi
-  echo "（验收：$(tail -n 1 "$LOG")）"
+  echo "（验收：$(grep -E '[0-9]+ 过 / [0-9]+ 挂' "$LOG" | tail -n 1)）"
 fi
 
-python3 - "$TMP/contract.json" "$ACC" "$TMP/accept.log" <<'PY'
-import json, re, sys
+FREEZE_OK=0
+if sh code/sup/freeze.sh --check "$BIN" >"$TMP/freeze.log" 2>&1; then
+  FREEZE_OK=1
+fi
+REQ_OK=0
+if python3 code/sup/req-check.py "$BIN" >"$TMP/req.log" 2>&1; then
+  REQ_OK=1
+fi
+
+python3 - "$TMP/contract.json" "$ACC" "$TMP/accept.log" "$ORA_LOG" \
+          "$FREEZE_OK" "$REQ_OK" "$TMP/freeze.log" "$TMP/req.log" "$ORA_OK" <<'PY'
+import json, os, re, sys
 
 contract = json.load(open(sys.argv[1], encoding="utf-8"))
 acc = sys.argv[2]
-status = {}
-try:
-    with open(sys.argv[3], encoding="utf-8") as f:
-        for line in f:
-            m = re.match(r"\s+(ok|FAIL)\s+#(\d+)", line)
-            if m:
-                status[int(m.group(2))] = (m.group(1) == "ok")
-except (OSError, IndexError):
-    pass
+accept_log, oracle_log = sys.argv[3], sys.argv[4]
+freeze_ok, req_ok = sys.argv[5] == "1", sys.argv[6] == "1"
+freeze_log, req_log = sys.argv[7], sys.argv[8]
+ora_ok = sys.argv[9] == "1"
+
+
+def statuses(path):
+    st = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                m = re.match(r"\s+(ok|FAIL)\s+#(\d+)", line)
+                if m:
+                    st[int(m.group(2))] = (m.group(1) == "ok")
+    except OSError:
+        pass
+    return st
+
+
+a_st = statuses(accept_log) if acc else {}
+e_st = statuses(oracle_log)
 
 def width(s):
     return sum(2 if ord(c) > 127 else 1 for c in s)
@@ -78,41 +110,100 @@ def width(s):
 def pad(s, n):
     return s + " " * max(0, n - width(s))
 
+def cut(s, n):
+    out = ""
+    for ch in s:
+        if width(out + ch) > n - 2:
+            return out + "…"
+        out += ch
+    return out
+
+reqs = []
+root = os.getcwd()  # report.sh 已经 cd 到仓库根
+reqfile = os.path.join(root, "req", "REQ.tsv")
+for line in open(reqfile, encoding="utf-8"):
+    if not line.strip() or line.lstrip().startswith("#"):
+        continue
+    f = line.rstrip("\n").split("\t")
+    if len(f) != 5:
+        continue
+    rid, text, gs, as_, es = [x.strip() for x in f]
+    def ids(s):
+        if s in ("", "-"):
+            return []
+        return [x for x in s.split(",") if x]
+    reqs.append((rid, text, ids(gs), ids(as_), ids(es)))
+
 goals = contract["goals"]
 routes = contract["routes"]
 examples = contract["examples"]
 envs = contract["envs"]
 unproven = [g for g in goals if not g["proven"]]
 
-print()
-print("Droplet 验收报告")
-print(f"  介质：合法 C11 + 4 张表   |   路由 {len(routes)}   |   配置 {len(envs)}   |   样例 {len(examples)}   |   目标 {len(goals)}（未证 {len(unproven)}）")
-print()
-print("  " + pad("目标", 26) + pad("断言", 18) + "结果")
-print("  " + "-" * 62)
-for g in goals:
-    ids = ", ".join("#" + p for p in g["proven"]) or "—"
-    if not g["proven"]:
-        res = "未证"
-    elif acc == "":
-        res = "未跑"
-    elif any(status.get(int(p)) is False for p in g["proven"]):
-        res = "红"
-    elif any(int(p) not in status for p in g["proven"]):
-        res = "未跑"
+rows = []
+bad_req = 0
+unrun_req = 0
+for rid, text, gs, as_, es in reqs:
+    bad = any(a_st.get(int(a)) is False for a in as_) or \
+          any(e_st.get(int(e)) is False for e in es)
+    unknown = (bool(as_) and not acc) or \
+              any(int(a) not in a_st for a in as_) or \
+              any(int(e) not in e_st for e in es)
+    if bad:
+        res, bad_req = "红", bad_req + 1
+    elif unknown:
+        res, unrun_req = "未跑", unrun_req + 1
     else:
         res = "绿"
-    print("  " + pad(g["id"], 26) + pad(ids, 18) + res)
+    ev = []
+    if as_:
+        ev.append("断言 " + ",".join("#" + a for a in as_))
+    if es:
+        ev.append("样例 " + ",".join("#" + e for e in es))
+    rows.append((rid, text, "；".join(ev), res))
+
+print()
+print("Droplet 验收报告")
+print("  介质：合法 C11 + 4 张表   |   路由 %d   |   配置 %d   |   样例 %d   |   目标 %d（未证 %d）   |   条款 %d"
+      % (len(routes), len(envs), len(examples), len(goals), len(unproven), len(reqs)))
+print()
+print("  " + pad("条款", 7) + pad("需求", 46) + pad("证据", 31) + "结果")
+print("  " + "-" * 90)
+for rid, text, ev, res in rows:
+    print("  " + pad(rid, 7) + pad(cut(text, 44), 46) + pad(cut(ev, 29), 31) + res)
 print()
 print("  路由：" + " / ".join(f"{r['method']} {r['path']}" for r in routes))
-print(f"  样例：{len(examples)} 条封闭样例覆盖纯决定；未覆盖的读写与轮转由 wire 断言兜着")
-if acc == "":
+print("  样例：%d 条封闭样例覆盖纯决定；读写、轮转与 wire 语义由断言兜着" % len(examples))
+if unproven:
+    print("  未证目标（DP_GOALS.proven 为空）：" + ", ".join(g["id"] for g in unproven))
+else:
+    print("  未证目标：0 条（每条目标都有断言或样例认领）")
+
+print("  题面冻结：" + ("一致（题没被改过）" if freeze_ok else "红 —— 题面与 req/FROZEN 不一致"))
+print("  登记链：  " + ("一致（条款 ↔ 目标 ↔ 断言/样例）" if req_ok else "红 —— 见 python3 code/sup/req-check.py"))
+
+if not ora_ok:
+    print("  样例 oracle：红 —— 样例没跑全，凡是有样例的条款都不能算绿。")
+
+if not acc:
     print()
     print("  断言结果未附：加 --accept <端口> 跑一次验收表，这一栏才有红绿。")
-    print("  本页只证明契约自洽，不证明服务这一版是好的。")
+    print("  本页现在只证明“条款都有证据”，不证明服务这一版是好的。")
 else:
-    ok = sum(1 for v in status.values() if v)
-    bad = sum(1 for v in status.values() if not v)
+    ok_a = sum(1 for v in a_st.values() if v)
+    bad_a = sum(1 for v in a_st.values() if not v)
+    ok_e = sum(1 for v in e_st.values() if v)
+    bad_e = sum(1 for v in e_st.values() if not v)
     print()
-    print(f"  结论：{len(goals) - len(unproven)}/{len(goals)} 目标有断言；断言 {ok} 绿 / {bad} 红（接的是这一版二进制）")
+    print("  结论：条款 %d 绿 / %d 红 / %d 未跑；断言 %d 绿 / %d 红；样例 %d 绿 / %d 红（接的是这一版二进制）"
+          % (len(reqs) - bad_req - unrun_req, bad_req, unrun_req, ok_a, bad_a, ok_e, bad_e))
+    if not req_ok:
+        print("  注意：登记链是红的 —— 上面的条款映射本身不可信，先修 req-check。")
+    if not freeze_ok:
+        print("  注意：题面冻结是红的 —— 这一版验的题与冻结时不是同一道题。")
+
+fail = (not freeze_ok) or (not req_ok) or (not ora_ok) or bad_req > 0 or \
+       any(v is False for v in e_st.values()) or \
+       (bool(acc) and any(v is False for v in a_st.values()))
+sys.exit(1 if fail else 0)
 PY

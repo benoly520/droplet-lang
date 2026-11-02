@@ -1,0 +1,10 @@
+# Droplet 题面冻结清单（由 code/sup/freeze.sh --update 生成）
+# 一行一项：路径 <TAB> sha256。contract.json 是 `blobd --contract` 的原始输出哈希。
+# 改动其中任意一项，submit 口都会以“题被改过”拒绝，直到人类重跑 --update。
+code/webapi/deploy/accept-table.sh	9f32fcb4da285840974b56c9c3b96be014d03cc896ed94f613b7f24e3a4d8c08
+code/sup/dp_decide.h	4798e7db8a0b68e8f938ee6820946d19e877a7876017f6340aab589c43603fc1
+code/sup/dp_env.h	b15c5cbddf3269be3e185e639141bece7df5592d49acb077320de42305537667
+code/sup/dp_sup.h	7a2c75d0ccb76dcf7e1d2e627e84d82dd52ee64aca8e6abd47023b4f9eeba9fe
+code/sup/dp_conf.h	74bde6029280394156967ae2487fdd55c86f4e0c5c207a80d35844d943d02fff
+code/runtime/rt.h	2b6366dbe0ac8767129bdd3bfbd2c9b340ad4f69d76b1087a8672126edc05eca
+contract.json	97816a5bc94f5789c8ab29b387aa1a4fcee253ee9319b2646909dd4cbdf8efa3
