@@ -91,6 +91,24 @@ if [ "$MODE" = "update" ]; then
     printf '%s\t%s\n' contract.json "$(contract_hash)"
   } >"$TMP"
   mv "$TMP" "$FROZEN"
+  # 换题的同时把**基线**钉住：req-check 的先红后绿拿这份题面去问“上一个实现”，靠的就是这一行。
+  # 写的是**此刻的 HEAD**（= 换题之前那道题的实现），不是工作区。
+  # 已经存在就不覆盖：一轮里反复改译稿（加一列、改反例措辞）不该把基线换成“已经做完的这版”。
+  # 要换基线是一个显式动作 —— 删掉 req/BASELINE 再跑一次 --update。
+  HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
+  if [ -z "$HEAD" ]; then
+    echo "警告：拿不到 HEAD（不是 git 仓库？）—— 没写 req/BASELINE，新增条款的先红后绿无法自动跑" >&2
+  elif [ -s req/BASELINE ]; then
+    echo "基线不变：$(grep -v '^#' req/BASELINE | head -n 1)（要换基线就删掉 req/BASELINE 再 --update）"
+  else
+    {
+      echo "# 基线 commit：换题那一刻的实现；先红后绿用它 + 当前题面构建“旧实现”。"
+      echo "# 由 code/sup/freeze.sh --update 写；手改这一行等于自证基线不可信。"
+      echo "# 浅 clone 里导不出来时：git fetch --unshallow，或手跑 req-check.py --baseline <二进制>。"
+      printf '%s\n' "$HEAD"
+    } > req/BASELINE
+    echo "基线已钉：$HEAD -> req/BASELINE"
+  fi
   echo "题面冻结已更新：$(printf '%s\n' "$FILES" | grep -c .) 份文件 + 契约 -> $FROZEN"
   exit 0
 fi

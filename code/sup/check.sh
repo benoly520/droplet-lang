@@ -43,7 +43,12 @@ echo "check（$MODE）："
 run build    sh code/sup/build.sh check
 run oracle   sh code/sup/oracle-sup.sh check-oracle
 run contract python3 code/sup/contract-sup.py .build/check/blobd
-run req      python3 code/sup/req-check.py .build/check/blobd
+if [ "${REQ_BASELINE:-1}" = "0" ]; then
+  # 显式逃生口：浅 clone / 拿不到基线 commit 时用。结论页会写明这一层没走完。
+  run req      python3 code/sup/req-check.py .build/check/blobd --no-baseline
+else
+  run req      python3 code/sup/req-check.py .build/check/blobd
+fi
 run freeze   sh code/sup/freeze.sh --check .build/check/blobd
 run surface  sh code/sup/surface-budget.sh
 

@@ -67,13 +67,13 @@ curl -s           -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blo
 | wiring check (`build.sh`, `nm -u`) | the service no longer references a decision that `DP_EXAMPLES` grades — i.e. the examples would grade a copy |
 | sample oracle (`oracle-sup.sh`) | any `DP_EXAMPLES` row fails; zero runnable examples counts as failure; a crash is listed, never a pass |
 | mutation (`mutate-dec.sh`) | a mutant survives and is not a hand-judged equivalent (13 mutants: 10 caught / 2 equivalent / 1 compile-time) |
-| wire assertions (`accept-table.sh`) | any of 27 external promises is broken (status, headers, body, snapshot, commit, auth, list envelope) |
+| wire assertions (`accept-table.sh`) | any of 30 external promises is broken (status, headers, body, snapshot, commit, auth, list envelope, content-type, boot-time refusal) |
 | contract reconciliation (`contract-sup.py`) | a goal cites an assertion number that does not exist, or a goal is left unproven (`""` is an explicit admission) |
 | surface budget (`surface-budget.sh`) | the must-read tables, types and reference service grow past 9,000 tokens / 32 KB |
 | candidate comparison (`compare-sup.sh`) | 0 or more than 1 candidate survives the examples (no solution / ambiguity) |
 | first-pass ruler (`firstpass.sh`) | given a candidate sequence, it computes first-pass and pass@k; **no model, no number** |
 | maintenance cost (`maint-cost.sh`) | a scripted change touches more files or +/- lines than its budget |
-| translation layer (`req/SRC.md` + `req/TRANS.tsv` + `req/AMBIG.tsv` + `req/GAP.tsv`) | a clause has no recorded reading, its counterexample column is empty, an ambiguity is undecided, a gap is unclosed, or (with `--baseline`) a `新增` clause was already green on the old binary — i.e. the status quo was transcribed as a requirement |
+| translation layer (`req/SRC.md` + `req/REQ.tsv` + `req/TRANS.tsv` + `req/AMBIG.tsv` + `req/GAP.tsv` + `req/BASELINE`) | a clause has no recorded reading, its counterexample column is empty or claims a catcher (`S<n>`/`E<n>`) that doesn't exist or didn't actually redden this clause's assertions, an ambiguity is undecided, a gap is `未闭`, or a `新增` clause was already green on the baseline (old implementation + current question) — i.e. the status quo was transcribed as a requirement. The baseline check now runs automatically |
 | requirement registry (`req-check.py`) | a requirement has no assertion/example, or a source sentence/assertion/example/goal is unclaimed, or a requirement disagrees with its goals' declared proof |
 | question freeze (`freeze.sh`) | the acceptance table, declaration headers, the five translation files or the contract differ from `req/FROZEN` (the question was edited) |
 | mutation score (`mutation-score.py`) | changing assertion N's expectation does not turn it red, a mutant reddens an undeclared assertion, or coverage falls below the floor |
@@ -94,8 +94,8 @@ code/sup/            the checked layer: four declaration tables, the flagship se
   dp_sup.h dp_cfg.c dp_conf.h dp_oracle.c   mechanism, 344 lines
 code/runtime/        the service runtime, 1468 lines of C (rt_core / rt_http / rt_blob / rt_ver, incl. rt.h)
 code/sup/lab/        the experiment packet: two decisions that do not exist in this repo
-code/webapi/deploy/  27-assertion acceptance table, soak, systemd unit, env example
-req/                 14 source sentences, 17 clauses, translation ledgers (TRANS/AMBIG/GAP), frozen hashes, README
+code/webapi/deploy/  30-assertion acceptance table, soak, systemd unit, env example
+req/                 16 source sentences, 19 clauses, translation ledgers (TRANS/AMBIG/GAP), baseline pin, frozen hashes, README
 docs/                SPEC, VALIDATION (numbers), EXPERIMENT (two trials), NEXT (handoff)
 ```
 

@@ -161,11 +161,16 @@ reqs = [(r[0], r[1], ids(r[2]), r[3], ids(r[4]), ids(r[5]), ids(r[6]))
         for r in tsv("REQ.tsv", 7)]
 nsrc = len(re.findall(r"^S\d+\s", open(os.path.join(root, "req", "SRC.md"),
                                        encoding="utf-8").read(), re.M))
-trans = tsv("TRANS.tsv", 5)
+trans = tsv("TRANS.tsv", 6)
 ambig = tsv("AMBIG.tsv", 7)
 gaps = tsv("GAP.tsv", 4)
 unresolved = [a[0] for a in ambig if a[6] != "已定"]
-open_gaps = [g[0] for g in gaps if g[3] != "已闭"]
+open_gaps = [g[0] for g in gaps if g[3] == "未闭"]
+wide_gaps = [g for g in gaps if g[3] == "不闭"]
+done_gaps = [g[0] for g in gaps if g[3].startswith("已闭")]
+gap_by_rid = {}
+for g in gaps:
+    gap_by_rid.setdefault(g[1], []).append(g)
 kinds = {}
 for r in reqs:
     kinds[r[3]] = kinds.get(r[3], 0) + 1
@@ -198,6 +203,8 @@ for rid, text, ss, typ, gs, as_, es in reqs:
         ev.append("样例 " + run(es))
     if not ev:
         ev.append("（缺口：无证据）")
+    for g in gap_by_rid.get(rid, []):
+        ev.append("缺口 %s %s" % (g[0], g[3]))
     rows.append((rid, "/".join(ss), typ, text, "；".join(ev), res))
 
 print()
@@ -216,8 +223,22 @@ print("  样例：%d 条封闭样例覆盖纯决定；读写、轮转与 wire �
 print("  译稿：源句 %d → 条款 %d（回归 %d / 新增 %d / 缺口 %d），逐条语义对账 %d 份"
       % (nsrc, len(reqs), kinds.get("回归", 0), kinds.get("新增", 0),
          kinds.get("缺口", 0), len(trans)))
-print("  歧义 %d（未定 %d）；缺口登记 %d（未闭 %d）"
-      % (len(ambig), len(unresolved), len(gaps), len(open_gaps)))
+n_ev = sum(1 for t in trans if len(t) == 6 and t[5] not in ("", "-"))
+# "-" 有两种，别混：反例写“无…”（译法与原文同宽，本来就没有反例可认领），
+# 和写了真反例但眼下没人管（这种必须由 GAP 行挂着，req-check 会查）。
+n_same = sum(1 for t in trans if len(t) == 6 and t[5] == "-" and t[4].startswith("无"))
+n_gaponly = sum(1 for t in trans if len(t) == 6 and t[5] == "-" and not t[4].startswith("无"))
+print("  反例台账：%d 条里 %d 条认领了判据（S=实现变异 / E=样例）；"
+      "%d 条写“-”：其中 %d 条是“译法与原文同宽”，%d 条没有判据、靠 GAP 登记挂在验收页上"
+      % (len(trans), n_ev, len(trans) - n_ev, n_same, n_gaponly))
+print("  歧义 %d（未定 %d）；缺口登记 %d（未闭 %d / 不闭 %d / 已闭 %d）"
+      % (len(ambig), len(unresolved), len(gaps),
+         len(open_gaps), len(wide_gaps), len(done_gaps)))
+if wide_gaps:
+    print("  不闭的边界（承认验不到那一步，挂着让人看）："
+          + "；".join("%s %s：%s" % (g[0], g[1], cut(g[2], 30)) for g in wide_gaps))
+if done_gaps:
+    print("  已闭的缺口：" + ",".join(done_gaps) + "（补了判据，闭合方式写在那一行的文本里）")
 if unresolved or open_gaps:
     print("  译稿是红的：未定歧义 " + (",".join(unresolved) or "-")
           + "，未闭缺口 " + (",".join(open_gaps) or "-"))

@@ -1,7 +1,7 @@
 #!/bin/sh
 # 超集介质这一侧的入口（v0.33 起只剩薄壳）。
 #
-# 断言表住在 `code/webapi/deploy/accept-table.sh`（27 条）；这里只做参数检查后 exec。
+# 断言表住在 `code/webapi/deploy/accept-table.sh`（30 条）；这里只做参数检查后 exec。
 # CLI：<二进制绝对路径> <端口> <标签>（CI 的 sup job、sabotage S6、手跑都这样调）。
 # 用法：sh code/sup/accept-sup.sh <二进制绝对路径> <端口> <标签>
 set -eu

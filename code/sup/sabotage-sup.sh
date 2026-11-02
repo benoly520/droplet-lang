@@ -305,7 +305,7 @@ if try_build s10; then report_miss 10 "把决定就地重写回胶水层（绕�
 fi
 
 # ---- S11：把区间的决定就地抄回机制 TU（第二条口子，接法与 S10 相同） ----
-# 端口那条决定住在 dp_cfg.c（机制 TU）里被调用。行为完全等价，21 条断言照样全过 ——
+# 端口那条决定住在 dp_cfg.c（机制 TU）里被调用。行为完全等价，整张断言表照样全过 ——
 # 被绕开的不是 bug 检查，是"样例验的是跑的那一份"这件事本身。所以这里的红必须是接线红。
 prep
 python3 - "$B" <<'PY11'
@@ -328,7 +328,7 @@ CFG_NAME=dp_cfg
 
 # ---- S12：把条件请求的判断就地抄回运行时（第三条接线，接法与 S10/S11 相同） ----
 # 判断从运行时搬进用户面之后，运行时只做"读"和"算"。把它抄回去，行为完全等价、
-# 27 条断言照样全过 —— 被绕开的仍然是"样例验的是跑的那一份"这件事本身。
+# 30 条断言照样全过 —— 被绕开的仍然是"样例验的是跑的那一份"这件事本身。
 prep
 python3 - "$B" "$RT/rt_http.c" <<'PY12'
 import sys
@@ -360,7 +360,7 @@ HTTP_NAME=rt_http
 HTTP_SRC=
 
 # ---- S13：把鉴权判断就地抄回运行时（第四条接线）----
-# 行为完全等价：配了 token 且不是 /health 时，没带头或头不对就 401。27 条断言照样全过，
+# 行为完全等价：配了 token 且不是 /health 时，没带头或头不对就 401。30 条断言照样全过，
 # 被绕开的仍是"样例验的是跑的那一份"。
 prep
 python3 - "$B" "$RT/rt_http.c" <<'PY13'
@@ -411,7 +411,7 @@ fi
 HTTP_NAME=rt_http
 HTTP_SRC=
 
-# ---- S15/S16/S17：题面与译稿的破坏（翻译层，v0.36）----
+# ---- S15–S20：题面、译稿与基线的破坏（翻译层，v0.36–v0.37）----
 # 这三条测的不是实现，是“题能不能被悄悄改简单”。所以先建一份**干净的临时树**证明三道门
 # 原本都绿，再逐条注入 —— 注入本身坏了（比如文件没被改）必须当场退出，不许算抓住。
 QT=$B/qtree
@@ -420,11 +420,16 @@ cp -a "$ROOT/code" "$QT/code"
 cp -a "$ROOT/req" "$QT/req"
 QT_REF=$B/clean   # S5 已经建好的干净参照二进制
 
-if sh "$QT/code/sup/freeze.sh" --check "$QT_REF" >/dev/null 2>&1    && python3 "$QT/code/sup/req-check.py" "$QT_REF" >/dev/null 2>&1; then
+# 临时树不是 git 仓库，基线门在这里只能显式跳过（--no-baseline）；它由 #18 单独验，
+# 那条不需要 git —— req/BASELINE 直接指一份现成的二进制就够了。
+QB="--port $((PORT0 + 60))"
+if sh "$QT/code/sup/freeze.sh" --check "$QT_REF" >/dev/null 2>&1 \
+   && python3 "$QT/code/sup/req-check.py" "$QT_REF" --no-baseline $QB >/dev/null 2>&1; then
   echo "  参照：临时树 freeze + req-check 全绿（破坏才有比对基准）"
 else
   echo "  参照临时树本身就红，破坏测试无从比对" >&2
   sh "$QT/code/sup/freeze.sh" --check "$QT_REF" 2>&1 | sed 's/^/      /' >&2 || true
+  python3 "$QT/code/sup/req-check.py" "$QT_REF" --no-baseline $QB 2>&1 | sed 's/^/      /' >&2 || true
   exit 1
 fi
 
@@ -446,10 +451,10 @@ cp -a "$ROOT/code" "$QT/code"
 cp -a "$ROOT/req" "$QT/req"
 grep -q '^R17' "$QT/req/TRANS.tsv" || { echo "S16 注入失败：TRANS 里没有 R17" >&2; exit 1; }
 sed -i '/^R17/d' "$QT/req/TRANS.tsv"
-if python3 "$QT/code/sup/req-check.py" "$QT_REF" >/dev/null 2>&1
+if python3 "$QT/code/sup/req-check.py" "$QT_REF" --no-baseline $QB >/dev/null 2>&1
 then report_miss 16 "删掉 R17 的 TRANS 行（没有译法记录）"
 else
-  python3 "$QT/code/sup/req-check.py" "$QT_REF" 2>&1 | grep -q 'R17 在 TRANS.tsv 里没有译法记录' \
+  python3 "$QT/code/sup/req-check.py" "$QT_REF" --no-baseline $QB 2>&1 | grep -q 'R17 在 TRANS.tsv 里没有译法记录' \
     || { echo "  S16 红了但不是 req-check 指名缺译法记录" >&2; exit 1; }
   report_caught s16 16 "req-check.py（TRANS 台账）" "删掉 R17 的译法记录：条款没有“为什么这么检查”的账 -> 红"
 fi
@@ -461,12 +466,55 @@ grep -q '^A2' "$QT/req/AMBIG.tsv" || { echo "S17 注入失败：AMBIG 里没有 
 sed -i '/^A2/s/\t已定$/\t未定/' "$QT/req/AMBIG.tsv"
 awk -F '\t' '$1 == "A2" && $NF == "未定" { f = 1 } END { exit f ? 0 : 1 }' "$QT/req/AMBIG.tsv" \
   || { echo "S17 注入失败：A2 状态没改成未定" >&2; exit 1; }
-if python3 "$QT/code/sup/req-check.py" "$QT_REF" >/dev/null 2>&1
+if python3 "$QT/code/sup/req-check.py" "$QT_REF" --no-baseline $QB >/dev/null 2>&1
 then report_miss 17 "把歧义 A2 改成未定"
 else
-  python3 "$QT/code/sup/req-check.py" "$QT_REF" 2>&1 | grep -q '还没有定论' \
+  python3 "$QT/code/sup/req-check.py" "$QT_REF" --no-baseline $QB 2>&1 | grep -q '还没有定论' \
     || { echo "  S17 红了但不是 req-check 指名歧义未定" >&2; exit 1; }
   report_caught s17 17 "req-check.py（AMBIG 台账）" "歧义改成未定：读法没定论就不许往下走 -> 红"
+fi
+
+# S18：把基线钉成“已经做完的这一版”—— 先红后绿就变成了自证：#27 在基线上直接绿。
+rm -rf "$QT/req"
+cp -a "$ROOT/req" "$QT/req"
+printf '%s\n' "$QT_REF" > "$QT/req/BASELINE"
+[ -x "$QT_REF" ] || { echo "S18 注入失败：参照二进制不在 $QT_REF" >&2; exit 1; }
+if python3 "$QT/code/sup/req-check.py" "$QT_REF" $QB >/dev/null 2>&1
+then report_miss 18 "把 req/BASELINE 指成当前实现（基线自己验自己）"
+else
+  python3 "$QT/code/sup/req-check.py" "$QT_REF" $QB 2>&1 | grep -q '全是绿的' \
+    || { echo "  S18 红了但不是基线门指名“新增条款在基线上全绿”（拒绝把别的红算成抓住）" >&2; exit 1; }
+  report_caught s18 18 "req-check.py（基线门）" "基线指向做完的这一版：#27/#29 在基线上全绿 -> 先红后绿不成立"
+fi
+
+# S19：把一条“不闭”的缺口改成“未闭”—— 缺口词汇表必须有牙齿，不闭≠可以偷偷升级成没账
+rm -rf "$QT/req"
+cp -a "$ROOT/req" "$QT/req"
+grep -q '^G1' "$QT/req/GAP.tsv" || { echo "S19 注入失败：GAP 里没有 G1" >&2; exit 1; }
+sed -i '/^G1/s/	不闭$/	未闭/' "$QT/req/GAP.tsv"
+awk -F '\t' '$1 == "G1" && $NF == "未闭" { f = 1 } END { exit f ? 0 : 1 }' "$QT/req/GAP.tsv" \
+  || { echo "S19 注入失败：G1 状态没改成未闭" >&2; exit 1; }
+if python3 "$QT/code/sup/req-check.py" "$QT_REF" --no-baseline $QB >/dev/null 2>&1
+then report_miss 19 "把缺口 G1 改成未闭"
+else
+  python3 "$QT/code/sup/req-check.py" "$QT_REF" --no-baseline $QB 2>&1 | grep -q '未闭：' \
+    || { echo "  S19 红了但不是 req-check 指名缺口未闭" >&2; exit 1; }
+  report_caught s19 19 "req-check.py（GAP 台账）" "缺口改成未闭：这一条挡路，翻译层不放行 -> 红"
+fi
+
+# S20：反例认领了一条根本不存在的变异 —— 台账上的账必须能在变异清单里查到
+rm -rf "$QT/req"
+cp -a "$ROOT/req" "$QT/req"
+grep -q '^R13	.*	S11$' "$QT/req/TRANS.tsv" || { echo "S20 注入失败：R13 的证据列不是 S11" >&2; exit 1; }
+sed -i 's/^\(R13	.*	\)S11$/\1S99/' "$QT/req/TRANS.tsv"
+awk -F '\t' '$1 == "R13" && $NF == "S99" { f = 1 } END { exit f ? 0 : 1 }' "$QT/req/TRANS.tsv" \
+  || { echo "S20 注入失败：R13 的证据没改成 S99" >&2; exit 1; }
+if python3 "$QT/code/sup/req-check.py" "$QT_REF" --no-baseline $QB >/dev/null 2>&1
+then report_miss 20 "把 R13 的反例认领到一个不存在的变异 S99"
+else
+  python3 "$QT/code/sup/req-check.py" "$QT_REF" --no-baseline $QB 2>&1 | grep -q '里没有这条变异' \
+    || { echo "  S20 红了但不是 req-check 指名变异不存在" >&2; exit 1; }
+  report_caught s20 20 "req-check.py（反例台账）" "反例认领了不存在的变异：台账与 mutation-score 的清单对不上 -> 红"
 fi
 
 echo "sabotage-sup: $CAUGHT 抓住 / $MISS 假阴性"

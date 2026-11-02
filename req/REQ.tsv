@@ -21,4 +21,6 @@ R13	非法 key 一律 400，不进 handler	S7	回归	path_closed	15	-
 R14	超过 APP_MAX_BODY 一律 413	S12	回归	body_bounded	19	17,18,19
 R15	配了 token 时，缺 token 或错 token 一律 401；/health 与空 token 例外	S11	回归	auth_required	25,26	12,13,14,15,16
 R16	启动端口只接受 1..65535，0 与 65536 不可用	S13	回归	-	-	4,5,6,7
-R17	清单响应是 JSON 对象：顶层键 keys，值为字典序字符串数组	S14	新增	list_envelope	27	-
+R17	清单响应是 JSON 对象：顶层键 keys，值为字典序字符串数组；空目录也是合法对象	S14	新增	list_envelope	27,29	-
+R18	带表示的成功响应声明 Content-Type: application/json	S15	回归	content_type_json	28	-
+R19	数据目录不可用时拒绝启动并给出诊断，不提供服务	S16	回归	boot_requires_usable_root	30	-

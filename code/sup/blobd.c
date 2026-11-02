@@ -47,7 +47,9 @@
   X(path_closed, "非法 key 一律 400，不进 handler", "15")                                 \
   X(body_bounded, "超过 APP_MAX_BODY 一律 413", "19")                                     \
   X(auth_required, "配了 token 时：没带或带错一律 401；/health 与空 token 例外", "25,26") \
-  X(list_envelope, "清单响应是 JSON 对象：顶层键 keys，值为字典序数组", "27")
+  X(list_envelope, "清单响应是 JSON 对象：顶层键 keys，值为字典序数组；空目录也是合法对象", "27,29") \
+  X(content_type_json, "带表示的成功响应声明 Content-Type: application/json", "28") \
+  X(boot_requires_usable_root, "数据目录不可用时拒绝启动并给出诊断，不带病提供服务", "30")
 
 #include "dp_env.h" /* 配置表在这里：名字、字段、kind、默认值 */
 #include "dp_sup.h"

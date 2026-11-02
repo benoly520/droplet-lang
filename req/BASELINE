@@ -1,0 +1,10 @@
+# 基线 commit：换题那一刻的实现；先红后绿用它 + 当前题面构建“旧实现”。
+# 由 code/sup/freeze.sh --update 写；手改这一行等于自证基线不可信。
+# 浅 clone 里导不出来时：git fetch --unshallow，或手跑 req-check.py --baseline <二进制>。
+#
+# 本轮（R17 list_envelope / #27）是手填的，不是 --update 写的：
+# 换题和实现落在同一个 commit（a4996db 既钉题面又写了外壳），
+# 那一刻的 HEAD 已经是“做完的版本”，拿它当基线 #27 直接绿 —— 门会假过。
+# 所以这一行钉的是**上一轮的 HEAD**：89a310f（四道门那版，清单还是裸数组）。
+# 下一轮换题时删掉本文件再跑 freeze.sh --update，让它自己钉。
+89a310fd1f3840df264ae8c8c6b3fad87aa093df

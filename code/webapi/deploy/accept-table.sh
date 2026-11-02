@@ -1,5 +1,5 @@
 #!/bin/sh
-# 唯一的验收表：27 条断言，没有一条是打印。
+# 唯一的验收表：30 条断言，没有一条是打印。
 #
 # 这张表是"结果验收"的落点：人只看它红不红，不读实现。所以每条都必须有期望值，
 # 退出码就是结论（最后一行 [ "$FAIL" -eq 0 ]）。
@@ -7,7 +7,9 @@
 # 三条口径：
 #   1) 每条断言带期望值，红不红由机器判，不由人眼判；
 #   2) 状态类的事实也要断言：快照数、提交数、清单条目数 -> #22/#23/#24；
-#      清单的外壳与顺序 -> #27（精确 body，S14）。
+#      清单的外壳与顺序 -> #27（精确 body，S14）；空清单同样是合法对象 -> #29（裸数组与空 body 都红）；
+#      带表示的成功响应必须声明 application/json -> #28（只改 body 的断言看不出这是承诺）；
+#      启动期的承诺也要断言：数据目录不可用 -> 拒绝启动 -> #30（它是唯一一条不问 HTTP 的）。
 #      #22 同时是 DP_GOALS 里 snapshot_before_write 那条目标的唯一证明；
 #   3) 必须证明观测的是**这一版刚起起来的进程**：端口被上一轮残留实例占着时请求照样有响应，
 #      但测的不是这份代码。所以先 kill -0，再谈结果。
@@ -110,6 +112,10 @@ ck 1 200 "$CK1" "GET /health 无 token 也放行"
 CK2=$(code -H "$A" "$KEYS")
 ck 2 200 "$CK2" "GET /v1/keys 空清单"
 
+# 编号跟条款（R17）走，不跟执行顺序走：这一条必须在第一次写入之前发，那时目录才是空的。
+# 散文里那句“空的也要能解析”从来没说清是“空目录”还是“读不到目录”，但它至少要求空也是合法对象。
+ck 29 '{"keys":[]}' "$(body -H "$A" "$KEYS")" "空清单也是合法对象：{\"keys\":[]}"
+
 CK3=$(code -X PUT -H "$A" --data-binary hello "$BLOB")
 ck 3 204 "$CK3" "PUT 不带 If-Match"
 wait_commits 1 || true
@@ -175,6 +181,11 @@ ck 20 409 "$CK20" "同一 key 连 POST 两次 -> 409"
 CK21=$(body -H "$A" "$BLOB")
 ck 21 hello4 "$CK21" "GET 回来的字节 == 最近一次成功 PUT 的字节"
 
+# 散文从没说过 Content-Type，但前 27 条断言里没一条管它：客户端只能靠猜。
+# 这一条钉的是“带 body 的成功响应声明 application/json”（错误响应按 #7/#14/#17 根本没有 body）。
+CK28=$(hd content-type -H "$A" "$BLOB")
+ck 28 application/json "$CK28" "带 body 的成功响应声明 Content-Type: application/json"
+
 # ---- 从 accept.sh 的打印转成断言的三条（v0.33 合并时新增）----
 # 提交子进程是异步的：轮询等它落盘（最多 10 秒；CI 的 runner 比本机慢，3 秒实测不够），
 # 否则 #23 数到的是写入过程中的中间态。
@@ -205,6 +216,30 @@ CK25=$(code -H 'Authorization: Bearer wrong' "$KEYS")
 ck 25 401 "$CK25" "错 token -> 401（鉴权决定在 dp_decide.c，样例覆盖同一份）"
 CK26=$(code "$KEYS")
 ck 26 401 "$CK26" "没带 token -> 401"
+
+# ---- 启动期的承诺（S16 / R19 / A4 / G9）----
+# 探针不能靠 chmod 000：root 下它挡不住读，测出来的绿是假的。改成把 APP_ROOT 指向一个
+# **普通文件** —— stat 成功但 S_ISDIR 必假，谁跑都一样。
+# 判据只看两件可观察的事：端口上没人应答（没带病服务），stderr 有东西（能定位）。
+# 不钉诊断文案：钉一句人话等于把人措辞的自由也钉掉，而这条要的只是“能定位”。
+BADROOT=$B/notadir
+printf x > "$BADROOT"
+BADLOG=$B/bad-boot.log
+APP_BIND=127.0.0.1 APP_PORT=$((PORT + 1)) APP_ROOT=$BADROOT APP_TOKEN=secret \
+  "$BIN" >"$BADLOG" 2>&1 &
+BADS=$!
+sleep 0.6
+BADCODE=$(code --max-time 2 -H "$A" "http://127.0.0.1:$((PORT + 1))/v1/keys" || true)
+kill "$BADS" 2>/dev/null || true
+wait "$BADS" 2>/dev/null || true
+if [ "$BADCODE" != 000 ]; then
+  BADSTATE=answering:$BADCODE
+elif [ -s "$BADLOG" ]; then
+  BADSTATE=refused-with-diagnostic
+else
+  BADSTATE=refused-silent
+fi
+ck 30 refused-with-diagnostic "$BADSTATE" "数据目录是个普通文件时拒绝启动并留下诊断（不静默降级成“服务在、全废”）"
 
 echo "$LABEL: $PASS 过 / $FAIL 挂"
 if [ "$FAIL" -ne 0 ]; then
