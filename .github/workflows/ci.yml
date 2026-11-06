@@ -12,12 +12,13 @@ name: CI
 #   freeze   题面（验收表/声明头/契约）与 req/FROZEN 一致，改题必须显式 --update
 #   score    变异覆盖分：30 条断言每条都至少被一条实现变异弄红（floor = 断言总数）
 #   surface  必读面的字节/token 预算（面有没有悄悄膨胀）
+#   lang     登记语言四段：定义↔检查器码表、码的活性样本、与 req/ 逐栏等价、定义预算
 #   compare  候选比较：样例能不能把唯一正确的一份挑出来（含自检）
 #   firstpass 首次成功率量尺（含自检；没有模型数据，数字不在这里产生）
 #   maint    三种典型改动的文件/行数预算
 #   loop     作者回路：check.sh 一条命令一个退出码；brief 题面包不含实现；submit 能收也能拒
 #   report   人类验收页：目标 -> 断言 -> 红绿，一屏
-#   sabotage 20 条破坏测试，每条必须由具体工具以具体诊断抓住
+#   sabotage 23 条破坏测试，每条必须由具体工具以具体诊断抓住
 #
 # soak.sh 不在这里：它要一台长时间常开的机器。
 
@@ -60,6 +61,8 @@ jobs:
         run: python3 code/sup/mutation-score.py --binary "$GITHUB_WORKSPACE/.build/ci-sup/blobd" --l-port 18340 --s-port 18440
       - name: 必读面预算
         run: sh code/sup/surface-budget.sh
+      - name: 登记语言（定义↔检查器对账 + 与 req/ 等价 + 定义预算）
+        run: sh code/sup/lang-check.sh "$GITHUB_WORKSPACE/.build/ci-sup/blobd"
       - name: 候选比较自检（唯一/无解/歧义）
         run: sh code/sup/compare-sup.sh --self-test
       - name: 首次成功率量尺自检

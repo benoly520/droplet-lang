@@ -4,8 +4,12 @@
 and checks that fail when the implementation drifts from what was declared.**
 
 A "superset" here means exactly one thing: valid C is never rejected by this layer. There was a
-bespoke language in this repository; it was removed, and no further language extensions will be
-built (docs/SPEC.md §2.1). What remains is the part that measurably worked.
+bespoke language in this repository; it was removed, and no further extensions to **C** will be
+built (docs/SPEC.md §2.1) — no new syntax, no compiler branches, no annotation checkers. What
+remains is the part that measurably worked. One caveat, stated rather than buried: v0.38 added
+`lang/`, a tiny *separate* medium for registering claims and their judges (see docs/LANG2.md). It
+touches no C, is excluded from the frozen question surface, replaces nothing, and is marked
+experimental with kill criteria.
 
 "AI" here means the author, not a design target: nothing in the syntax or the toolchain is specific
 to AI. What is specific is the workflow — declarations a machine can reconcile, checks that fail,
@@ -39,7 +43,7 @@ The superset form kept the part that did work. Everything under `code/` is C11 p
 Needs `cc` (C11), `sh`, `python3`, `git`, `flock`, `curl`. No Go, no code generator.
 
 ```sh
-sh code/sup/check.sh                            # one command, one exit code (build/samples/contract/registry/freeze/budget)
+sh code/sup/check.sh                            # one command, one exit code (build/samples/contract/registry/freeze/budget/language)
 sh code/sup/report.sh .build/check/blobd --accept 18881   # human page: requirement -> assertions/samples -> red/green
 ```
 
@@ -75,9 +79,10 @@ curl -s           -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blo
 | maintenance cost (`maint-cost.sh`) | a scripted change touches more files or +/- lines than its budget |
 | translation layer (`req/SRC.md` + `req/REQ.tsv` + `req/TRANS.tsv` + `req/AMBIG.tsv` + `req/GAP.tsv` + `req/BASELINE`) | a clause has no recorded reading, its counterexample column is empty or claims a catcher (`S<n>`/`E<n>`) that doesn't exist or didn't actually redden this clause's assertions, an ambiguity is undecided, a gap is `未闭`, or a `新增` clause was already green on the baseline (old implementation + current question) — i.e. the status quo was transcribed as a requirement. The baseline check now runs automatically |
 | requirement registry (`req-check.py`) | a requirement has no assertion/example, or a source sentence/assertion/example/goal is unclaimed, or a requirement disagrees with its goals' declared proof |
+| registration language (`lang-check.sh`, experimental) | the `.dpt` definition and its checker disagree (a documented error code that can never fire, or a code with no live sample), `lang/blobd.dpt` stops being field-for-field equivalent to `req/`, or the complete definition grows past 1,500 tokens |
 | question freeze (`freeze.sh`) | the acceptance table, declaration headers, the five translation files or the contract differ from `req/FROZEN` (the question was edited) |
 | mutation score (`mutation-score.py`) | changing assertion N's expectation does not turn it red, a mutant reddens an undeclared assertion, or coverage falls below the floor |
-| sabotage (`sabotage-sup.sh`) | one of 17 injected defects is *not* caught by a named tool with a named diagnostic (3 of them edit the question or the translation instead of the code) |
+| sabotage (`sabotage-sup.sh`) | one of 23 injected defects is *not* caught by a named tool with a named diagnostic (6 of them edit the question, the translation or the baseline instead of the code; 3 edit the registration language's own definition) |
 
 The last row is the important one: it checks the checkers. A "caught" that is really a compile error
 from a broken injection is a false green, and this suite exists because that happened once.
@@ -96,7 +101,8 @@ code/runtime/        the service runtime, 1468 lines of C (rt_core / rt_http / r
 code/sup/lab/        the experiment packet: two decisions that do not exist in this repo
 code/webapi/deploy/  30-assertion acceptance table, soak, systemd unit, env example
 req/                 16 source sentences, 19 clauses, translation ledgers (TRANS/AMBIG/GAP), baseline pin, frozen hashes, README
-docs/                SPEC, VALIDATION (numbers), EXPERIMENT (two trials), NEXT (handoff)
+lang/                experimental registration language: droplet.dpt (the whole definition, 1,321 tokens) + blobd.dpt (mechanical rewrite of req/, proven equivalent)
+docs/                SPEC, VALIDATION (numbers), EXPERIMENT (two trials), LANG2 (the registration language and its measurement), NEXT (handoff)
 ```
 
 ## Known limits

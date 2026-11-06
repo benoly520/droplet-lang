@@ -9,7 +9,7 @@
 - 原来那门自造语言（`.dlt`、编译器 4727 行）**已删除**。理由见 SPEC §2：实测没有赢，且它自己声明的
   invariant 被自己的服务违反。
 - 所有数字都是跑出来的，不是估的：兼容性 5/0、wire 30/0（ASan 同）、oracle 19/19、决定层变异 10 抓 / 2 等价 MISS /
-  1 编译期、破坏测试 20/0、契约 18 目标 / 未证 0 / 孤儿 0；登记链 16 源句 / 19 条款 / 30 断言，歧义 4 全已定，
+  1 编译期、破坏测试 23/0、契约 18 目标 / 未证 0 / 孤儿 0；登记链 16 源句 / 19 条款 / 30 断言，歧义 4 全已定，
   缺口 9 条（不闭 7 / 已闭 2）；必读面见 VALIDATION §2。
 - 首次成功率有了**第一个数**：决定层 3 次独立生成，pass@1=3/3（12/12 样例，首次即过）；
   陌生维护者 1 次：5 文件 / 18 个 +/- 行、`check --full` 全绿。样本极小，见 EXPERIMENT。
@@ -27,13 +27,18 @@
   `mutation-score.py`（L 30/30 改期望必红、E 19/19 改样例期望必挂、S 25 条实现变异、覆盖 30/30）、
   `report.sh` 按条款出一页。保证的是“已知错法会被指名抓住 + 改题不会静默通过 + 每次翻译留痕”，
   不是“实现 100% 正确”（SPEC §9、req/README.md）。
-- **不再做语言扩展**（决定，见 SPEC §2.1）：不加语法、不做编译器分支、不做注解检查器。
-  “超集”只保留一条含义：合法 C11 不被拒绝。往后只加检查与覆盖面，不加语法。
+- **对 C 不再做语言扩展**（决定，见 SPEC §2.1，仍然成立）：不加语法、不做编译器分支、不做注解检查器。
+  “超集”只保留一条含义：合法 C11 不被拒绝。往后对 C 只加检查与覆盖面，不加语法。
+- v0.38 多了一个**实验性介质**：`lang/*.dpt` —— 一门只登记“需求 ↔ 判据”关系的小语言
+  （定义 1,321 token，读完 = 会用），由 `code/sup/dpt-check.py` 检查，进 `check.sh` 快档第 7 项。
+  它**不改 C**、**不进题面冻结**（`req/FROZEN` 仍 12 项）、**不替换 `req/`**：`lang/blobd.dpt` 是从
+  `req/` 机械生成的，等价性由 `--against` 逐栏证明（19 条款 / 16 源句 / 4 歧义 / 9 缺口）。
+  本轮三臂实测判的是“留着降级”而不是“转正”，见 [LANG2.md](LANG2.md) 第 5–6 节。
 
 ## 1. 五分钟上手
 
 ```sh
-sh code/sup/check.sh --full                    # 一条命令一个退出码（13 项）
+sh code/sup/check.sh --full                    # 一条命令一个退出码（14 项）
 sh code/sup/report.sh .build/check/blobd --accept 18881   # 人类：条款 -> 断言/样例 -> 红绿
 sh code/sup/submit-sup.sh 你的.c               # 整条面接受或拒绝（含题面冻结）
 python3 code/sup/req-check.py .build/check/blobd          # 登记链：孤儿 = 红
@@ -54,6 +59,19 @@ python3 code/sup/mutation-score.py --binary .build/check/blobd  # 每条断言�
 - 每次实验都按 EXPERIMENT §1/§2 的步骤重跑（§3 的 A/B 树不在仓库里，只能重跑它留下的账），数字进 VALIDATION §2。
 
 **不要**把 n=3 说成“AI 一般能写对”。样本与题面决定结论边界。
+
+### P1b · 登记语言：下一轮必须做决定，不许停在“留着”
+
+`lang/` 现在是实验性介质，四段门与 `req/` 等价性都绿，但只有 1,321 token 的定义证明不了“更好”。
+下一轮三选一，且要写清代价：
+
+- **转正**：把 `req/` 换成 `lang/blobd.dpt` 作为唯一登记面 —— 这是真换题，必须
+  `freeze.sh --update`（12 项 → 13 项）、`req-check.py` 改读 `.dpt` 或删除，SPEC §9 五道门的落点要重写。
+  做之前先补 D6（语言级歧义没有登记位），否则 `AMBIG` 的信息在语言里无处安放。
+- **补齐证据**：不动 `req/`，把三臂做到 n≥10、跨模型族、判官与读者不同源，并去掉那个结构性不对称
+  （`.dpt` 有解析器、TSV 没有 —— 要么给 TSV 也写格式检查，要么用人工评分）。
+- **关掉**：删 `lang/` 与三道破坏 #21–#23，只留 `docs/LANG2.md` 的负结果。判据已在
+  [LANG2.md](LANG2.md) §6 写好，触发就执行，别靠“再试一轮”。
 
 ### P2 · 把剩下的纯判断搬出来（如果它真的纯）
 
@@ -77,7 +95,7 @@ python3 code/sup/mutation-score.py --binary .build/check/blobd  # 每条断言�
 2. `accept-sup.sh` 30/0。
 3. `contract-sup.py` rc=0，且未证 = 0、孤儿 = 0。
 4. 改了检查或决定：`oracle-sup.sh`、`mutate-dec.sh` 绿。
-5. 改了检查本身：`sabotage-sup.sh` 仍然 20/20，且每条归因正确。
+5. 改了检查本身：`sabotage-sup.sh` 仍然 23/23，且每条归因正确。
 6. 改了必读面或参考实现：`surface-budget.sh` 在预算内。
 7. 改了决定层：`compare-sup.sh --self-test` 4/4（歧义判定没退化）。
 8. 改动了 `.o` 的引用关系：确认接线检查没有变空（`nm -u` 那五行仍打印“接线绿”）；运行时逐 TU 编 .o 就是为了这个。
@@ -92,6 +110,10 @@ python3 code/sup/mutation-score.py --binary .build/check/blobd  # 每条断言�
     换题时上一轮的“新增”必须改成“回归”（它已经实现了）；不改的话基线会报“新增在基线上全绿”。
 11c. 给 `TRANS.tsv` 的证据列加了编号：`mutation-score.py --phase all` 的台账对账必须绿 ——
     编号要么在变异/样例清单里、要么实测真的红本条款的断言。
+11d. 改了 `lang/`（登记语言）：`sh code/sup/lang-check.sh .build/check/blobd` 四段全绿 ——
+    定义的 20 条码与实现逐一对上（`--self-check`）、每条码有样本打中（`--self-test`）、
+    `lang/blobd.dpt` 与 `req/` 逐栏等价（`--against`）、定义 ≤ 1,500 token。
+    加一条构造就要加一条码 + 一个样本 + 一处 `req/` 对应；预算顶到就删构造，不许抬预算。
 12. 人验收只看 `report.sh --accept`：条款全绿、未证 0、冻结与登记链一致。
 
 ## 4. 坑（踩过的）
@@ -114,6 +136,12 @@ python3 code/sup/mutation-score.py --binary .build/check/blobd  # 每条断言�
   否则容易只绿一边。两处都按“谁的 .o 必须引用哪个符号”写，不按文件名猜。
 - **候选比较的“歧义”不是工具坏了**：两份同外延实现在样例上等价时，工具必须报歧义。
   想让它变“唯一”，办法是加样例，不是放宽判定。
+- **`--self-check` 只对了码表，没对语义**：v0.38 第一轮的 E09 把 L2 写反了（`gap` 条款也被要求署证据），
+  码表照样“绿”，判出来的分数却是错的 —— 三臂实测的第一轮数字因此作废。规格对账不等于实现对账，
+  任何当判据用的东西都要有一条“它自己会不会错”的样本。
+- **临时树里跑的检查要显式传 `--root`/`--spec`**：`sabotage-sup.sh` 把 `lang/` 复制到 `/tmp` 再改，
+  从脚本自身位置推 `ROOT` 的检查器会指到 `/lang/droplet.dpt`（表现为 `FileNotFoundError`，
+  看起来像“红”，其实什么都没测）。#21/#22/#23 各撞过一次才修好。
 
 ## 5. 文档地图
 
@@ -122,7 +150,9 @@ python3 code/sup/mutation-score.py --binary .build/check/blobd  # 每条断言�
 | [SPEC.md](SPEC.md) | 形态、四张表、检查面、边界与口子 |
 | [VALIDATION.md](VALIDATION.md) | 怎么跑、跑出什么、这些数字不能证明什么 |
 | [EXPERIMENT.md](EXPERIMENT.md) | 三个实验：冷启动写决定层、陌生维护者改 405→501、译稿层 A/B（含负结果）+ 复现步骤 |
+| [LANG2.md](LANG2.md) | v0.38 的登记语言 `.dpt`：主张、三门纪律、四段门、三臂实测与缺陷账、自杀条款与本轮判定 |
 | 本文件 | 交接与待办 |
 | `code/sup/` | 超集机制 + 旗舰服务 + 全部检查脚本 + 三条回路 + `lab/` 实验题面 |
+| `lang/` | 登记语言的完整定义（`droplet.dpt`）与机械转写（`blobd.dpt`）；不进题面冻结 |
 | `code/runtime/` | 服务运行时（1468 行共享 C，含 rt.h） |
 | `code/webapi/deploy/` | 30 条断言表、soak、systemd 单元与环境样例 |

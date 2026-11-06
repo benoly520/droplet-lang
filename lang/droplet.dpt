@@ -1,0 +1,66 @@
+// Droplet 登记语言 —— 完整定义。这一份文件就是检查器的口径：
+// 下面的错误码表与 code/sup/dpt-check.py 由 --self-check 双向对账，
+// 谁多一条谁红。预算 1500 token，由 lang-budget.sh 守；超了删构造或删规则，不抬预算。
+
+// 它能做的事只有一件：说明“哪句话由谁证明”。没有表达式、没有类型、没有控制流、
+// 没有宏、没有插件注册。任何未在下面出现的标识符都是 E01 —— 封闭性是设计目标，不是限制。
+// 字符串只允许双引号、单行。注释是 // 到行尾，不属于语言。
+
+service ID { src* promise* choice* hole* }
+
+src S<n> "原文一句，只抄不改"
+
+promise R<n> "一条没有歧义的承诺" {
+  from    S<n>[,S<n>]        必填    引用的 src 必须存在
+  status  regress|new|gap    必填    regress=现状已满足 / new=实现前必须是红的 / gap=表达不了
+  goal    id[,id]            选填    必须是清单里的 goal
+  wire    <n>[,n]            选填    必须是清单里的断言号
+  unit    <n>[,n]            选填    必须是清单里的样例号
+  reads   "这一条实际怎么检查"  必填
+  bounds  "明确不约束什么"      必填  沉默不算排除
+  trap    "什么错实现能骗过它"   必填  写不出来 = 这条检查是同义反复
+  evidence M<n>|@<n>|none[,...] 必填  那条反例现在归谁管（M=实现变异，@=样例）
+}
+
+choice A<n> S<n> "读法一" "读法二" "选定的一种" "判据"     选定为空 = 未定
+hole   G<n> R<n> "缺什么判据、为什么不算违约，或闭合它的编号" open|waived|closed
+
+// 引用解析的清单（默认从工程取，--inventory 可从 JSON 取）：
+//   wire -> 验收表断言号      unit -> 样例号        goal -> 契约里的 goal 及其 proven
+//   evidence M<n> -> 实现变异表编号    evidence @n -> 样例号
+//   源句用 S<n>、变异用 M<n> —— 两套编号不许共用一个前缀（写 S 会被 E01 拒收）。
+// 字符串：单行，双引号包裹；里面要写双引号用 \"，要写反斜杠用 \\，要写换行用 \n。
+//   没写的转义序列一律 E01。排版（缩进、换行、顺序）不参与语义。
+
+// 合法性
+L1  每条 promise 至少引一句 src；每条 src 至少被一条 promise 认领
+L2  status != gap 的 promise 必须有 wire 或 unit
+L3  promise 声明的 goal，其 proven 集必须等于该 promise 的 wire 集
+L4  evidence 写 M<n>：该变异必须真的弄红本条 wire 之一；写 @n：本条必须声明该样例
+L5  evidence = none 时 trap 必须以「无」开头；否则必须有一条 hole 的 ID 出现在 trap 文本里
+L6  每条 hole 的 ID 必须出现在它所挂 promise 的 trap 里；hole 的 R<n> 必须存在
+L7  清单里每条断言、每个样例、每个目标都必须被某条 promise 引用（孤儿 = 红）；
+    变异不强制认领 —— 它是覆盖分的材料，不是某条承诺的反例，没人署名只提示不判红
+L8  status = new 的 promise 必须在旧实现上至少有一条 wire 是红的（本检查器只声明，实盘在别处）
+
+// 错误码表（穷举；检查器不许有表外的码）
+E01 未知标识符
+E02 缺必填栏，或栏出现两次
+E03 恰好一个 service 之外的顶层声明
+E04 src/promise/choice/hole 的 ID 形状或重复不对
+E05 引用了清单里不存在的 wire/unit/goal/S 变异
+E06 引用了不存在的 src 或 promise ID
+E07 src 没被任何 promise 认领（孤儿源句）
+E08 status 不是三个值之一
+E09 非 gap 的承诺既无 wire 也无 unit
+E10 goal 的 proven 与本条 wire 不等（漂移）
+E11 evidence 的 M 变异打不中本条任何 wire
+E12 evidence 的 @ 样例没被本条声明
+E13 evidence = none 与 trap 不匹配（trap 没写「无…」，也没有 hole 被点名）
+E14 trap/reads/bounds 为空
+E15 choice 的选定为空（未定的歧义）
+E16 hole 状态非法或没写清缺什么；状态为 open 是合法写法，但它按设计挡住提交
+E17 hole 的 ID 没出现在其 promise 的 trap 里
+E18 清单里的断言、样例或目标没人认领（孤儿）
+E19 status = new 且本次要求当场判先红（默认不触发，先红后绿由登记核对那侧跑基线）
+E20 文件结尾有多余的 } 或未闭合的 {

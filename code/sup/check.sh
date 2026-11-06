@@ -2,11 +2,11 @@
 # 作者/维护者的唯一回路：一条命令，一个退出码，红在哪一项就说哪一项。
 #
 # 为什么要这个：AI 写 C 的失败模式是**静默漂移**，不是不会写语法。所以回路必须短、
-# 必须一次给全（构建/样例/契约/登记/冻结/预算），而且红的时候要给出**第一个失败项**，
+# 必须一次给全（构建/样例/契约/登记/冻结/预算/登记语言），而且红的时候要给出**第一个失败项**，
 # 不是让调用者去翻四份日志自己拼。
 #
 # 口径：
-#   * 默认只跑不占端口的六项（约 4 秒）：构建、样例、契约、需求登记、题面冻结、必读面预算；
+#   * 默认只跑不占端口的七项（约 5 秒）：构建、样例、契约、需求登记、题面冻结、必读面预算、登记语言；
 #   * --full 追加需要起服务的项（验收、变异、破坏、变异覆盖分），约 7 分钟；
 #   * 任一项红 -> 立即停，打印该项日志末尾，退出 1。不继续跑后面的项：
 #     后面的红很可能是前面的红造成的，一起报等于没说。
@@ -51,6 +51,7 @@ else
 fi
 run freeze   sh code/sup/freeze.sh --check .build/check/blobd
 run surface  sh code/sup/surface-budget.sh
+run lang     sh code/sup/lang-check.sh .build/check/blobd
 
 if [ "$MODE" = "full" ]; then
   run accept  sh code/sup/accept-sup.sh "$ROOT/.build/check/blobd" "${PORT:-18201}" check

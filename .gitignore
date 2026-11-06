@@ -7,3 +7,6 @@ a.out
 # 测试与覆盖率
 *.test
 *.out
+
+# Python 检查器的字节码（ab-score.py 用 importlib 载入 dpt-check.py 时生成）
+__pycache__/

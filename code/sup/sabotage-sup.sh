@@ -517,5 +517,60 @@ else
   report_caught s20 20 "req-check.py（反例台账）" "反例认领了不存在的变异：台账与 mutation-score 的清单对不上 -> 红"
 fi
 
+# ---- 登记语言（lang/）的三条：定义、预算、署名 ----
+LANG=$B/lang
+rm -rf "$LANG"; mkdir -p "$LANG"
+cp -a "$ROOT/lang" "$LANG/lang"
+cp "$ROOT/code/sup/dpt-check.py" "$LANG/dpt-check.py"
+cp "$ROOT/code/sup/lang-budget.sh" "$LANG/lang-budget.sh"
+cp -a "$ROOT/req" "$LANG/req"
+cd "$LANG"
+
+# S21：往语言定义里加一条错误码，但检查器不会吐它 —— 定义开始骗读它的人
+sed -i '$a E21 凭空定义加出来的码' lang/droplet.dpt
+if python3 dpt-check.py --self-check --spec lang/droplet.dpt >/dev/null 2>&1
+then report_miss 21 "在定义里加一条不会发生的错误码"
+else
+  python3 dpt-check.py --self-check --spec lang/droplet.dpt 2>&1 | grep -q '文档写了但不会发生' \
+    || { echo "  S21 红了但没指名是定义在骗人" >&2; exit 1; }
+  report_caught s21 21 "dpt-check.py --self-check（定义<->实现对账）" "定义多写一条失败模式：文档骗读它的人 -> 红"
+fi
+
+# S22：把语言定义加胖到超预算 —— "读完就会用"这个提法的成立条件是有人守的
+rm -rf lang; cp -a "$ROOT/lang" lang
+i=0
+while [ "$i" -lt 60 ]; do
+  printf '// 凑字数的一行注释，让定义长得读不下去。\n' >> lang/droplet.dpt
+  i=$((i + 1))
+done
+if sh "$ROOT/code/sup/lang-budget.sh" lang/droplet.dpt >/dev/null 2>&1
+then report_miss 22 "把语言定义加胖到超出预算"
+else
+  sh "$ROOT/code/sup/lang-budget.sh" lang/droplet.dpt 2>&1 | grep -q '超出预算' \
+    || { echo "  S22 红了但不是预算抓的" >&2; exit 1; }
+  report_caught s22 22 "lang-budget.sh（定义预算）" "完整定义膨胀过线：这门语言相对表格已无优势 -> 红"
+fi
+
+# S23：把一条反例的署名擦掉（evidence 改成 none，trap 仍写着真反例、也没有 hole 被点名）
+# 选 R2：它的 trap 不含任何 G 编号 —— R17 那种 trap 里点了 G8 的，擦掉署名仍然合规（L5 第二支）。
+rm -rf lang; cp -a "$ROOT/lang" lang
+python3 - <<'EOF'
+import re
+p = "lang/blobd.dpt"
+s = open(p, encoding="utf-8").read()
+s2 = re.sub(r"(\n( *)evidence )M03,M16(\n)", r"\1none\3", s, count=1)
+if s2 == s:
+    raise SystemExit("S23 注入失败：没找到 evidence M03,M16")
+open(p, "w", encoding="utf-8").write(s2)
+EOF
+if python3 dpt-check.py lang/blobd.dpt --root "$ROOT" --binary "$QT_REF" >/dev/null 2>&1
+then report_miss 23 "擦掉 R2 的反例署名（evidence 改成 none，trap 留着）"
+else
+  python3 dpt-check.py lang/blobd.dpt --root "$ROOT" --binary "$QT_REF" 2>&1 | grep -q 'E13' \
+    || { echo "  S23 红了但不是 E13 抓的" >&2; exit 1; }
+  report_caught s23 23 "dpt-check.py（反例署名 E13）" "写了反例又不署判据：口头认领不算 -> 红"
+fi
+cd "$ROOT"
+
 echo "sabotage-sup: $CAUGHT 抓住 / $MISS 假阴性"
 [ "$MISS" -eq 0 ]

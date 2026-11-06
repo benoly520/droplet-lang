@@ -1,0 +1,12 @@
+// 一份已经验收通过的登记件，长这样：
+  src S14 "清单响应必须是一个 JSON 对象，顶层键为 keys，值是按字典序排列的字符串数组。"
+  promise R17 "清单响应是 JSON 对象：顶层键 keys，值为字典序字符串数组；空目录也是合法对象" {
+    from S14
+    status new
+    goal list_envelope
+    wire 27,29
+    reads "清单 body 精确等于 {\"keys\":[\"demo\",\"second\",\"third\"]}，空目录精确等于 {\"keys\":[]}"
+    bounds "不约束错误响应（#7/#14/#17 已规定错误没有 body）；JSON 空白风格散文没约束 -> 收窄进 AMBIG A3 由人拍板，不藏在“排除”里"
+    trap "退回裸数组（S21 弄红 #27/#29）；排完倒过来（S22 弄红 #27）；空清单发空 body（S23 弄红 #29）；只查前缀会漏 values 的类型 -> 所以用精确 body；空清单以前根本没判据（G8，已用 #29 闭合）"
+    evidence S21,S22,S23
+  }

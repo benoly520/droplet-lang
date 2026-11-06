@@ -1,0 +1,225 @@
+// 由 code/sup/dpt-check.py --emit req 机械转写（等价性证明用，不是手写样本）
+service blobd {
+  src S1 "探活接口不需要鉴权，始终返回 200。"
+  src S2 "同一个 key 的读取必须返回最近一次成功写入的字节；覆盖写之前保留上一版本快照。"
+  src S3 "清单必须来自数据目录本身，不依赖任何额外的注册表文件。"
+  src S4 "创建 key 只在 key 不存在时成功，成功时 201 且没有 body；重复创建返回 409。"
+  src S5 "每一次成功写入恰好留下一条版本化提交。"
+  src S6 "所有错误响应都不携带 body。"
+  src S7 "读取不存在的 key 返回 404；key 不合法返回 400，不进入业务处理。"
+  src S8 "ETag 由 body 推导，同一份表示只有一个版本号；未声明的动词一律 405。"
+  src S9 "204 响应不得带 Content-Length，也不得带 body。"
+  src S10 "带 If-Match 写入时，相符才放行，不符返回 412 且没有 body。"
+  src S11 "配置了 token 时，缺 token 或 token 不符一律 401；/health 与未配置 token 的情况例外。"
+  src S12 "超过 APP_MAX_BODY 的请求一律 413。"
+  src S13 "启动端口只接受 1 到 65535，0 和 65536 不得启动。"
+  src S14 "清单响应必须是一个 JSON 对象，顶层键为 keys，值是按字典序排列的字符串数组。"
+  src S15 "【补，散文未写】凡带表示的成功响应，必须声明 Content-Type: application/json。"
+  src S16 "【补，散文未写】数据目录不可用（不存在，或不是目录）时，进程必须拒绝启动并给出一条可定位的诊断，不得带病提供服务。"
+  promise R1 "探活不鉴权：GET /health 无需 token，恒回 200" {
+    from S1
+    status regress
+    goal health_open
+    wire 1
+    reads "GET /health 在未带 token 时也回 200；只断言状态码"
+    bounds "不约束 body 文案"
+    trap "无（译法与原文同宽：原文只承诺状态）"
+    evidence none
+  }
+  promise R2 "同一 key 的 GET 字节等于最近一次成功 PUT 的字节" {
+    from S2
+    status regress
+    goal read_back
+    wire 3,21
+    reads "PUT 后 GET 同一 key，字节相等；#21 固定为 hello4"
+    bounds "不约束中间失败的写入"
+    trap "GET 返回旧值但长度相同：只有 #21 比字节才抓得住，少这一条就会漏"
+    evidence M03,M16
+  }
+  promise R3 "每次覆盖写之前必须留下上一版本快照" {
+    from S2
+    status regress
+    goal snapshot_before_write
+    wire 22
+    reads "每次成功 PUT 前，.snapshots 下出现该 key 的上一版本；#22 数 3"
+    bounds "保留几份历史已在 AMBIG A1 定论；**快照内容比不比对没定，见下**"
+    trap "两种反例：完全不做备份（S17 弄红 #22，抓住）；备份写成当前版本（文件数仍是 3、内容是新的 -> 只有比对内容才抓得住，当前没断言，G1）"
+    evidence M17
+  }
+  promise R4 "清单来自数据目录本身，不来自任何注册表文件" {
+    from S3
+    status regress
+    goal list_from_dir
+    wire 2,11,24
+    reads "清单内容来自 APP_ROOT 目录扫描；#2/#11/#24 用状态与计数"
+    bounds "不约束目录实现方式"
+    trap "两种反例：清单处理直接报错（S02/S19 弄红 #2/#24，抓住）；维护一份注册表文件并返回同样三个名字（译法通过、原文违反，G2）"
+    evidence M02,M19
+  }
+  promise R5 "POST 只在 key 不存在时创建：201 空 body，重复 409" {
+    from S4
+    status regress
+    goal create_once
+    wire 10,12,20
+    unit 1,2,3
+    reads "首次 POST 201 无 body；重复 POST 409"
+    bounds "不约束并发创建"
+    trap "重复 POST 返回 200 空 body（S15 让它成功、S08/S09 弄红 #10/#12，抓住）"
+    evidence M15,M08,M09
+  }
+  promise R6 "每次成功写入恰好留下一条版本化提交" {
+    from S5
+    status regress
+    goal commit_per_write
+    wire 23
+    reads "4 次成功写入 = 恰好 4 条提交"
+    bounds "不约束提交内容与顺序"
+    trap "两种反例：一条都不提交（S18 弄红 #23，抓住）；提交 4 条空提交（计数通过、原文“版本化”违反，G3）"
+    evidence M18
+  }
+  promise R7 "错误响应不携带 body" {
+    from S6
+    status regress
+    goal error_no_body
+    wire 7,14,17
+    reads "412/404/405 三种错误的 body 长度 = 0"
+    bounds "只覆盖这三种错误码"
+    trap "412 带 body（S06 弄红 #7/#14/#17，抓住）；500 之类其它错误码带 body：不在断言集里，G4"
+    evidence M06
+  }
+  promise R8 "不存在的 key 必须 404" {
+    from S7
+    status regress
+    goal not_found_status
+    wire 13
+    reads "GET 不存在的 key 状态 404"
+    bounds "不约束响应头（Location 之类原文没禁止，不算违反）"
+    trap "把 404 映射成 200 或 302：#13 认的是状态码，不是“有没有 404 这个字”"
+    evidence M10
+  }
+  promise R9 "ETag 由 body 推导；同一份表示只有一个版本号" {
+    from S8
+    status regress
+    goal single_version
+    wire 4,18
+    reads "GET 有 ETag；405 无 ETag；ETag 由 body 哈希推导"
+    bounds "不约束 ETag 的具体格式"
+    trap "不发 ETag（S04 弄红 #4，抓住）；用随机数当 ETag：#4/#18 都还是绿的，只有跨到 R11 的 If-Match 用例才红 —— 本条款自己的断言抓不住，G5"
+    evidence M04,M13
+  }
+  promise R10 "204 不得带 Content-Length，也不得带 body" {
+    from S9
+    status regress
+    goal no_content_framing
+    wire 8,9
+    reads "204 响应无 Content-Length 且 size_download=0"
+    bounds "不约束其他无体状态"
+    trap "无（译法与原文同宽）"
+    evidence none
+  }
+  promise R11 "If-Match 相符放行、不符 412 且空 body" {
+    from S10
+    status regress
+    goal versioned_write
+    wire 5,6,7
+    unit 8,9,10,11
+    reads "带正确 ETag 放行 204；带 deadbeef 412；412 body 0"
+    bounds "不约束弱校验 W/"
+    trap "接受任意非空 If-Match：#6 与样例 #8/#9 会红"
+    evidence M05,@9,@10
+  }
+  promise R12 "未声明的动词一律 405，空 body，无 ETag" {
+    from S8
+    status regress
+    goal method_closed
+    wire 16,17,18
+    reads "DELETE /v1/blob 405，body 0，无 ETag"
+    bounds "只测一个未声明动词"
+    trap "把 405 映射成 200（S12 弄红 #16，抓住）；只对 DELETE 特判 405、其它动词 200：只测了 DELETE，G6"
+    evidence M12
+  }
+  promise R13 "非法 key 一律 400，不进 handler" {
+    from S7
+    status regress
+    goal path_closed
+    wire 15
+    reads "key=../evil 返回 400"
+    bounds "只测一种非法组合"
+    trap "key 校验整体失效（S11 弄红 #15，抓住）；只拦 `..` 而放过其它非法字符：只测了这一种，G7"
+    evidence M11
+  }
+  promise R14 "超过 APP_MAX_BODY 一律 413" {
+    from S12
+    status regress
+    goal body_bounded
+    wire 19
+    unit 17,18,19
+    reads "9 MiB PUT 返回 413（上限 8 MiB）"
+    bounds "wire 只测 9 MiB 这一点"
+    trap "上限放大 16 倍（S14 弄红 #19，抓住）；等于上限的 8 MiB 走哪条腿由样例 #17/#18 钉，不在 wire 断言里"
+    evidence @17,@18,M14
+  }
+  promise R15 "配了 token 时，缺 token 或错 token 一律 401；/health 与空 token 例外" {
+    from S11
+    status regress
+    goal auth_required
+    wire 25,26
+    unit 12,13,14,15,16
+    reads "错 token 401；无 token 401；/health 无 token 200；空配置不鉴权"
+    bounds "不测 token 前后空白"
+    trap "接受任意 Bearer 前缀（S20 弄红 #25/#26，抓住）；token 为空时仍鉴权（样例 #12 是判据）"
+    evidence M20,@12
+  }
+  promise R16 "启动端口只接受 1..65535，0 与 65536 不可用" {
+    from S13
+    status regress
+    unit 4,5,6,7
+    reads "dec_port_usable 区间 [1,65535]，样例 #4-#7"
+    bounds "不测实际 bind 失败"
+    trap "只检查 >0：65536 的样例 #7 会红；本条款没有 wire 断言，证据全在样例上"
+    evidence @4,@5,@6,@7
+  }
+  promise R17 "清单响应是 JSON 对象：顶层键 keys，值为字典序字符串数组；空目录也是合法对象" {
+    from S14
+    status new
+    goal list_envelope
+    wire 27,29
+    reads "清单 body 精确等于 {\"keys\":[\"demo\",\"second\",\"third\"]}，空目录精确等于 {\"keys\":[]}"
+    bounds "不约束错误响应（#7/#14/#17 已规定错误没有 body）；JSON 空白风格散文没约束 -> 收窄进 AMBIG A3 由人拍板，不藏在“排除”里"
+    trap "退回裸数组（S21 弄红 #27/#29）；排完倒过来（S22 弄红 #27）；空清单发空 body（S23 弄红 #29）；只查前缀会漏 values 的类型 -> 所以用精确 body；空清单以前根本没判据（G8，已用 #29 闭合）"
+    evidence M21,M22,M23
+  }
+  promise R18 "带表示的成功响应声明 Content-Type: application/json" {
+    from S15
+    status regress
+    goal content_type_json
+    wire 28
+    reads "带 body 的成功响应声明 Content-Type: application/json"
+    bounds "不管 204/201（它们没有表示，#8/#12 已经钉死 body 为 0）；不管错误响应（body 为 0，声明什么都无所谓）"
+    trap "声明成 text/plain：客户端按 JSON 解析就炸，而 #27/#21 这些看 body 的断言全绿"
+    evidence M24
+  }
+  promise R19 "数据目录不可用时拒绝启动并给出诊断，不提供服务" {
+    from S16
+    status regress
+    goal boot_requires_usable_root
+    wire 30
+    reads "不可用的定义取实现里的判据：stat 失败或不是目录 -> 退出码非 0 + stderr 一条诊断，端口上没人应答"
+    bounds "不钉诊断文案（只要求 stderr 非空，钉文案等于钉一句人话）；不管 SIGTERM/热重载这类运维路径；空目录不算不可用（那归 R17/#29）"
+    trap "把“不是目录”这半边判掉：APP_ROOT 指到普通文件也照样开机，服务起来但每个请求都失败 —— 就是代码注释里写的“启动成功、运行全废”的静默降级，29 条 wire 断言一条都不会红（S25 弄红 #30）；这一条以前根本没判据（G9，已用 #30 闭合）"
+    evidence M25
+  }
+  choice A1 S2 "“上一版本”只保留覆盖前最后一份" "保留全部历史版本" "选择A：覆盖前留一份，保留策略由运行时默认值决定" "#22"
+  choice A2 S14 "“字典序”按字节序（key 字符集是 ASCII）" "按本地化排序" "选择A：key 只允许 [a-z0-9_-]，按字节序" "#27"
+  choice A3 S14 "JSON 用紧凑形（无空格），body 精确等于 {\"keys\":[...]} 才绿" "保留可读缩进/空格，判据只解析结构" "选A：散文没约束空白，但两种写法不能都算过 —— 由人拍板钉成紧凑形，判据是精确 body" "#27,#29"
+  choice A4 S14 "“空的也要能解析”指空目录：200 + 空对象；数据目录不可用是启动条件不满足，进程拒绝启动（fail fast）" "读不到目录（不存在 / 不是目录 / 无权限）也算“空”，照样 200 + 空对象" "选A：不可用不是空清单。这一条按**实现已经在做的事**登记，不按愿望登记 —— 参考实现 stat 失败或非目录就退出码 1" "#29 证“空目录 -> 200 + 空对象”，#30 证“不可用 -> 拒绝启动、端口上没人应答”"
+  hole G1 R3 "快照只数了文件个数（#22 = 3），没比对内容：把当前版本当快照存，计数照过" waived
+  hole G2 R4 "清单只数了名字与状态，没排除“另建一份注册表文件返回同样三个名字”的实现" waived
+  hole G3 R6 "提交只数了条数（#23 = 4），没验提交内容与先后：四条空提交照过" waived
+  hole G4 R7 "错误不携带 body 只测了 412/404/405 三种；500 之类的错误码带 body 不在断言集里" waived
+  hole G5 R9 "随机 ETag 只有跨到 R11 的 If-Match 用例才红；本条款自己的 #4/#18 抓不住" waived
+  hole G6 R12 "未声明动词只测了 DELETE 一个；“只对 DELETE 特判 405”这种实现过得去" waived
+  hole G7 R13 "非法 key 只测了 ../evil 一种组合；“只拦 .. 放过其它非法字符”过得去" waived
+  hole G8 R17 "空清单的 body 以前没有判据（#2 只看状态码，裸数组 [] 与 {\"keys\":[]} 都算 200）；v0.37 用断言 #29 闭合" closed
+  hole G9 R19 "“目录不可用时报什么”以前没有判据：断言集里没有一条把 APP_ROOT 指向不可用路径再启动（chmod 000 在 root 下挡不住读，那条探针不可信）；v0.37 用断言 #30 闭合（普通文件当 root -> 拒绝启动 + stderr 有诊断）" closed
+}
