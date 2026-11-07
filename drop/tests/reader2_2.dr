@@ -1,0 +1,25 @@
+// 冷读读者的第 2 题：没有 split，按空格切串并数不同词（连续空格算一个，串首尾不产生空词）
+// 它的原始期望：`one,two,three,three` + `3`；新 print 规则下第一行是 ["one","two","three","three"]
+let s = "one two  three three"
+
+fn isSp(c) = c == " "
+fn skipBlank(t, i) {
+  let n = len(t)
+  if(i >= n, n, if(isSp(t[i]), skipBlank(t, i + 1), i))
+}
+fn wordEnd(t, i) {
+  let n = len(t)
+  if(i >= n, n, if(isSp(t[i]), i, wordEnd(t, i + 1)))
+}
+fn words(t, i, acc) {
+  let a = skipBlank(t, i)
+  let b = wordEnd(t, a)
+  if(a >= b, acc, words(t, b, acc + [t[a:b]]))
+}
+fn has(ys, v) = len(filter(fn(y) = y == v, ys)) > 0
+fn keep(acc, v) = if(has(acc, v), acc, acc + [v])
+fn uniq(ys) = fold(keep, ys, [])
+
+let ws = words(s, 0, [])
+print(ws)
+print(len(uniq(ws)))

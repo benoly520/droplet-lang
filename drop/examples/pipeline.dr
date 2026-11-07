@@ -1,0 +1,15 @@
+// 内置只有这几个：map / filter / fold 串成一条
+fn double(x) = x * 2
+fn even(x) = x % 2 == 0
+fn add(a, b) = a + b
+print(fold(add, filter(even, map(double, range(10))), 0))
+print(map(str, range(4)))
+print(join(", ", sort(["banana", "apple", "cherry"])))
+// 函数是值：能绑定、能放进表、能当参数传
+let twice = fn(x) = x + x
+print(twice(4))
+let ops = [twice, str]
+print(ops[0](3))
+print(map(ops[1], [1, 2]))
+fn apply(f, x) = f(x)
+print(apply(twice, 10))

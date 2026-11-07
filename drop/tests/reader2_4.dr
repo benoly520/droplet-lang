@@ -1,0 +1,10 @@
+// 冷读读者的第 4 题：2..20 的合数个数 + 逗号一行（它特意用 join 避开 print 打表）
+fn divides(n, d) = n % d == 0
+fn hasFactor(n, d) = if(d >= n, false, if(divides(n, d), true, hasFactor(n, d + 1)))
+fn composite(n) = hasFactor(n, 2)
+
+let ns = map(fn(i) = i + 2, range(19))
+let comps = filter(composite, ns)
+
+print(len(comps))
+print(join(",", map(str, comps)))

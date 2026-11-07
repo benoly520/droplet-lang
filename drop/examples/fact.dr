@@ -1,0 +1,5 @@
+// 递归、条件、整数
+fn fact(n) = if(n <= 1, 1, n * fact(n - 1))
+print(fact(0))
+print(fact(10))
+print(if(fact(5) > 100, "大", "小"))

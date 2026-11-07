@@ -1,0 +1,7 @@
+// 表可以 +，递归拆开一层
+fn flat(xss) = fold(fn(a, b) = a + b, xss, [])
+print(flat([[1, 2], [3], []]))
+fn cut(s, i) = if(i >= len(s), if(len(s) == 0, [], [s]),
+                 if(s[i] == " ", [s[0:i]] + cut(s[i+1:], 0), cut(s, i + 1)))
+print(join("|", cut("a bb ccc", 0)))
+print(cut("", 0))

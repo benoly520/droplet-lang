@@ -1,0 +1,8 @@
+// 词法作用域：函数带着它被写在那儿能看到的名字
+// 没有赋值，所以「会变的计数器」写不出来；要计数就把状态传进去拿回来
+fn make_adder(start) = fn(step) = start + step
+let from10 = make_adder(10)
+print(from10(1))
+print(from10(5))
+fn counter(n) = if(n <= 0, [], [n] + counter(n - 1))
+print(counter(3))

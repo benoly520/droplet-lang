@@ -8,5 +8,10 @@ a.out
 *.test
 *.out
 
+# 例外：drop/ 的 *.out 是「期望输出」，属于题面，必须进仓库
+# （门拿它逐字比对；被上面那条吞掉过一次，干净克隆里那段等于没跑，见 drop/check.sh Z7）
+!drop/examples/*.out
+!drop/tests/*.out
+
 # Python 检查器的字节码（ab-score.py 用 importlib 载入 dpt-check.py 时生成）
 __pycache__/
