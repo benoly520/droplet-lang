@@ -1,8 +1,25 @@
-// 词法作用域：函数带着它被写在那儿能看到的名字
-// 没有赋值，所以「会变的计数器」写不出来；要计数就把状态传进去拿回来
-fn make_adder(start) = fn(step) = start + step
-let from10 = make_adder(10)
-print(from10(1))
-print(from10(5))
-fn counter(n) = if(n <= 0, [], [n] + counter(n - 1))
-print(counter(3))
+// 词法作用域：函数体能看到的名字 = 它被写在那儿时能看到的，不看调用处。
+// v0.39 这份先写「加器工厂」`fn make_adder(start) = fn(step) = start + step`，再把造出来的
+// 函数当值绑给 from10、当参数传。v0.40 里函数不是值 —— 那条路整条删掉，只剩一条：
+// 块里定义局部函数，它捕获定义那一刻的环境。
+// 前三行打印的和 v0.39 一字不差；后两行是这次补的「不追改」和「传状态」。
+
+fn outer(start, step) {
+  let base = start * 10
+  fn add_base() { base + step }             // 捕获的是写它时能看到的 base 和 step
+  add_base()
+}
+fn down(n) { if(n <= 0, [], [n] + down(n - 1)) }
+
+print(str(outer(1, 1)))                      // 11
+print(str(outer(1, 5)))                      // 15
+print(str(down(3)))                          // [3,2,1]
+
+let base = 99
+fn later() { base }                          // 看到的是这一刻的 base
+print(str(later()))                          // 99
+print(str(outer(1, 1)))                      // 还是 11 —— 外面重名，追不回已经写下的那一层
+
+// 没有赋值，所以「会变的计数器」写不出来；要计数就把状态传进去、再拿回来
+fn count_up(n, acc) { if(n <= 0, acc, count_up(n - 1, acc + 1)) }
+print(str(count_up(3, 0)))

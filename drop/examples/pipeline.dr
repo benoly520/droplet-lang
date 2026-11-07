@@ -1,15 +1,27 @@
-// 内置只有这几个：map / filter / fold 串成一条
-fn double(x) = x * 2
-fn even(x) = x % 2 == 0
-fn add(a, b) = a + b
-print(fold(add, filter(even, map(double, range(10))), 0))
-print(map(str, range(4)))
-print(join(", ", sort(["banana", "apple", "cherry"])))
-// 函数是值：能绑定、能放进表、能当参数传
-let twice = fn(x) = x + x
-print(twice(4))
-let ops = [twice, str]
-print(ops[0](3))
-print(map(ops[1], [1, 2]))
-fn apply(f, x) = f(x)
-print(apply(twice, 10))
+// v0.39 这份是一条流水线：map / filter / fold 串起来，再把函数当值绑、当参数传。
+// v0.40 把这五个名字全删了，函数也不是值 —— 同一件事只剩「带 acc 的尾递归」这一种写法。
+// 七行输出和 v0.39 一字不差，代价是每一个「替你循环」的东西都得自己写成具名函数。
+
+fn upto(a, b, acc) { if(a >= b, acc, upto(a + 1, b, acc + [a])) }                 // 代替 range(n)
+fn twice_all(xs, i, acc) { if(i >= len(xs), acc, twice_all(xs, i + 1, acc + [xs[i] * 2])) }   // 代替 map
+fn keep_even(xs, i, acc) { if(i >= len(xs), acc, keep_even(xs, i + 1, if(xs[i] % 2 == 0, acc + [xs[i]], acc))) }
+fn total(xs, i, acc) { if(i >= len(xs), acc, total(xs, i + 1, acc + xs[i])) }     // 代替 fold
+fn to_str(xs, i, acc) { if(i >= len(xs), acc, to_str(xs, i + 1, acc + [str(xs[i])])) }
+
+print(str(total(keep_even(twice_all(upto(0, 10, []), 0, []), 0, []), 0, 0)))     // 90
+print(str(to_str(upto(0, 4, []), 0, [])))                                          // ["0","1","2","3"]
+
+// 排序没有内置：插入 + 尾递归，两行写完
+fn ins(x, ys) { if(len(ys) == 0, [x], if(x <= ys[0], [x] + ys, [ys[0]] + ins(x, ys[1:]))) }
+fn isort(xs, acc) { if(len(xs) == 0, acc, isort(xs[1:], ins(xs[0], acc))) }
+
+print(join(", ", isort(["banana", "apple", "cherry"], [])))                        // apple, banana, cherry
+
+// 函数不是值：let twice = fn(x) = x + x、ops[0](3)、apply(f, x) 全都不存在了，
+// 只剩「按名字调用」这一条 —— 所以那三行只能写成三次直接调用。
+fn twice(x) { x + x }
+
+print(str(twice(4)))                                                               // 8
+print(str(twice(3)))                                                               // 6
+print(str(to_str([1, 2], 0, [])))                                                  // ["1","2"]
+print(str(twice(10)))                                                              // 20

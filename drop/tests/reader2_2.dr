@@ -1,8 +1,14 @@
-// 冷读读者的第 2 题：没有 split，按空格切串并数不同词（连续空格算一个，串首尾不产生空词）
-// 它的原始期望：`one,two,three,three` + `3`；新 print 规则下第一行是 ["one","two","three","three"]
+// 冷读读者的第 2 题：没有 split 的年代，按空格切串并数不同词（连续空格算一个，首尾不产生空词）。
+// v0.40 有 split 了，但这个程序偏巧要「连续空格算一个」，而 split 只有一种切法（空段保留），
+// 所以它的手扫下标版本原样留着 —— 只改了 v0.40 强制的三处：
+//   fn isSp(c) = c == " "      → 函数体必须是块
+//   len(filter(fn(y) = ...))   → 尾递归里直接数
+//   fold(keep, ys, [])         → 带 acc 的尾递归
+// 输出和 v0.39 一字不差：["one","two","three","three"] 然后 3
+
 let s = "one two  three three"
 
-fn isSp(c) = c == " "
+fn isSp(c) { c == " " }
 fn skipBlank(t, i) {
   let n = len(t)
   if(i >= n, n, if(isSp(t[i]), skipBlank(t, i + 1), i))
@@ -16,10 +22,10 @@ fn words(t, i, acc) {
   let b = wordEnd(t, a)
   if(a >= b, acc, words(t, b, acc + [t[a:b]]))
 }
-fn has(ys, v) = len(filter(fn(y) = y == v, ys)) > 0
-fn keep(acc, v) = if(has(acc, v), acc, acc + [v])
-fn uniq(ys) = fold(keep, ys, [])
+fn has(ys, i, v) { if(i >= len(ys), false, if(ys[i] == v, true, has(ys, i + 1, v))) }
+fn keep(acc, v) { if(has(acc, 0, v), acc, acc + [v]) }
+fn uniq(ys, i, acc) { if(i >= len(ys), acc, uniq(ys, i + 1, keep(acc, ys[i]))) }
 
 let ws = words(s, 0, [])
-print(ws)
-print(len(uniq(ws)))
+print(str(ws))
+print(str(len(uniq(ws, 0, []))))

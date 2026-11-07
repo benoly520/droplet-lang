@@ -1,0 +1,89 @@
+— GET / —— 一个 200，正文四个字节
+HTTP/1.1 200 OK
+Date: *
+Content-Type: text/plain; charset=utf-8
+Content-Length: 4
+
+pong
+— GET 一条没有的路 —— 404
+HTTP/1.1 404 Not Found
+Date: *
+Content-Type: text/plain; charset=utf-8
+Content-Length: 15
+
+没有这条路
+— HEAD / —— 只回头，Content-Length 写 0，正文由宿主抹掉
+HTTP/1.1 200 OK
+Date: *
+Content-Type: text/plain; charset=utf-8
+Content-Length: 0
+— DELETE / —— 程序自己不认的方法：405
+HTTP/1.1 405 Method Not Allowed
+Date: *
+Content-Type: text/plain; charset=utf-8
+Content-Length: 24
+
+只认 GET、HEAD、POST
+— POST —— 正文按 bytes(body) 那条路发出去，回来的还是那些字节
+HTTP/1.1 200 OK
+Date: *
+Content-Type: text/plain; charset=utf-8
+Content-Length: 11
+
+你好 body
+  [回来的最后 11 个字节和发出去的一模一样吗] True
+— 同一条连接读完第一个请求，接着读第二个（keep-alive）
+HTTP/1.1 200 OK
+Date: *
+Content-Type: text/plain; charset=utf-8
+Content-Length: 4
+
+pong
+— 第二个响应：还在同一条连接上，没再建过一次连接
+HTTP/1.1 200 OK
+Date: *
+Content-Type: text/plain; charset=utf-8
+Content-Length: 8
+
+HTTP/1.1
+— 对端写了 Connection: close（一模一样）—— 多回一行，并且真的关
+HTTP/1.1 200 OK
+Date: *
+Content-Type: text/plain; charset=utf-8
+Content-Length: 4
+Connection: close
+
+pong
+— 行分隔只认 CRLF：LF-only 的请求不认，直接断这条连接
+
+— 首部超过 64 KiB：断这条连接，不是错误码
+
+— 正文声明超过 1 MiB：断这条连接，不是错误码
+
+— GET /len —— 程序自己数请求的字节数
+HTTP/1.1 200 OK
+Date: *
+Content-Type: text/plain; charset=utf-8
+Content-Length: 2
+
+30
+— GET /peer —— 对端地址是个字符串
+HTTP/1.1 200 OK
+Date: *
+Content-Type: text/plain; charset=utf-8
+Content-Length: 15
+
+127.0.0.1:*
+— 处理函数里报错：整个服务器一红就停（第一个响应发不出去）
+
+  [服务器的 stderr] 挂：第 1 行 E6 —— 下标越界：["GET / HTTP/1.1","Host: x","",""] 长 4，取第 9 个
+  [退出码] 1
+— 一次请求里调两次 reply = E14（头一次已经发出去了）
+HTTP/1.1 200 OK
+Date: *
+Content-Type: text/plain; charset=utf-8
+Content-Length: 9
+
+头一次
+  [服务器的 stderr] 挂：第 1 行 E14 —— 宿主不肯做：这个请求已经回过了 —— 一次请求只有一个响应
+  [退出码] 1

@@ -1,10 +1,19 @@
-// 冷读读者的第 4 题：2..20 的合数个数 + 逗号一行（它特意用 join 避开 print 打表）
-fn divides(n, d) = n % d == 0
-fn hasFactor(n, d) = if(d >= n, false, if(divides(n, d), true, hasFactor(n, d + 1)))
-fn composite(n) = hasFactor(n, 2)
+// 冷读读者的第 4 题：2..20 的合数个数 + 逗号一行（它特意用 join 避开 print 打表）。
+// v0.39 原文取数用 `map(fn(i) = i + 2, range(19))`、筛合数用 `filter(composite, ns)`。
+// v0.40 两个名字都没有，也没有匿名函数 —— 同一件事只剩「带 i 和 acc 的尾递归」。
+// print 这次只收字符串，所以那行 join 反而是最顺的写法。
+// 输出和 v0.39 一字不差：11，然后 4,6,8,9,10,12,14,15,16,18,20
 
-let ns = map(fn(i) = i + 2, range(19))
-let comps = filter(composite, ns)
+fn divides(n, d) { n % d == 0 }
+fn hasFactor(n, d) { if(d >= n, false, if(divides(n, d), true, hasFactor(n, d + 1))) }
+fn composite(n) { hasFactor(n, 2) }
 
-print(len(comps))
-print(join(",", map(str, comps)))
+fn nums(a, b, acc) { if(a > b, acc, nums(a + 1, b, acc + [a])) }            // 代替 range
+fn keep_comps(xs, i, acc) { if(i >= len(xs), acc, keep_comps(xs, i + 1, if(composite(xs[i]), acc + [xs[i]], acc))) }
+fn to_str(xs, i, acc) { if(i >= len(xs), acc, to_str(xs, i + 1, acc + [str(xs[i])])) }
+
+let ns = nums(2, 20, [])
+let comps = keep_comps(ns, 0, [])
+
+print(str(len(comps)))
+print(join(",", to_str(comps, 0, [])))

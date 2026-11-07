@@ -81,5 +81,5 @@ jobs:
         run: sh code/sup/report.sh "$GITHUB_WORKSPACE/.build/ci-sup/blobd" --accept 18952
       - name: 破坏测试（每条断言归因到具体工具）
         run: sh code/sup/sabotage-sup.sh 18960
-      - name: drop 语言（独立：例子 + 定义<->实现对账 + 表面探针 + 预算 + 七条破坏）
+      - name: drop 语言（独立：干净房间 + 例子 + 定义<->实现对账 + 预算 + 真 socket 打服务器 + 十一条破坏）
         run: sh drop/check.sh

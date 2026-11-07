@@ -1,5 +1,8 @@
-// 递归、条件、整数
-fn fact(n) = if(n <= 1, 1, n * fact(n - 1))
-print(fact(0))
-print(fact(10))
-print(if(fact(5) > 100, "大", "小"))
+// 递归、条件、整数。v0.40 的两条收紧落在这份最小的例子上：
+//   函数体只有块（没有 fn f(x) = e 这种表达式体）；上屏幕只有 print(str(...))。
+
+fn fact(n) { if(n <= 1, 1, n * fact(n - 1)) }
+
+print(str(fact(0)))
+print(str(fact(10)))
+print(str(if(fact(5) > 100, "大", "小")))

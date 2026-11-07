@@ -7,6 +7,8 @@
 v0.38 加了 `lang/`，一套**独立的**登记格式，用来登记“承诺 ↔ 判据”的关系（见 docs/LANG2.md）。
 v0.39 更正：`lang/*.dpt` 是**格式不是语言**（离开 `req/` 五表它什么都判不了），另起 `drop/` 才是那门
 极简语言 —— 定义只有 `drop/spec.txt`，不引用仓库任何其它文件（见 docs/DROP.md）。
+v0.40 把「同一件事的第二种写法」全删了（循环只剩尾递归一条，没有 `map`/`filter`/`fold`/`range`/`sort`，
+没有隐式转换），并当场用这门语言写了一个能跑的 HTTP 服务器来证明删完还表达得出来。
 它不碰 C、不进题面冻结、不替换 `req/`，状态是实验性，并且写了自杀条款。
 
 “AI”在这里指作者，不是设计对象：语法和工具链里没有任何一处是专为 AI 设计的。专为 AI 的是**工作流** ——
@@ -32,8 +34,10 @@ v0.39 更正：`lang/*.dpt` 是**格式不是语言**（离开 `req/` 五表它�
 之间没有一条会失败的检查），而且它自己声明的 invariant 被自己的旗舰服务违反了。留下的形态保留了真正
 起作用的那部分，并且明确不再往**改 C** 的方向走。`code/` 下现在只有 C11 与 shell / Python；
 `lang/` 下是与 C 无关、只登记承诺与判据的实验性格式（v0.38，四段门 + 三道破坏守着，见 docs/LANG2.md）。
-`drop/` 下是一门从零重做的极简语言（v0.39）：`sh drop/check.sh` 一条命令，四段门 + 七条破坏，
-定义 `spec.txt` 152 行 / 1,470 token 预算内；它不碰 C、不进题面冻结、也不读 `req/`。
+`drop/` 下是一门从零重做的极简语言（v0.40）：`sh drop/check.sh` 一条命令，五段门 + 十一条破坏，
+定义 `spec.txt` 150 行 / 1,750 token = 预算的 100.0%；同一件事只许一种写法（迭代只剩尾递归，
+没有 `map`/`filter`/`fold`/`range`/`sort` 这些替你循环的名字，没有隐式转换），并且这份定义足够写出一个能跑的
+HTTP 服务器（`drop/examples/http.dr`，23 行，门里第五段拿真 socket 打它）。它不碰 C、不进题面冻结、也不读 `req/`。
 
 ## 五分钟上手
 
@@ -41,7 +45,7 @@ v0.39 更正：`lang/*.dpt` 是**格式不是语言**（离开 `req/` 五表它�
 
 ```sh
 sh code/sup/check.sh                           # 一条命令一个退出码（构建/样例/契约/登记/冻结/预算/登记格式）
-sh drop/check.sh                               # 极简语言 drop：例子 + 定义<->实现对账 + 预算 + 七条破坏
+sh drop/check.sh                               # 极简语言 drop：例子 + 对账 + 预算 + 真 socket 打服务器 + 十一条破坏
 sh code/sup/report.sh .build/check/blobd --accept 18881   # 人类验收页：条款 -> 断言/样例 -> 红绿
 ```
 
@@ -79,7 +83,7 @@ curl -s          -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blob
 | 登记格式（`lang-check.sh`，实验性） | 定义与检查器对不上（写了不会发生的错误码、或有条码从没被样本打中）；或 `lang/blobd.dpt` 与 `req/` 不再逐栏等价；或完整定义超过 1,500 token |
 | 题面冻结（`freeze.sh`） | 验收表、声明头、**5 份译稿**或契约与 `req/FROZEN` 不一致（题被改过） |
 | 变异覆盖分（`mutation-score.py`） | 改第 N 条断言的期望它不红；或实现变异红了没声明的断言；或覆盖低于 floor |
-| `drop` 语言（`drop/check.sh`，独立于本工程） | 8 份例子（含冷读读者只读定义写的 4 份）输出对不上；定义的 13 条错误码与实现的 13 条不一致、有条码没有能触发它的样本、或定义里某句规则找不到原话；定义超过 1,500 token；定义里 `> ` 那 47 行真代码抽出来跑不通；命令行吐出 Python 堆栈 |
+| `drop` 语言（`drop/check.sh`，独立于本工程） | 目录里出现指到本工程别处的引用（独立性现在是门，不是文档里的一句 grep）；例子（含被改写成 v0.40 写法的 4 份读者程序）输出对不上 `.out`；定义的 14 条错误码与实现的 14 条不一致、有条码没有能触发它的样本、或实现某条行为在定义里找不到原话；定义超过 1,750 token；定义里 `> ` 那 24 行真代码抽出来跑不通；真 socket 打 `examples/http.dr` 的 89 行对话台账对不上；命令行吐出 Python 堆栈 |
 | 破坏测试（`sabotage-sup.sh`） | 23 条注入的缺陷里有一条**没有**被具名工具以具名诊断抓住（含 6 条改题/改译稿/改基线的、3 条改登记语言定义的） |
 
 最后一行最重要：它检查的是检查器本身。“被抓住”如果其实是注入代码写坏了导致的编译失败，那是假绿 ——
@@ -100,7 +104,7 @@ code/sup/lab/        实验题面包：两条本仓库里不存在的决定
 code/webapi/deploy/  30 条断言表、soak、systemd 单元、环境变量样例
 req/                 源句 SRC.md、19 条条款、译稿 TRANS/AMBIG/GAP、基线 BASELINE、冻结清单 FROZEN、README（五道门）
 lang/                实验性登记格式：droplet.dpt（定义，1,321 token）、blobd.dpt（由 req/ 机械转写，等价性有门）
-drop/                v0.39 的极简语言（干净房间）：spec.txt 唯一定义、drop.py 实现、check.sh 门、examples/ + tests/（外部读者程序）
+drop/                v0.40 的极简语言（干净房间）：spec.txt 唯一定义（1,750 token 顶满预算）、drop.py 实现（含 serve/reply 服务器）、check.sh 五段门 + 十一条破坏、examples/ + tests/
 docs/                SPEC、VALIDATION（实测数字）、EXPERIMENT（三个实验）、LANG2（登记格式与三臂实测）、DROP（极简语言与三轮冷读）、NEXT（交接）
 ```
 

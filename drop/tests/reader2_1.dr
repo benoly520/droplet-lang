@@ -1,9 +1,19 @@
-// 外部冷读读者（第二轮）写的程序，逐字搬进来当回归测试。
-// 它的原始期望：第 1 行 `1,2,3`；本轮 print 改规则后是 `[1,2,3]`（见 spec 的 str/print）。
+// 外部冷读读者（第二轮）写的程序，当回归测试用。
+// v0.39 原文四行里有三行是 filter / fold / 匿名函数：
+//   fn has(ys, v) = len(filter(fn(y) = y == v, ys)) > 0
+//   fn keep(acc, v) = if(has(acc, v), acc, acc + [v])
+//   fn dedup(ys) = fold(keep, ys, [])
+// v0.40 把这三个名字删了，也没有 sort —— 同一件事只剩「带 acc 的尾递归」，去重要自己数。
+// 输出和 v0.39 一字不差：[1,2,3]
+
 let xs = [3, 1, 3, 2, 1]
 
-fn has(ys, v) = len(filter(fn(y) = y == v, ys)) > 0
-fn keep(acc, v) = if(has(acc, v), acc, acc + [v])
-fn dedup(ys) = fold(keep, ys, [])
+fn has(ys, i, v) { if(i >= len(ys), false, if(ys[i] == v, true, has(ys, i + 1, v))) }
+fn keep(acc, v) { if(has(acc, 0, v), acc, acc + [v]) }
+fn dedup(ys, i, acc) { if(i >= len(ys), acc, dedup(ys, i + 1, keep(acc, ys[i]))) }
 
-print(sort(dedup(xs)))
+// 没有 sort：插入 + 尾递归
+fn ins(x, sorted) { if(len(sorted) == 0, [x], if(x <= sorted[0], [x] + sorted, [sorted[0]] + ins(x, sorted[1:]))) }
+fn isort(ys, acc) { if(len(ys) == 0, acc, isort(ys[1:], ins(ys[0], acc))) }
+
+print(str(isort(dedup(xs, 0, []), [])))

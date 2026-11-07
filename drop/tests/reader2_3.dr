@@ -1,9 +1,20 @@
-// 冷读读者的第 3 题：FizzBuzz 1..15，每行一个
-// 它靠「顶层表达式的值被丢掉」+「先求参数再绑」推出 map(print, ...) 会打 15 行
+// 冷读读者的第 3 题：FizzBuzz 1..15，每行一个。
+// v0.39 原文最后一行是 `map(print, map(fb, map(fn(i) = i + 1, range(15))))` —— 它靠
+// 「函数是值」把 print 当参数递进去，靠三个 sugar 名字把 15 次调用串起来。
+// v0.40 这一条整条没有了：要一行打一次，就把 print 写成句子、把 if 留在最后一句当尾位入口。
+// 输出和 v0.39 一字不差（15 行）。
+
 fn fb(n) {
   let r3 = n % 3
   let r5 = n % 5
   if(r3 == 0 && r5 == 0, "FizzBuzz", if(r3 == 0, "Fizz", if(r5 == 0, "Buzz", str(n))))
 }
 
-map(print, map(fb, map(fn(i) = i + 1, range(15))))
+// 副作用句子写在 if 之前，if 留在最后一句 —— 尾调用在最后一句里才算尾位，
+// 所以这样写转 15 万次也不涨层数；换成 { print(fb(i)) each(...) } 当一支就不算了。
+fn each(top, i) {
+  print(fb(i))
+  if(i >= top, none, each(top, i + 1))
+}
+
+each(15, 1)

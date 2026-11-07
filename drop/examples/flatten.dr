@@ -1,7 +1,19 @@
-// 表可以 +，递归拆开一层
-fn flat(xss) = fold(fn(a, b) = a + b, xss, [])
-print(flat([[1, 2], [3], []]))
-fn cut(s, i) = if(i >= len(s), if(len(s) == 0, [], [s]),
-                 if(s[i] == " ", [s[0:i]] + cut(s[i+1:], 0), cut(s, i + 1)))
-print(join("|", cut("a bb ccc", 0)))
-print(cut("", 0))
+// 表可以 +，递归拆开一层。
+// v0.39 这份的 flat 用的是 fold(fn(a, b) = a + b, xss, [])；v0.40 没有 fold，
+// 也没有匿名函数 —— 同一件事只剩「带 acc 的尾递归」这一种写法。第一行打印的和 v0.39 一字不差；
+// 后面几行改用 split，v0.39 那份得自己拿下标扫。
+
+fn flat(acc, xss) { if(len(xss) == 0, acc, flat(acc + xss[0], xss[1:])) }
+
+print(str(flat([], [[1, 2], [3], []])))          // [1,2,3]
+
+// 按空格切词：v0.39 得自己拿索引扫，v0.40 有 split —— 但只有这一个切法，
+// 分隔符就是一个字符串，连续的分会各留一个空段。
+print(join("|", split("a bb ccc", " ")))          // a|bb|ccc —— join 给的就是字符串，直接 print
+print(str(split("a bb ccc", " ")))                // ["a","bb","ccc"]
+print(str(split("", ",")))                        // [""] —— 空串切出来还是一个空段
+print(join("|", split("a  bb", " ")))             // a||bb
+
+// 要「不产生空段」就得自己筛一遍：这也只有一种写法
+fn drop_empty(xs, i, acc) { if(i >= len(xs), acc, drop_empty(xs, i + 1, if(xs[i] == "", acc, acc + [xs[i]]))) }
+print(str(drop_empty(split("a  bb", " "), 0, [])))   // ["a","bb"]
