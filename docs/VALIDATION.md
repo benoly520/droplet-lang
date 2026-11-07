@@ -308,7 +308,7 @@ D6 留着）和两条难看的事实：两种介质里都有读者为了过孤�
 
 ```sh
 grep -rn "req/\|SPEC\|blobd\|\.dpt" drop/   # 实测 0 处命中
-sh drop/check.sh                                # 四段 + 七条破坏，约 6 秒
+sh drop/check.sh                                # 四段 + 七条破坏，实测 1.4 秒
 ```
 
 跑出来的数字（全部实测，本轮）：
