@@ -124,10 +124,14 @@ namespace DropLang
         public int NextHandle = 1;
         public int? Port;                                  // --port 给的端口，没给就是 null
 
-        // 定义给的三行号规则：函数体里的错报调用那一行；表字面量里的错报「[」那一行。
-        public DropErr E(int code, string msg)
+        // 行号规则（维护者 2026-11-08 第二次定调后的读法）：
+        // 默认「N 是那个记号所在的行」—— 错在函数体里也报体里那一行，不搬到调用处。
+        // 例外一：表字面量里的错报「[」那一行（定义明写）。
+        // 例外二：「函数体里的错报在调用那一行」只在「那个记号本身就是这次调用」时成立，
+        //         也就是 E2（参数个数不符）和 E13（叠到第 201 层）—— 由调用处传 callLine 进来。
+        public DropErr E(int code, string msg, int callLine = 0)
         {
-            int line = Frames.Count > 0 ? StmtLine : Lit != 0 ? Lit : CurLine;
+            int line = callLine != 0 ? callLine : Lit != 0 ? Lit : CurLine;
             if (line <= 0) line = StmtLine > 0 ? StmtLine : 1;
             return new DropErr(code, line, msg);
         }
@@ -384,6 +388,16 @@ namespace DropLang
         // 「同一行」= 还在写下这一句的那一行上；换行记号本身意味着这一句到头了。
         bool SameLine() { return Cur.K == Tk.Eof || (Cur.K != Tk.New && Cur.Line == curLine); }
 
+        // 该有逗号 / 收尾符的那个位置（维护者 2026-11-08 第二次定调）：
+        // 还露着真记号 —— 定义说「形状不对一律 E3：少括号少逗号」，所以这里算 E3；
+        // 句子或文件到这里就断了、什么都不剩 —— 定义说「括号没闭合是 E11」，所以只有这种算 E11。
+        // 同一个位置既可能缺收尾符也可能缺逗号，定义把它们归给同一个码，消息里不必分开。
+        DropErr Close(string closer, string why11, string what)
+        {
+            if (AtLineEnd()) return Err(11, "话说到一半：" + why11);
+            return Err(3, "语法错：" + what + "，这里该有「" + closer + "」，实际是" + Cur.Show());
+        }
+
         // ---------- 句子表 ----------
         public List<St> Program()
         {
@@ -407,19 +421,11 @@ namespace DropLang
                 if (!top && At("}")) return list;
                 St s = Stmt();
                 list.Add(s);
-                if (top)
-                {
-                    if (!AtLineEnd()) throw E3("一行一句：这一句后面还跟着" + Cur.Show());
-                    if (Cur.K == Tk.New) Adv();
-                }
-                else
-                {
-                    // 块里放行同行多句 —— spec 自己的例子 { let a = 1 a + 1 } 就是这么写的
-                    if (At("}")) continue;
-                    if (Cur.K == Tk.New) { Adv(); continue; }
-                    if (Cur.Line != curLine && !AtLineEnd()) { /* 换行已经由上面的 AdvNew 处理 */ }
-                    if (AtLineEnd()) continue;
-                }
+                // 顶层和块里同一套规矩（维护者 2026-11-08 第二次定调）：
+                // 「一行一句」说的是「一句话不许跨行」，不是「一句独占一行」；
+                // 所以顶层写 let a = 1 let b = 2 也合法，原先这里多出来的那条 E3 已抹掉。
+                // 句子结束后剩下什么也不算：换行由下一圈开头吃掉，「}」由下一圈判断，
+                // 其余记号就是同一行里的下一句。
             }
         }
 
@@ -575,7 +581,7 @@ namespace DropLang
                         break;
                     }
                 }
-                if (!At(")")) throw Err(11, "话说到一半：调用的「(」没有配上「)」");
+                if (!At(")")) throw Close(")", "调用的「(」没有配上「)」", "调用没写完");
                 Adv();
             }
             finally { gdepth--; }
@@ -603,7 +609,7 @@ namespace DropLang
                         if (!At("]")) b = E();                      // 上端可省：xs[3:]，两端都省 xs[:]
                     }
                 }
-                if (!At("]")) throw Err(11, "话说到一半：「[」没有配上「]」");
+                if (!At("]")) throw Close("]", "「[」没有配上「]」", "下标没写完");
                 Adv();
             }
             finally { gdepth--; }
@@ -626,7 +632,7 @@ namespace DropLang
                 Adv();
                 if (Cur.K == Tk.New) throw Err(11, "话说到一半：「(」后面就换行了");
                 var e = E();
-                if (!At(")")) throw Err(11, "话说到一半：「(」没有配上「)」");
+                if (!At(")")) throw Close(")", "「(」没有配上「)」", "括号没闭合");
                 Adv();
                 return e;                                                  // 括号只是表达式
             }
@@ -648,7 +654,7 @@ namespace DropLang
                             break;
                         }
                     }
-                    if (!At("]")) throw Err(11, "话说到一半：表字面量的「[」没有配上「]」");
+                    if (!At("]")) throw Close("]", "表字面量的「[」没有配上「]」", "表字面量没闭合");
                     Adv();
                 }
                 finally { gdepth--; }
@@ -904,19 +910,21 @@ namespace DropLang
             {
                 var b = Builtin.For(n);
                 if (c.Args.Count != b.Argc)
-                    throw C.E(2, "内置「" + n + "」要 " + b.Argc + " 个参数，这里给了 " + c.Args.Count + " 个");
-                return b.Fn(this, ArgsOf(c.Args, env));
+                    throw C.E(2, "内置「" + n + "」要 " + b.Argc + " 个参数，这里给了 " + c.Args.Count + " 个", c.Line);
+                var bav = ArgsOf(c.Args, env);
+                C.CurLine = c.Line;                                // 内置出错时，「那个记号」就是这次调用
+                return b.Fn(this, bav);
             }
             object o = Env.Find(env, n);
             if (o == null) throw C.E(1, "没绑过的名字：「" + n + "」");
             var fd = o as FuncDef;
             if (fd == null) throw C.E(4, "不是函数不能调用：「" + n + "」是" + U.Kind((Val)o));
             if (c.Args.Count != fd.Params.Length)
-                throw C.E(2, "「" + n + "」要 " + fd.Params.Length + " 个参数，这里给了 " + c.Args.Count + " 个");
+                throw C.E(2, "「" + n + "」要 " + fd.Params.Length + " 个参数，这里给了 " + c.Args.Count + " 个", c.Line);
             var args = ArgsOf(c.Args, env);
             if (tail && C.Frames.Count > 0 && C.Frames[C.Frames.Count - 1].Fn == fd)
                 return new TailJump { Fn = fd, Args = args };                    // 尾位调用自己 = 转
-            return Run(fd, args);
+            return Run(fd, args, c.Line);
         }
 
         Val[] ArgsOf(List<Ex> xs, Env env)
@@ -942,14 +950,15 @@ namespace DropLang
             return env;
         }
 
-        Val Run(FuncDef f, Val[] args)
+        Val Run(FuncDef f, Val[] args, int callLine)
         {
             int self = 0;
             for (int i = 0; i < C.Frames.Count; i++) if (C.Frames[i].Fn == f) self++;
+            // E13 报「最里头那一次没成功的调用」在哪一行 —— 就是这次 Run 要进去的那个调用记号
             if (self >= SelfCap)
-                throw C.E(13, "「" + f.Name + "」的非尾自身调用叠到第 " + (SelfCap + 1) + " 层，进不去");
+                throw C.E(13, "「" + f.Name + "」的非尾自身调用叠到第 " + (SelfCap + 1) + " 层，进不去", callLine);
             if (C.Frames.Count >= TotalCap)
-                throw C.E(13, "调用叠到宿主上限 " + TotalCap + " 层（互相调用在定义里没有「转」的语义）");
+                throw C.E(13, "调用叠到宿主上限 " + TotalCap + " 层（互相调用在定义里没有「转」的语义）", callLine);
             var env = BindArgs(f, args);
             C.Frames.Add(new Frame { Fn = f, Env = env });
             try
@@ -1551,7 +1560,7 @@ namespace DropLang
         static string Date(Ctx c, string arg)
         {
             if (arg != "") throw No(c, "date 只认空串");
-            // 定义只说「回时钟」，没说什么形状；这里取「星期, DD Mon YYYY HH:MM:SS GMT」这一串（REPORT §里记了）
+            // 定义只说「回时钟」，没说什么形状；这里取「星期, DD Mon YYYY HH:MM:SS GMT」这一串（REPORT 里记了）
             return DateTime.UtcNow.ToString("r", CultureInfo.InvariantCulture);
         }
     }
@@ -1643,11 +1652,13 @@ namespace DropLang
 
         static int Die(TextWriter err, string msg) { err.WriteLine(msg); return 1; }
 
-        // 多个文件按命令行顺序并成一个程序，行号按并起来的整体连续算。
+        // 「宿主的解释器 [--port] 库.dr 程序.dr —— 宿主按这个顺序并起来」：
+        // 并起来 = 把几个文件的文本按命令行给的顺序接成一条长串，行号就按这条长串从头数。
+        // 文件之间只隔「每个 .dr 末尾本来就带的那一个换行」；再接一个换行就凭空多出一行。
+        // 所以这里不再逐文件数行号，也不再在每个文件尾巴上加一个换行记号（维护者第二次定调改的）。
         static List<Token> LexAll(List<string> files)
         {
-            var all = new List<Token>();
-            int line = 0;
+            var text = new List<int>();
             foreach (var path in files)
             {
                 int[] src;
@@ -1658,23 +1669,24 @@ namespace DropLang
                 }
                 catch (Exception) { throw new DropErr(0, 0, "读不到文件：「" + path + "」"); }
                 if (src.Length > 0 && src[0] == 0xFEFF) src = U.Slice(src, 1, src.Length);   // BOM
-                int n = src.Length;
-                int p = 0;
-                while (p < n)
-                {
-                    line++;
-                    int st = p;
-                    while (p < n && src[p] != '\n') p++;
-                    int en = p;
-                    if (p < n) p++;                                          // 吃掉换行
-                    if (en > st && src[en - 1] == '\r') en--;
-                    all.AddRange(Lexer.Line(line, U.Slice(src, st, en)));
-                    all.Add(new Token { K = Tk.New, Line = line });
-                }
-                all.Add(new Token { K = Tk.New, Line = line });
+                text.AddRange(src);
             }
-            all.Add(new Token { K = Tk.Eof, Line = line });
-            return all;
+            int[] a = text.ToArray();
+            var toks = new List<Token>();
+            int line = 0, p = 0, n = a.Length;
+            while (p < n)
+            {
+                line++;
+                int st = p;
+                while (p < n && a[p] != '\n') p++;
+                int en = p;
+                if (p < n) p++;                                          // 吃掉换行
+                if (en > st && a[en - 1] == '\r') en--;                  // 行尾那个回车符不算内容
+                toks.AddRange(Lexer.Line(line, U.Slice(a, st, en)));
+                toks.Add(new Token { K = Tk.New, Line = line });
+            }
+            toks.Add(new Token { K = Tk.Eof, Line = line });
+            return toks;
         }
     }
 }

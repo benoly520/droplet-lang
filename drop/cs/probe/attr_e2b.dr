@@ -1,0 +1,4 @@
+// attr_e2b：那次个数不对的调用写在函数体里
+fn twice(x) { x * 2 }
+fn go(v) { twice(v, v) }
+print(str(go(1)))

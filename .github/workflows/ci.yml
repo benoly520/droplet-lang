@@ -20,6 +20,11 @@ name: CI
 #   report   人类验收页：目标 -> 断言 -> 红绿，一屏
 #   sabotage 23 条破坏测试，每条必须由具体工具以具体诊断抓住
 #
+# 另一个 job：
+#   cs     同一页定义的第二个宿主（C#）与参考宿主对账 —— 语料逐字节、报错样本的（行，码）、
+#          真客户端打出来的 88 行实录。它跟 C 那档没有依赖关系，所以单开一个 job：C 的构建
+#          一分钟都不该等 dotnet。没有 dotnet 的机器上这个脚本自己明说"这段没跑"（红都不算）。
+#
 # soak.sh 不在这里：它要一台长时间常开的机器。
 
 on:
@@ -81,5 +86,20 @@ jobs:
         run: sh code/sup/report.sh "$GITHUB_WORKSPACE/.build/ci-sup/blobd" --accept 18952
       - name: 破坏测试（每条断言归因到具体工具）
         run: sh code/sup/sabotage-sup.sh 18960
-      - name: drop 语言（独立：干净房间 + 例子 + 定义<->实现对账 + 预算与分界 + 真 socket 打库写的 HTTP 服务器 + 十四条破坏）
+      - name: drop 语言（独立：干净房间 + 例子 + 定义<->实现对账 + 预算与分界 + 真 socket 打库写的 HTTP 服务器 + 十六条破坏）
         run: sh drop/check.sh
+
+  # 第二个宿主：这一档不测 C，测的是「同一页定义能不能长出两份实现」。
+  # 它跑的不是"能不能编过"，而是两份宿主对同一句话是否说得分毫不差 ——
+  # 所以它必须和 sup 档分开：没有 dotnet 的机器上 conform.sh 会明说"这段没跑"，
+  # 而这里装了 dotnet，它就真跑，红就是漂。
+  cs:
+    name: 两个宿主一份定义（C# 对账）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: 两份宿主对账（语料逐字节 / 报错样本 / 服务器实录 / 耗时只报数）
+        run: sh drop/cs/conform.sh
