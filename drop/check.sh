@@ -5,7 +5,8 @@
 #   [2/5] 对账     spec.txt 的错误码 = drop.py 会吐的错误码；实现表面每条都有定义原话对着
 #                 且每条码都有一个真能触发它的样本；宿主命令表 = 定义说的那七个（双向比）
 #   [3/5] 预算     spec.txt 是全部定义：超预算 = 定义在膨胀，不是能力在增长
-#                 顺带一条分界：定义和语言实现里都不许出现协议词汇 —— HTTP 是库的事
+#                 顺带两条分界：定义和语言实现里都不许出现协议词汇 —— HTTP 是库的事；
+#                 定义里也不许出现任何具体宿主的名字 —— 跑法那两句必须对第二个宿主同样成立
 #   [4/5] 定义即可执行  从 spec.txt 重新抽出 > 行，必须与 examples/spec.dr 逐字相同，且跑出 *.out
 #   [5/5] 服务器  起真进程 + 裸 socket 打 lib/http.dr + examples/http.dr，对话必须逐字等于
 #                 tests/http.expected；顺带查库只碰那七个宿主命令（它不许偷别的外面）
@@ -26,6 +27,11 @@ PY=${PYTHON:-python3}
 T=$(mktemp -d)
 T_live="$T/live"
 trap 'rm -rf "$T"' EXIT
+
+# 破坏测试要一整棵跑得起来的门树。cs/ 只带 Drop.cs —— 第三段只读它，bin/obj 不必跟着拷，
+# 不然每条破坏都多拷 1 MB，门的时间白花。
+tree() { mkdir -p "$1/cs"; cp -R examples tests lib drop.py spec.txt check.sh "$1/"; cp cs/Drop.cs "$1/cs/"; }
+
 
 # sh drop/check.sh --update  改完 spec.txt 后重抽 examples/spec.{dr,out}
 if [ "$1" = "--update" ]; then
@@ -51,7 +57,7 @@ echo "[1/5] 例子（先查一条：这个目录不许指到外面 —— 干净
 # —— 不然"把检查的名字写进注释"都会让门红。Z11 负责证明这条真的会红。
 if grep -rnE '(^|[^A-Za-z0-9_.-])([r]eq|[c]ode|[d]ocs|[l]ang)/|[.]dpt|[b]lobd|[S]PEC' \
        --include='*.py' --include='*.sh' --include='*.txt' --include='*.dr' \
-       --include='*.out' --include='*.expected' . ; then
+       --include='*.out' --include='*.expected' --include='*.cs' --include='*.csproj' . ; then
   echo "  红：上面这些行引用了 drop/ 外面的东西 —— 干净房间塌了，独立性从此只能靠自觉"
   exit 1
 fi
@@ -93,6 +99,36 @@ for args, want in [([], 2), (['/tmp/不存在.dr'], 1)]:
         bad += 1
     else:
         print("  对上 CLI %r -> rc=%d，一行说明，无堆栈" % (args, rc))
+# 跨行写法：定义说「一行一句，换行是唯一的语句分隔符」，所以一句话不许在没闭合的括号里续行。
+# 这一张表钉的是八个真会跨行的写法各红在哪一行，以及两个合法写法必须照样跑。
+# 第二个宿主（cs/）拿同一张表比 —— 这条在两份实现之间是最容易漂的，光靠文档说不清。
+import re
+lay = 'tests/layout.expected'
+if not os.path.exists(lay):
+    print("  缺 %s —— 跨行写法没有对账表，这段等于没跑" % lay)
+    bad += 1
+else:
+    for row in open(lay, encoding='utf-8').read().splitlines():
+        who, ln, code, rcw = row.split()
+        f = 'tests/layout/%s.dr' % who
+        r = subprocess.run([sys.executable, 'drop.py', f], capture_output=True, text=True)
+        got = re.match(r"挂：第 \d+ 行 (E\d+)", r.stderr)
+        want_rc = int(rcw.split('=')[1])
+        if r.returncode != want_rc or not got or got.group(1) != code or "Traceback" in r.stderr:
+            print("  差 %s：rc=%d（要 %d）err=%r" % (f, r.returncode, want_rc, r.stderr[:90]))
+            bad += 1
+        elif "第 %d 行" % int(ln) not in r.stderr:
+            print("  差 %s：码对了但行的归属漂了（要 %s，得到 %r）" % (f, ln, r.stderr[:60]))
+            bad += 1
+        else:
+            print("  对上 跨行写法 %s -> %s %s" % (who, ln, code))
+for f, want in [('tests/layout_ok_1.dr', 'a\n空\n'), ('tests/layout_ok_2.dr', '2\n')]:
+    r = subprocess.run([sys.executable, 'drop.py', f], capture_output=True, text=True)
+    if r.returncode != 0 or r.stdout != want:
+        print("  差 %s：合法写法被拦了 rc=%d out=%r" % (f, r.returncode, r.stdout))
+        bad += 1
+    else:
+        print("  对上 合法写法 %s" % f)
 sys.exit(1 if bad else 0)
 PY
 
@@ -100,7 +136,7 @@ echo "[2/5] 定义 <-> 实现对账 + 码的活性"
 $PY drop.py --self-check
 $PY drop.py --self-test
 
-echo "[3/5] 定义预算 + 分界（协议词汇不许长在定义和实现里）"
+echo "[3/5] 定义预算 + 两道分界（协议词汇不许长在定义和实现里，具体宿主名不许长在定义里）"
 $PY - <<'PY'
 import os, sys
 s = open('spec.txt', encoding='utf-8').read()
@@ -128,8 +164,25 @@ n_lib = len([w for w in WORDS if w in lib])
 if n_lib < 4:
     print("  红：这一条查不出东西 —— 协议词汇一个都不在 lib/http.dr 里，说明上面那两条是空的")
     sys.exit(1)
-print("  绿：定义 %d / %d token 之内；协议词汇 0 处（定义里 %d、实现里 %d），全在库里那 %d 处"
-      % (tok, lim_t, len(in_spec), len(in_py), n_lib))
+# 第二道分界：定义不许写死宿主。跑法那一句、不许吐堆栈那一句，都必须对任何一个宿主同时成立 ——
+# 定义里一旦留下某个具体宿主的名字，「同一份定义可以有第二个宿主」就只是文档里的一句话。
+# 注意这一条只查 spec.txt：drop.py 本身就是一个宿主，它说「我用 python3 跑」是诚实，不是越界。
+HOSTS = ["python", "Python", "dotnet", "C#", "node", "Ruby", "Lua", "JVM", "gcc", "clang"]
+in_host = [w for w in HOSTS if w in s]
+if in_host:
+    print("  红：宿主分界塌了 —— 定义里出现了具体宿主的名字 %r，跑法与报错那两句必须对任何宿主都成立"
+          % in_host)
+    sys.exit(1)
+# 分界对两份宿主都要成立：第二个宿主里长出协议词汇，等于把库的代码搬回语言里。
+if not os.path.exists('cs/Drop.cs'):
+    print("  红：第二个宿主 cs/Drop.cs 不在这个仓库里 —— 「同一份定义可以有第二个宿主」没人举证了")
+    sys.exit(1)
+in_cs = [w for w in WORDS if w in open('cs/Drop.cs', encoding='utf-8').read()]
+if in_cs:
+    print("  红：第二个宿主伸出了协议词汇 %r —— 分层不是只改第一份实现就能算数的" % in_cs)
+    sys.exit(1)
+print("  绿：定义 %d / %d token 之内；协议词汇 0 处（定义里 %d、两份宿主里 %d/%d），全在库里那 %d 处；"
+      "宿主名 0 处" % (tok, lim_t, len(in_spec), len(in_py), len(in_cs), n_lib))
 PY
 
 echo "[4/5] 定义即可执行（> 行 = 抽得出、跑得起、对得上）"
@@ -300,7 +353,7 @@ cp drop.py "$T/drop.py"
 #    本地全绿、干净克隆里门却根本没跑）-> 门必须红，而且必须说人话，不许吐堆栈
 T7="$T/z7"
 mkdir -p "$T7"
-cp -R examples tests lib drop.py spec.txt check.sh "$T7/"
+tree "$T7"
 rm -f "$T7"/*/*.out
 if (cd "$T7" && sh check.sh >"$T7/z7.log" 2>&1); then
   echo "  假绿 Z7：期望输出全没了，门却还是绿的"; exit 1
@@ -337,9 +390,10 @@ old = """    v = args[0]
     print(v); return None"""
 new = """    v = args[0]
     print(v if isinstance(v, str) else show(v)); return None"""
-assert s.count(old) == 1, "Z9 的锚点没了"
+if not (s.count(old) == 1): sys.exit("Z9 的锚点没了")
 open(p, "w", encoding="utf-8").write(s.replace(old, new))
 ZPY
+if [ $? -ne 0 ]; then echo "  红：这条破坏的补丁没打上（原因就在上面那行），破坏测试没跑成"; exit 1; fi
 if $PY "$T/drop.py" --self-test >/dev/null 2>&1; then
   echo "  假绿 Z9：print 又能悄悄转文本了，活性测试却没红"; exit 1
 fi
@@ -356,9 +410,10 @@ old = """    port = HOST["port"]
     if port is None:"""
 new = """    port = HOST["port"] or 0
     if False:"""
-assert s.count(old) == 1, "Z10 的锚点没了"
+if not (s.count(old) == 1): sys.exit("Z10 的锚点没了")
 open(p, "w", encoding="utf-8").write(s.replace(old, new))
 YPY
+if [ $? -ne 0 ]; then echo "  红：这条破坏的补丁没打上（原因就在上面那行），破坏测试没跑成"; exit 1; fi
 if cmp -s drop.py "$T/drop.py"; then
   echo "  假绿 Z10：破坏没落到实现上，先修这条破坏"; exit 1
 fi
@@ -378,13 +433,14 @@ cp drop.py "$T/drop.py"
 #    而门里当时只有文档中手写的那一句 grep，没有任何东西会红）-> 第一段必须立刻红。
 T11="$T/z11"
 mkdir -p "$T11"
-cp -R examples tests lib drop.py spec.txt check.sh "$T11/"
+tree "$T11"
 $PY - "$T11" <<'ZPY'
 import sys, os
 p = os.path.join(sys.argv[1], "spec.txt")
 s = open(p, encoding="utf-8").read()
 open(p, "w", encoding="utf-8").write(s + "// 端口的事另见 " + "req" + "/SRC.md 第 3 条\n")
 ZPY
+if [ $? -ne 0 ]; then echo "  红：这条破坏的补丁没打上（原因就在上面那行），破坏测试没跑成"; exit 1; fi
 if ! cmp -s spec.txt "$T11/spec.txt"; then :; else echo "  假绿 Z11：破坏没落到定义上"; exit 1; fi
 if (cd "$T11" && sh check.sh >"$T11/z11.log" 2>&1); then
   echo "  假绿 Z11：定义里多了一句指向本目录之外的引用，门却还是绿的"; exit 1
@@ -402,21 +458,22 @@ echo "  抓住 Z11：定义里塞一句指向外面的引用 -> 第一段当场�
 #     -> 第三段必须红，且红在分界上，不是红在预算上（破坏特意选了一句长度差不多的，就是为了分开这两件事）
 T12="$T/z12"
 mkdir -p "$T12"
-cp -R examples tests lib drop.py spec.txt check.sh "$T12/"
+tree "$T12"
 $PY - "$T12" <<'ZPY'
 import os, sys
 p = os.path.join(sys.argv[1], "spec.txt")
 s = open(p, encoding="utf-8").read()
 old = "语言不认识「请求」，那是用 drop 写的一个库的事"
 new = "语言不认识「请求」，HTTP 是用 drop 写的一个库的事"
-assert s.count(old) == 1, "Z12 的锚点没了"
+if not (s.count(old) == 1): sys.exit("Z12 的锚点没了")
 t = s.replace(old, new)
 asc = sum(1 for c in t if ord(c) < 128)
 tok = asc // 4 + (len(t) - asc) // 3
 # 破坏必须只撞分界这一条：撞进预算里，红就归因错了
-assert tok <= int(os.environ["BUDGET_TOK"]), "Z12 会把定义顶出预算（%d token），换个不那么长的词" % tok
+if not (tok <= int(os.environ["BUDGET_TOK"])): sys.exit("Z12 会把定义顶出预算（%d token），换个不那么长的词" % tok)
 open(p, "w", encoding="utf-8").write(t)
 ZPY
+if [ $? -ne 0 ]; then echo "  红：这条破坏的补丁没打上（原因就在上面那行），破坏测试没跑成"; exit 1; fi
 if cmp -s spec.txt "$T12/spec.txt"; then
   echo "  假绿 Z12：破坏没落到定义上，先修这条破坏"; exit 1
 fi
@@ -436,16 +493,17 @@ echo "  抓住 Z12：定义里塞进一个协议词 -> 第三段当场红，且�
 #     -> 第五段开头那条扫描必须红
 T13="$T/z13"
 mkdir -p "$T13"
-cp -R examples tests lib drop.py spec.txt check.sh "$T13/"
+tree "$T13"
 $PY - "$T13" <<'ZPY'
 import os, sys
 p = os.path.join(sys.argv[1], "lib", "http.dr")
 s = open(p, encoding="utf-8").read()
 old = 'host("peer", c)'
 new = 'host("getpeer", c)'
-assert s.count(old) >= 1, "Z13 的锚点没了"
+if not (s.count(old) >= 1): sys.exit("Z13 的锚点没了")
 open(p, "w", encoding="utf-8").write(s.replace(old, new))
 ZPY
+if [ $? -ne 0 ]; then echo "  红：这条破坏的补丁没打上（原因就在上面那行），破坏测试没跑成"; exit 1; fi
 if cmp -s lib/http.dr "$T13/lib/http.dr"; then
   echo "  假绿 Z13：破坏没落到库上，先修这条破坏"; exit 1
 fi
@@ -469,9 +527,10 @@ p = sys.argv[1]
 s = open(p, encoding="utf-8").read()
 old = '"peer": _h_peer, "close": _h_close, "date": _h_date}'
 new = '"peer": _h_peer, "close": _h_close, "date": _h_date, "file": _h_date}'
-assert s.count(old) == 1, "Z14 的锚点没了"
+if not (s.count(old) == 1): sys.exit("Z14 的锚点没了")
 open(p, "w", encoding="utf-8").write(s.replace(old, new))
 YPY
+if [ $? -ne 0 ]; then echo "  红：这条破坏的补丁没打上（原因就在上面那行），破坏测试没跑成"; exit 1; fi
 if cmp -s drop.py "$T/drop.py"; then
   echo "  假绿 Z14：破坏没落到实现上，先修这条破坏"; exit 1
 fi
@@ -487,4 +546,72 @@ fi
 echo "  抓住 Z14：实现的宿主命令表加宽到八个 -> 对账红（口子只有定义说的那七个）"
 cp drop.py "$T/drop.py"
 
-echo "drop: 绿（五段 + 十四条破坏）"
+# Z15 往定义里塞回一个具体宿主的名字（v0.41 之前「跑法只有一条：python3 drop.py …」就是这么写的；
+#     定义一旦写死宿主，「同一份定义可以有第二个宿主」就只剩文档里的一句话）
+#     -> 第三段必须红，且红在宿主分界上，不是红在预算上，也不是红在表面探针上
+#     破坏特意插在「宿主的解释器」前面，为的是保住那条探针原话 —— 不然红的会是第二段，归因就错了
+T15="$T/z15"
+mkdir -p "$T15"
+tree "$T15"
+$PY - "$T15" <<'ZPY'
+import os, sys
+p = os.path.join(sys.argv[1], "spec.txt")
+s = open(p, encoding="utf-8").read()
+old = "跑法只有一条：宿主的解释器"
+new = "跑法只有一条（python3）：宿主的解释器"
+if not (s.count(old) == 1): sys.exit("Z15 的锚点没了")
+t = s.replace(old, new)
+if not ("宿主的解释器 [--port <端口>] 库.dr 程序.dr" in t): sys.exit("Z15 会把表面探针撞掉，红会落到第二段")
+asc = sum(1 for c in t if ord(c) < 128)
+tok = asc // 4 + (len(t) - asc) // 3
+if not (tok <= int(os.environ["BUDGET_TOK"])): sys.exit("Z15 会把定义顶出预算（%d token），换个不那么长的写法" % tok)
+open(p, "w", encoding="utf-8").write(t)
+ZPY
+if [ $? -ne 0 ]; then echo "  红：这条破坏的补丁没打上（原因就在上面那行），破坏测试没跑成"; exit 1; fi
+if cmp -s spec.txt "$T15/spec.txt"; then
+  echo "  假绿 Z15：破坏没落到定义上，先修这条破坏"; exit 1
+fi
+if (cd "$T15" && sh check.sh >"$T15/z15.log" 2>&1); then
+  echo "  假绿 Z15：定义里冒出具体宿主的名字，门却还是绿的 —— 第二个宿主没有立足点"; exit 1
+fi
+if grep -q "Traceback" "$T15/z15.log"; then
+  echo "  假绿 Z15：红了，但吐的是 Python 堆栈"; exit 1
+fi
+if ! grep -q "宿主分界塌了" "$T15/z15.log"; then
+  echo "  假绿 Z15：门红了，但没说红在宿主分界上（红的是别的东西，这条没测到）"; exit 1
+fi
+rm -rf "$T15"
+echo "  抓住 Z15：定义里塞回一个具体宿主名 -> 第三段当场红，且报的是宿主分界（不是预算）"
+
+# Z16 把「一句不许跨行」里管表字面量的那一处删掉（两个宿主最容易在这条上各判各的：
+#     第一份实现当初就是按「括号里换行不算分隔」写的，第二份是按字面写的 —— 光靠文档说不清）
+#     -> 第一段那张跨行表必须当场红，而且红在 x_list_comma 这一行
+T16="$T/z16"
+mkdir -p "$T16"
+tree "$T16"
+$PY - "$T16" <<'ZPY'
+import os, sys
+p = os.path.join(sys.argv[1], "drop.py")
+s = open(p, encoding="utf-8").read()
+old = 'p.take(); p.one_line("表字面量逗号后面换行了", line); continue'
+new = 'p.take(); continue'
+if not (s.count(old) == 1): sys.exit("Z16 的锚点没了")
+open(p, "w", encoding="utf-8").write(s.replace(old, new))
+ZPY
+if [ $? -ne 0 ]; then echo "  红：这条破坏的补丁没打上（原因就在上面那行），破坏测试没跑成"; exit 1; fi
+if cmp -s drop.py "$T16/drop.py"; then
+  echo "  假绿 Z16：破坏没落到实现上，先修这条破坏"; exit 1
+fi
+if (cd "$T16" && sh check.sh >"$T16/z16.log" 2>&1); then
+  echo "  假绿 Z16：跨行的表字面量又不红了，跨行表等于没跑"; exit 1
+fi
+if grep -q "Traceback" "$T16/z16.log"; then
+  echo "  假绿 Z16：红了，但吐的是 Python 堆栈"; exit 1
+fi
+if ! grep -q "差 tests/layout/x_list_comma.dr" "$T16/z16.log"; then
+  echo "  假绿 Z16：门红了，但没说红在 x_list_comma 上（红的是别的东西，这条没测到）"; exit 1
+fi
+rm -rf "$T16"
+echo "  抓住 Z16：删掉一处「不许跨行」-> 第一段当场红，且红在跨行表的那一行上"
+
+echo "drop: 绿（五段 + 十六条破坏）"

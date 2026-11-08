@@ -1,0 +1,6 @@
+// 对照：尾调用不算层数 —— 定义说第 201 层是「往里缩」的上限，不是「转」的上限
+fn count(n, acc) { if(n <= 0, acc, count(n - 1, acc + 1)) }
+print(str(count(50000, 0)))
+fn down(n, acc) { if(n <= 0, acc, down(n - 1, acc + [n])) }
+fn last(xs) { if(len(xs) <= 1, xs[0], last(xs[1:])) }
+print(str(last(down(100000, []))))

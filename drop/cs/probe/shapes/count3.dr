@@ -1,0 +1,2 @@
+fn count(n, acc) { if(n <= 0, acc, count(n - 1, acc + 1)) }
+print(str(count(50000, 0) + count(50000, 0) + count(50000, 0)))

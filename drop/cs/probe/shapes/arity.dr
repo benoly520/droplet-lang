@@ -1,0 +1,3 @@
+fn f(a, b) { a }
+let t = [1]
+print(str(f(1, 2) + len(t)))

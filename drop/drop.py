@@ -45,6 +45,7 @@ sys.setrecursionlimit(MAX_CALL_DEPTH * 25 + 1000)   # 本实现的上限；超�
 CONSTRUCTS = [
     # 「实现表面 -> 定义原话」的一一映射：每条探针都必须能在 spec.txt 里逐字找到。
     ('换行是唯一分隔', '换行是唯一的语句分隔符'),
+    ('一句不许跨行', '一行一句，换行是唯一的语句分隔符'),
     ('分号不是东西', '分号不是东西（写它是 E3）'),
     ('注释不参与语义', '// 到行尾是注释，注释里的引号和括号不算数'),
     ('没有块注释', '没有块注释'),
@@ -160,10 +161,10 @@ CONSTRUCTS = [
     ('阻塞超时断归宿主', '阻塞、超时、断归宿主，不占错误码'),
     ('语言不认识请求', '语言不认识「请求」'),
     ('库没有专门的语法', '库没有专门的语法'),
-    ('跑法只有一条', 'python3 drop.py [--port <端口>] 库.dr 程序.dr'),
+    ('跑法只有一条', '宿主的解释器 [--port <端口>] 库.dr 程序.dr'),
     ('宿主按顺序并文件', '宿主按这个顺序并起来'),
     ('一红就停', '打印一行「挂：第 N 行 Ex —— 中文说明」到 stderr，退出码 1'),
-    ('不许吐堆栈', '不是 Python 的 Traceback'),
+    ('不许吐堆栈', '不是宿主自己的 Traceback'),
     ('错误行的两处例外', '函数体里的错报在调用那一行，表字面量里的错报在 [ 那一行'),
     ('14 条码', '错误一共 14 种，穷举如下'),
     ('输出只有一条规则', '只有 print 产生输出，一次一行，程序结束时不会自动打任何东西'),
@@ -253,11 +254,11 @@ def tokenize(src):
 # ---------------------------------------------------------------- 语法
 class P:
     def __init__(self, toks):
-        self.t, self.i = toks, 0
+        self.t, self.i, self.last = toks, 0, 0
     def peek(self, k=0):
         return self.t[self.i + k]
     def take(self):
-        tok = self.t[self.i]; self.i += 1; return tok
+        tok = self.t[self.i]; self.i += 1; self.last = tok[2]; return tok
     def is_op(self, *ops):
         ty, v, _ = self.peek()
         return ty == "op" and v in ops
@@ -271,6 +272,21 @@ class P:
         if t[0] == "eof":
             raise DropError("E11", t[2], "这里该有 %r，可文件到头了" % v)
         raise DropError("E3", t[2], "这里该有 %r，看到的是 %r" % (v, t[1]))
+    # 「一句不许跨行」：定义只说 一行一句、换行是唯一的语句分隔符，读严格一点就是
+    # 一句话里绝不许出现换行。下面三个方法是这条规矩唯一的执法处 —— 每认掉一个
+    # 分隔用的记号，就问一次「下一个记号还在不在这一行」。
+    def cross(self):
+        return self.peek()[2] > self.last
+    def one_line(self, why, at=None):
+        if self.cross():
+            raise DropError("E11", self.peek()[2] if at is None else at, "一句不许跨行：%s" % why)
+    def closer(self, v, why, at=None):
+        self.one_line(why, at)
+        return self.expect(v)
+    def sep(self, v, why, at=None):
+        got = self.expect(v)
+        self.one_line(why, at if at is not None else got[2])
+        return got
 
 def parse_program(src):
     p = P(tokenize(src))
@@ -279,8 +295,9 @@ def parse_program(src):
         items.append(parse_item(p))
     return items
 
-def parse_params(p):
+def parse_params(p, line):
     params, seen = [], set()
+    p.one_line("左括号后面换行了", line)
     if not p.is_op(")"):
         while True:
             q = p.take()
@@ -292,9 +309,9 @@ def parse_params(p):
                 raise DropError("E12", q[2], "形参 %s 写了两次" % q[1])
             seen.add(q[1]); params.append(q[1])
             if p.is_op(","):
-                p.take(); continue
+                p.sep(",", "逗号后面换行了", line); continue
             break
-    p.expect(")")
+    p.closer(")", "形参表没写完", line)
     return params
 
 def bad_name(tok, line, who):
@@ -310,14 +327,16 @@ def parse_item(p):
         line = p.take()[2]
         bad_name(p.peek(), line, "let")
         name = p.take()[1]
-        p.expect("=")
+        p.one_line("名字和等号之间换行了", p.last)
+        p.sep("=", "等号后面换行了", p.last)
         return ("let", name, parse_expr(p, 0), line)
     if p.is_kw("fn"):
         line = p.take()[2]
         bad_name(p.peek(), line, "fn")
         name = p.take()[1]
         p.expect("(")
-        params = parse_params(p)
+        params = parse_params(p, p.last)
+        p.one_line("函数头后面换行了", line)
         if p.is_op("{"):
             p.take()
             body = []
@@ -342,14 +361,16 @@ def parse_expr(p, min_prec):
             "+": 5, "-": 5, "*": 6, "/": 6, "%": 6}
     if p.is_op("-", "!"):
         op = p.take()
+        p.one_line("一元负号后面换行了", op[2])
         lhs = ("un", op[1], parse_expr(p, 7), op[2])
     else:
         lhs = parse_postfix(p)
     while True:
         ty, v, _ = p.peek()
-        if ty != "op" or v not in LEFT or LEFT[v] < min_prec:
+        if ty != "op" or v not in LEFT or LEFT[v] < min_prec or p.cross():
             break
         p.take()
+        p.one_line("运算符后面换行了", p.last)
         rhs = parse_expr(p, LEFT[v] + 1)
         lhs = ("bin", v, lhs, rhs, lhs[3] if len(lhs) > 3 else p.peek()[2])
     return lhs
@@ -361,26 +382,30 @@ def parse_postfix(p):
             if e[0] != "name":
                 raise DropError("E3", p.peek()[2],
                                 "被调的必须是一个名字：具名函数或内置名，别的东西不能放在 () 左边")
+            p.one_line("名字和左括号之间换行了", p.last)
             line = p.take()[2]
+            p.one_line("左括号后面换行了", line)
             args = []
             if not p.is_op(")"):
                 while True:
                     args.append(parse_expr(p, 0))
                     if p.is_op(","):
-                        p.take(); continue
+                        p.sep(",", "逗号后面换行了", line); continue
                     break
-            p.expect(")")
+            p.closer(")", "实参没写完", line)
             e = ("call", e, args, line)
             continue
         if p.is_op("["):
+            p.one_line("被下标的东西和左方括号之间换行了", p.last)
             line = p.take()[2]
+            p.one_line("左方括号后面换行了", line)
             lo = parse_expr(p, 0) if not p.is_op(":") else None
             colon = p.is_op(":")
             hi = None
             if colon:
-                p.take()
+                p.sep(":", "切片冒号后面换行了", line)
                 hi = parse_expr(p, 0) if not p.is_op("]") else None
-            p.expect("]")
+            p.closer("]", "下标没写完", line)
             if not colon:
                 e = ("index", e, lo, line)
             else:
@@ -400,19 +425,22 @@ def parse_atom(p):
     if ty == "kw" and v == "none":
         return ("none", line)
     if ty == "kw" and v == "if":
+        p.one_line("if 和左括号之间换行了", line)
         p.expect("(")
-        c = parse_expr(p, 0); p.expect(",")
-        a = parse_expr(p, 0); p.expect(",")
+        p.one_line("if 的左括号后面换行了", line)
+        c = parse_expr(p, 0); p.sep(",", "if 的第一个逗号后面换行了", line)
+        a = parse_expr(p, 0); p.sep(",", "if 的第二个逗号后面换行了", line)
         b = parse_expr(p, 0)
-        p.expect(")")
+        p.closer(")", "if 没写完", line)
         return ("if", c, a, b, line)
     if ty == "kw" and v == "fn":
         raise DropError("E3", line, "没有匿名函数：函数只有一种写法是 名字(形参) { 句子 }")
     if ty == "name":
         return ("name", v, line)
     if ty == "op" and v == "(":
+        p.one_line("左括号后面换行了", line)
         e = parse_expr(p, 0)
-        p.expect(")")
+        p.closer(")", "括号没闭合", line)
         return e
     if ty == "op" and v == "{":
         items = []
@@ -422,13 +450,14 @@ def parse_atom(p):
         return ("block", items, line)
     if ty == "op" and v == "[":
         xs = []
+        p.one_line("左方括号后面换行了", line)
         if not p.is_op("]"):
             while True:
                 xs.append(parse_expr(p, 0))
                 if p.is_op(","):
-                    p.take(); continue
+                    p.take(); p.one_line("表字面量逗号后面换行了", line); continue
                 break
-        p.expect("]")
+        p.closer("]", "表字面量没闭合", line)
         return ("list", xs, line)
     if ty == "eof":
         raise DropError("E11", line, "话说到一半，文件先到头了")
@@ -718,6 +747,7 @@ def run_call(f, args):
     e = Env(f.env)
     for k, v in zip(f.params, args):
         e.set(k, v)
+    cell = [e]
     items = f.body[1]
     last = len(items) - 1
     while True:
@@ -725,36 +755,40 @@ def run_call(f, args):
         upto = last if t is None else last - 1
         val = None
         for it in items[:upto + 1]:
-            val = ev_item(it, e)
+            val = ev_item(it, cell)
         if t is None:
             return val
+        cur = cell[0]        # 尾位那一句要在「此刻这一层」里算，块里 let 出来的名字住在这儿
         if t[0] == "if":
             node = t[1]
-            c = ev(node[1], e)
+            c = ev(node[1], cur)
             if not isinstance(c, bool):
                 raise DropError("E7", node[4], "if 的条件要 true/false，给的是 %s" % kind(c))
             branch = node[2] if c else node[3]
             if branch[0] == "call" and branch[1][0] == "name" and branch[1][1] == f.name:
-                vals = [ev(a, e) for a in branch[2]]
+                vals = [ev(a, cur) for a in branch[2]]
                 if len(vals) != len(f.params):
                     raise DropError("E2", branch[3], "%s 收 %d 个，给了 %d 个"
                                     % (f.name, len(f.params), len(vals)))
+                cell[0] = e          # 跳回开头：块里 let 出来的遮层一并撤掉
                 for k, v in zip(f.params, vals):
                     e.set(k, v)
                 continue
-            return ev(branch, e)
-        vals = [ev(a, e) for a in t[1]]
+            return ev(branch, cur)
+        vals = [ev(a, cur) for a in t[1]]
         if len(vals) != len(f.params):
             raise DropError("E2", items[last][1][3], "%s 收 %d 个，给了 %d 个"
                             % (f.name, len(f.params), len(vals)))
+        cell[0] = e              # 跳回开头：块里 let 出来的遮层一并撤掉
         for k, v in zip(f.params, vals):
             e.set(k, v)
 
 def run_body(body, env):
     """块当表达式用：一句接一句，值 = 最后一句；{} 的值是无。这里不当尾位看（不是函数体）。"""
     val = None
+    cell = [env]
     for it in body[1]:
-        val = ev_item(it, env)
+        val = ev_item(it, cell)
     return val
 
 def ev(node, env):
@@ -886,31 +920,32 @@ def same(a, b):
         return False
     return a == b
 
-def ev_item(it, env):
+def ev_item(it, cell):
+    env = cell[0]
     if it[0] == "expr":
         return ev(it[1], env)
-    if it[0] == "let":
-        _, nm, e, line = it
+    if it[0] in ("let", "fn"):
+        nm, line = it[1], it[3] if it[0] == "let" else it[4]
         if nm in BUILTINS:
             raise DropError("E3", line, "%s 是内置名字，不许重新绑定" % nm)
-        env.set(nm, ev(e, env))
-        return None
-    if it[0] == "fn":
-        _, nm, params, body, line = it
-        if nm in BUILTINS:
-            raise DropError("E3", line, "%s 是内置名字，不许重新定义" % nm)
-        env.set(nm, Fn(params, body, env, nm))
+        v = ev(it[2], env) if it[0] == "let" else Fn(it[2], it[3], env, nm)
+        # 定义：「重名 = 新绑定遮住旧的」「之后再重定义外层名字也追不改它」。
+        # 所以同一层里再来一次同名绑定不许就地覆盖 —— 另起一层盖住旧的，
+        # 这一句之后的句子看到新的，先前写好的函数还站在它那一刻的那一层。
+        if nm in env.d:
+            cell[0] = env = Env(env)
+        env.set(nm, v)
         return None
     raise DropError("E11", 0, "内部：顶层的东西不对")
 
 # ---------------------------------------------------------------- 跑一个程序
 def run_src(src):
     global TOP_ENV
-    env = Env()
-    TOP_ENV = env
+    cell = [Env()]
+    TOP_ENV = cell[0]
     for it in parse_program(src):
-        ev_item(it, env)
-    return env
+        ev_item(it, cell)
+    return cell[0]
 
 def run_files(paths):
     """几个文件并成一个程序：行号从头数到底 —— 定义说「宿主按这个顺序并起来」，

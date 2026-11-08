@@ -1,0 +1,3 @@
+// 尾位是 if 的两支之外的位置调用自己不算转
+fn g(n, acc) { if(n <= 0, acc, g(n - 1, acc + 1) + 0) }
+print(str(g(5, 0)))

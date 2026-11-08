@@ -1,0 +1,3 @@
+print(str([] == none))
+print(str([] == []))
+print(str(none == none))

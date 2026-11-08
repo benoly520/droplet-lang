@@ -1,0 +1,2 @@
+print(str(len("\x0D\x0A")))
+print(str(len("\\n")))

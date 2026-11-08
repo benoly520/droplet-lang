@@ -1,0 +1,4 @@
+// 端口只有一个，第二次 bind 撞自己：宿主不肯做
+let a = host("bind", "")
+let b = host("bind", "")
+print("不该走到这里")

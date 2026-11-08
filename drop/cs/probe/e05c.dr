@@ -1,0 +1,2 @@
+// E5 变体：true 不能比大小
+print(str(true < false))

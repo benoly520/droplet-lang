@@ -1,0 +1,2 @@
+fn f(a) { let a = 1 a }
+print(str(f(9)))

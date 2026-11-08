@@ -1,0 +1,4 @@
+print(str("abcdef"[:3]))
+print(str("abcdef"[3:]))
+print(str("abcdef"[:]))
+print(str([1,2,3][:2]))

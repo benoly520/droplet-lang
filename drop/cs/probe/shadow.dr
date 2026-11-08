@@ -1,0 +1,5 @@
+let g = 1
+fn h() { g }
+let g = 2
+print(str(h()))
+print(str(g))

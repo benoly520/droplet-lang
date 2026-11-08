@@ -17,6 +17,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8123
 PY = sys.executable
+# 起服务器用的那一句命令。默认是本仓库自带的 Python 宿主；DROP_HOST 可以换成别的宿主
+# （同一份定义可以有第二个宿主，实录这一项就是拿来比两个宿主说的是不是同一套字节）。
+# 换了宿主时这条路必须写绝对路径 —— 服务器是在临时目录里起的。
+HOST = os.environ.get("DROP_HOST", "").split() or [PY, os.path.join(ROOT, "drop.py")]
 LIB = os.path.join(ROOT, "lib", "http.dr")
 POST_BODY = "你好 body".encode("utf-8")   # 11 个字节：两个汉字各 3 个
 CRLF = b"\r\n"
@@ -27,7 +31,7 @@ _PEER = re.compile(rb"127\.0\.0\.1:\d+")
 def boot(app, port, tmp):
     """起服务器：宿主除了报错什么都不往 stderr 写，所以只能自己试连，等端口肯接。
        等不到就抛 —— 不许门自己卡住。"""
-    p = subprocess.Popen([PY, os.path.join(ROOT, "drop.py"), "--port", str(port), LIB, app],
+    p = subprocess.Popen(HOST + ["--port", str(port), LIB, app],
                          cwd=tmp, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     deadline = time.time() + 8
     while time.time() < deadline:

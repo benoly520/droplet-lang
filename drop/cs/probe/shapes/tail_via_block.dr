@@ -1,0 +1,2 @@
+fn t(n, acc) { { if(n <= 0, acc, t(n - 1, acc + 1)) } }
+print(str(t(300, 0)))

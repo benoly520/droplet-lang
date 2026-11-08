@@ -1,0 +1,3 @@
+// 库：行 1~4（并起来之后仍是 1~4）
+fn greet(who) { "你好，" + who }
+fn boom(xs) { xs[9] }

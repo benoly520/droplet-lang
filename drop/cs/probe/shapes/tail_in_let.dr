@@ -1,0 +1,2 @@
+fn t(n, acc) { let x = if(n <= 0, acc, t(n - 1, acc + 1)) x }
+print(str(t(300, 0)))

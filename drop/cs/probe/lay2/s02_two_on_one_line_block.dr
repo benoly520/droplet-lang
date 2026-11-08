@@ -1,0 +1,2 @@
+fn f(a) { let b = 1 b + a }
+print(str(f(2)))

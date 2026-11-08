@@ -1,0 +1,2 @@
+// E10 变体：host 的参数不是字符串
+print(host("date", 1))

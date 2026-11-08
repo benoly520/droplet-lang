@@ -1,0 +1,4 @@
+fn f(a) {
+  a * 2
+}
+print(str(f(3)))

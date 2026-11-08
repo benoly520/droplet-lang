@@ -1,0 +1,2 @@
+// E7 条件不是 true/false
+print(str(if(1, "a", "b")))

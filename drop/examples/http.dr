@@ -1,20 +1,27 @@
 // 一个最小的 Web 程序：路由就是一层一层的 if，别的什么都没有。
 // 跑法：python3 drop.py --port 8087 lib/http.dr examples/http.dr
 // HTTP 的事全在 lib/http.dr 里（那也是用这门语言写的）；这里只回答「这条路径给什么」。
+// 「一句不许跨行」管着每一句，所以一层一层的 if 全写在一行里，深的就拆个小函数接着排。
 
 fn handle(req, peer) {
   let m = http_word(req, 0)
-  if(m == "GET" || m == "HEAD", route(http_word(req, 1), req, peer),
-  if(m == "POST", http_reply(200, http_body(req)),
-     http_reply(405, "只认 GET、HEAD、POST")))
+  if(m == "GET" || m == "HEAD", route(http_word(req, 1), req, peer), other(m, req))
 }
 
+fn other(m, req) { if(m == "POST", http_reply(200, http_body(req)), http_reply(405, "只认 GET、HEAD、POST")) }
+
 fn route(p, req, peer) {
-  if(p == "/", http_reply(200, "pong"),
-  if(p == "/peer", http_reply(200, peer),
-  if(p == "/len", http_reply(200, str(len(req))),
-  if(p == "/ver", http_reply(200, http_word(req, 2)),
-     http_reply(404, "没有这条路")))))
+  if(p == "/", http_reply(200, "pong"), route2(p, req, peer))
 }
+
+fn route2(p, req, peer) {
+  if(p == "/peer", http_reply(200, peer), route3(p, req))
+}
+
+fn route3(p, req) {
+  if(p == "/len", http_reply(200, str(len(req))), route4(p, req))
+}
+
+fn route4(p, req) { if(p == "/ver", http_reply(200, http_word(req, 2)), http_reply(404, "没有这条路")) }
 
 http_serve()

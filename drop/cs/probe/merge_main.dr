@@ -1,0 +1,3 @@
+// 程序：并起来是行 5~7
+print(greet("drop"))
+print(str(boom([1, 2])))

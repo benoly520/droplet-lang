@@ -1,0 +1,17 @@
+// 宿主七个命令里的六个在这一趟里全走一遍：bind accept recv send peer close（date 单独看）
+let h = host("bind", "")
+let c = host("accept", h)
+let r = host("recv", c)
+print(str(len(r)))                              // 收到的字节数（一字节一字符）
+print(str(len(bytes(r))))                       // 再过一次 bytes()：还是那么多
+print(split(host("peer", c), ":")[0])           // 对端 IP（端口每次都变，只打 IP 段）
+let d = host("date", "")
+print(str(len(d)))                              // GMT 时钟串固定 29 个字符
+print(d[26:])                                   // 尾巴是不是 GMT
+host("send", c + "\n" + bytes("DROP/1 " + r))   // 原样回显，前面加个标记
+let r2 = host("recv", c)                        // 对端写完就关：这是「断」，不是错
+print(str(len(r2)))
+print(str(r2 == ""))
+host("close", c)
+host("close", h)
+print("宿主这趟走完了")

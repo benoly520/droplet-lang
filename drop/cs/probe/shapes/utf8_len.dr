@@ -1,0 +1,2 @@
+print(str(len("日本語") + len("文")))
+print(str(len(bytes("日本語"))))

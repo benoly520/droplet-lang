@@ -1,0 +1,2 @@
+fn b(x) { x * 2 }
+print(str(a(3)))

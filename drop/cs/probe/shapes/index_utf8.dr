@@ -1,0 +1,3 @@
+print("é" == "\xe9")
+print(str(num("-0")))
+print(str(num("+1")))

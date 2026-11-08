@@ -1,0 +1,3 @@
+// 参数/命令的形状：recv 要连接句柄（给监听句柄就是宿主不肯做）
+let h = host("bind", "")
+print(host("recv", h))

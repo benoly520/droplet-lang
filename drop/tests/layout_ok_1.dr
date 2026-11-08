@@ -1,0 +1,11 @@
+// 合法写法：块里的句子各占一行，中间可以有空行和注释，if 链写在一行里。
+fn pick(xs) {
+
+  let n = len(xs)
+  // 空表回 "空"
+  let h = if(n == 0, "", xs[0])
+
+  if(h == "", "空", h)
+}
+print(pick(["a"]))
+print(pick([]))

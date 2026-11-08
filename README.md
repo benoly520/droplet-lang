@@ -15,12 +15,26 @@ removed every second way of doing a thing (iteration = tail recursion only; no `
 `range`/`sort`, no implicit conversion). v0.41 corrected where the HTTP server had been put: it was
 inside the language (`serve`, `reply`, `request`, 11 protocol rules in the definition), and the user's
 objection was 「HTTP 不应该是这门语言的本身，而是使用这门语言实现的一个 mini Web 服务器 —— 就好比 C# 和
-Web API」. The protocol now lives in `drop/lib/http.dr`, **173 lines written in drop itself**, reached
+Web API」. The protocol now lives in `drop/lib/http.dr`, **170 lines written in drop itself**, reached
 through one host builtin `host(cmd, arg)` with exactly seven commands; the definition contains zero
 protocol words (segment 3 of the gate checks that, sabotage probe Z12 enforces it) and the budget that
-v0.40 had raised from 1,500 to 1,750 tokens was handed back in full — the current reading is
-1,498 of 1,500. Neither touches C, neither is part of the frozen question surface, neither replaces
-`req/`; both are marked experimental with kill criteria.
+v0.40 had raised from 1,500 to 1,750 tokens was handed back in full in v0.41.
+v0.42 tested something else: **whether one page of definition can grow a second host**. Another person
+read only `drop/spec.txt` (never `drop.py`, never the library, never the gate) and wrote a 1,680-line
+C# host from scratch, `drop/cs/Drop.cs`; the two implementations are then reconciled by
+`sh drop/cs/conform.sh`. Where that stands, stated rather than smoothed over: 11 corpus programs agree
+byte-for-byte, the live server's wire bytes agree, 52 of 72 error samples agree — and 8 disagreements
+are still open (5 in error samples, 3 line-number rows in the 88-line transcript), all of them ruled to
+be the second host's to fix, so the register of "the definition did not decide this" is deliberately
+empty and `conform.sh` stays red until they actually are fixed. It paid for itself on the spot: **the
+reference implementation had been binding shadowed names wrong — "rebinding an outer name must not
+retro-change a closure already written" was quoted in the definition the whole time, and the surface
+probe had been green for three rounds** — that class of error is only catchable by a second
+implementation. Three tightenings came out of it, all in the definition rather than the budget: the run
+line may not name a host (Z15), **a statement may not cross a line** (a crossing table + Z16), and the
+protocol-word ban now scans both hosts. Current reading: 1,497 of 1,500. None of this touches C, none
+of it is part of the frozen question surface, none of it replaces `req/`; all of it is marked
+experimental with kill criteria.
 
 "AI" here means the author, not a design target: nothing in the syntax or the toolchain is specific
 to AI. What is specific is the workflow — declarations a machine can reconcile, checks that fail,
@@ -49,14 +63,16 @@ one comparison that mattered (turning a declared goal into something that fails 
 implementation violates it), and its own flagship service violated its own declared invariant.
 The superset form kept the part that did work. Everything under `code/` is C11 plus shell/Python.
 `lang/` is the experimental registration format (v0.38, four gate segments + three sabotage probes,
-docs/LANG2.md). `drop/` is a minimal language rebuilt from scratch (v0.41): one command
-(`sh drop/check.sh`), five gate segments + fourteen sabotage probes, and a definition that nearly fills
-its budget — `spec.txt`, 135 lines / 1,498 estimated tokens of 1,500. One way to do each thing
+docs/LANG2.md). `drop/` is a minimal language rebuilt from scratch (v0.42): one command
+(`sh drop/check.sh`), five gate segments + sixteen sabotage probes, and a definition that nearly fills
+its budget — `spec.txt`, 135 lines / 1,497 estimated tokens of 1,500. One way to do each thing
 (iteration = tail recursion only, no sugar names, no implicit conversion) and one seam to the outside
 (`host`, seven commands: bind/accept/recv/send/peer/close/date). HTTP is not in the language: it is
-`drop/lib/http.dr` (173 lines of drop) plus a 20-line program (`drop/examples/http.dr`). Nothing is
-compiled — `python3 drop/drop.py [--port N] lib.dr app.dr` is the run, and the file order on the
-command line is the only import mechanism. It touches no C, is not in the frozen question surface, and
+`drop/lib/http.dr` (170 lines of drop) plus a 27-line program (`drop/examples/http.dr`). Nothing is
+compiled — the definition states the run line without naming a host (`the interpreter [--port N] lib.dr
+app.dr`), and the file order on the command line is the only import mechanism; the reference host is
+`python3 drop/drop.py`, and v0.42 added a second one, `dotnet drop/cs/bin/Release/net8.0/droplet.dll`,
+written from the definition alone. It touches no C, is not in the frozen question surface, and
 does not read `req/`.
 
 ## Quick start
@@ -90,7 +106,8 @@ And the other language, which is not part of the C workspace at all — nothing 
 ```sh
 python3 drop/drop.py drop/examples/fact.dr       # 递归 + 条件 + 整数：打印 1 / 3628800 / 大
 python3 drop/drop.py --port 8087 drop/lib/http.dr drop/examples/http.dr
-curl -s http://127.0.0.1:8087/                    # pong —— 服务器在那 173 行库里，不在语言里
+curl -s http://127.0.0.1:8087/                    # pong —— 服务器在那 170 行库里，不在语言里
+sh drop/cs/conform.sh                             # 同一份定义，两份宿主对账（没有 dotnet 就明说这段没跑）
 ```
 
 ## What is actually checked
@@ -113,7 +130,8 @@ curl -s http://127.0.0.1:8087/                    # pong —— 服务器在那 
 | registration format (`lang-check.sh`, experimental) | the `.dpt` definition and its checker disagree (a documented error code that can never fire, or a code with no live sample), `lang/blobd.dpt` stops being field-for-field equivalent to `req/`, or the complete definition grows past 1,500 tokens |
 | question freeze (`freeze.sh`) | the acceptance table, declaration headers, the five translation files or the contract differ from `req/FROZEN` (the question was edited) |
 | mutation score (`mutation-score.py`) | changing assertion N's expectation does not turn it red, a mutant reddens an undeclared assertion, or coverage falls below the floor |
-| `drop` language (`drop/check.sh`, independent of this project) | anything in the directory points outside it (that independence is now a gate, not a grep quoted in docs); one of the examples disagrees with its `.out`; the 14 error codes in the definition and the 14 the implementation emits do not match one-for-one, a code has no live sample that triggers it, a behaviour of the implementation has no matching sentence in the definition, or the implementation's host-command table is not the same seven names the definition teaches; the definition grows past 1,500 estimated tokens; a protocol word (HTTP, Content-Length, status line, GET…) appears in the definition or the interpreter — that is HTTP growing back into the language; the 24 `> ` lines of real code extracted verbatim from the definition do not run and reproduce their output; the library reaches for an eighth host command; a raw socket session against `lib/http.dr` + `examples/http.dr` disagrees with the 88-line transcript in `tests/http.expected`; the command line leaks a Python traceback |
+| `drop` language (`drop/check.sh`, independent of this project) | anything in the directory points outside it (that independence is now a gate, not a grep quoted in docs); one of the examples disagrees with its `.out`; the 14 error codes in the definition and the 14 the implementation emits do not match one-for-one, a code has no live sample that triggers it, a behaviour of the implementation has no matching sentence in the definition, or the implementation's host-command table is not the same seven names the definition teaches; the definition grows past 1,500 estimated tokens; a protocol word (HTTP, Content-Length, status line, GET…) appears in the definition or in **either** host — that is HTTP or a runtime growing back into the language — and a concrete host name (python3, dotnet, C#…) appears in the definition, which would make "the same definition can grow a second host" a documentation claim rather than a rule; a statement that crosses a line is accepted (a crossing table of 8 shapes must stay red, Z16 catches a dropped check); the 24 `> ` lines of real code extracted verbatim from the definition do not run and reproduce their output; the library reaches for an eighth host command; a raw socket session against `lib/http.dr` + `examples/http.dr` disagrees with the 88-line transcript in `tests/http.expected`; the command line leaks a Python traceback |
+| two hosts, one definition (`drop/cs/conform.sh`, experimental) | the same program prints different bytes under the two hosts; the same broken program reddens on a different line or with a different code — including the 25 boundary shapes the second host was not shown; the live server transcript disagrees with `tests/http.expected` (wire bytes byte-exact; error rows may differ in wording, never in line or code). Drifts are either fixed or written on a register that says the definition did not decide the question; the register is empty, so this check is **currently red** — 8 disagreements, all ruled to be the second host's |
 | sabotage (`sabotage-sup.sh`) | one of 23 injected defects is *not* caught by a named tool with a named diagnostic (6 of them edit the question, the translation or the baseline instead of the code; 3 edit the registration format's own definition) |
 
 The last row is the important one: it checks the checkers. A "caught" that is really a compile error
@@ -134,7 +152,7 @@ code/sup/lab/        the experiment packet: two decisions that do not exist in t
 code/webapi/deploy/  30-assertion acceptance table, soak, systemd unit, env example
 req/                 16 source sentences, 19 clauses, translation ledgers (TRANS/AMBIG/GAP), baseline pin, frozen hashes, README
 lang/                experimental registration FORMAT: droplet.dpt (the whole definition, 1,321 tokens) + blobd.dpt (mechanical rewrite of req/, proven equivalent)
-drop/                the v0.41 minimal language (clean room): spec.txt (the only definition, 1,498/1,500 tokens, zero protocol words) + drop.py (reference interpreter: tail-call loop + the host seam, 7 commands) + lib/http.dr (HTTP written in drop, 173 lines) + check.sh (5 gate segments + 14 sabotage probes) + examples/ (incl. the 20-line http.dr) + tests/
+drop/                the v0.42 minimal language (clean room): spec.txt (the only definition, 1,497/1,500 tokens, zero protocol words, zero host names) + drop.py (reference host: tail-call loop + the host seam, 7 commands) + lib/http.dr (HTTP written in drop, 170 lines) + check.sh (5 gate segments + 16 sabotage probes) + examples/ (incl. the 27-line http.dr) + tests/ + cs/ (second host: Drop.cs, 1,680 lines written from the definition alone, + conform.sh reconciling the two)
 docs/                SPEC, VALIDATION (numbers), EXPERIMENT (three trials), LANG2 (the registration format and its three-arm measurement), DROP (the minimal language and the cold reads), NEXT (handoff)
 ```
 

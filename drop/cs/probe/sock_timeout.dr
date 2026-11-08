@@ -1,0 +1,9 @@
+// 对端连上但一个字节都不发：10 秒没动静 = 断 = 空串，不占错误码
+let h = host("bind", "")
+let c = host("accept", h)
+let r = host("recv", c)
+print(str(len(r)))
+print(str(r == ""))
+host("close", c)
+host("close", h)
+print("超时也算走通")

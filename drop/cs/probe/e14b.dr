@@ -1,0 +1,2 @@
+// E14 变体：宿主起来时没给 --port，bind 就不肯做
+print(host("bind", ""))

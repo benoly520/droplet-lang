@@ -1,0 +1,2 @@
+fn head(ys) { ys[0] }
+print(str(head([])))

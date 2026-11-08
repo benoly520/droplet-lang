@@ -1,0 +1,4 @@
+// E13 调用叠到第 201 层：deep(199) 是 200 层（进得去），deep(200) 要 201 层（进不去）
+fn deep(n) { if(n <= 0, 0, 1 + deep(n - 1)) }
+print(str(deep(199)))
+print(str(deep(200)))

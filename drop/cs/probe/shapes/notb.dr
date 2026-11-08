@@ -1,0 +1,3 @@
+print(str(none))
+print(str(!true))
+print(str(!0))

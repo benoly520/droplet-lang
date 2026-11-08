@@ -1,0 +1,2 @@
+// bind 之后不 close 就让程序走完：宿主不该吊着进程
+print(host("bind", ""))

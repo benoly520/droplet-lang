@@ -46,12 +46,15 @@ fn deliver(c, req) {
 // 攒到出现一个空行为止，回 [头部（每行都带着自己的 CRLF）, 空行后面的字节]；
 // 头部为 "" = 这条连接当不了请求：对端断了、或头部超过 HDR_MAX。
 // at = 扫描接着「上一轮没读够的那三个字节」往下找，所以攒多少字节都只扫一遍。
+// 那条上限量的是「这一头有多长」，不是「已经攒了多少」—— 宿主一次回 4 KiB 还是 64 KiB
+// 都不该改变结果，所以攒的时候用 len(buf) 只是刹车（免得无限攒），真判超长看空行找到时的 cut。
 fn read_head(c, buf, at) {
   let cut = find_blank(buf, at)
+  let ok = cut >= 0 && cut + 4 <= HDR_MAX
   let ch = if(cut < 0 && len(buf) <= HDR_MAX, host("recv", c), "")
   let more = cut < 0 && ch != ""
-  if(cut >= 0 || !more, if(cut >= 0, [buf[0:cut + 2], buf[cut + 4:]], ["", ""]),
-     read_head(c, buf + ch, if(at == 0, 0, len(buf) - 3)))
+  let done = if(ok, [buf[0:cut + 2], buf[cut + 4:]], ["", ""])
+  if(cut >= 0 || !more, done, read_head(c, buf + ch, if(at == 0, 0, len(buf) - 3)))
 }
 
 // 第一个「前面也有一对 CRLF 的 CRLF」的下标，也就是那个空行的起点；没有回 -1。
@@ -73,8 +76,8 @@ fn read_body(c, head, rest) {
   let want = content_length(head)
   let ch = if(want > len(rest) && want <= BODY_MAX, host("recv", c), "")
   let ok = want >= 0 && want <= BODY_MAX
-  if(ok && want > len(rest) && ch != "", read_body(c, head, rest + ch),
-     if(ok && want <= len(rest), head + CRLF + rest[0:want], ""))
+  let done = if(ok && want <= len(rest), head + CRLF + rest[0:want], "")
+  if(ok && want > len(rest) && ch != "", read_body(c, head, rest + ch), done)
 }
 
 // 只认「Content-Length: 数字」这一种写法（大小写算不同，续行不认）；没这行 = 0。
@@ -142,20 +145,14 @@ fn packet(req, resp, close) {
 }
 
 fn head_lines(l0, st, cl, close) {
-  "HTTP/1.1 " + str(st) + " " + reason(st) + CRLF +
-  "Date: " + host("date", "") + CRLF +
-  "Content-Type: text/plain; charset=utf-8" + CRLF +
-  "Content-Length: " + cl + CRLF +
-  if(close, "Connection: close" + CRLF, "") +
-  CRLF
+  let a = "HTTP/1.1 " + str(st) + " " + reason(st) + CRLF + "Date: " + host("date", "") + CRLF
+  let b = "Content-Type: text/plain; charset=utf-8" + CRLF + "Content-Length: " + cl + CRLF
+  a + b + if(close, "Connection: close" + CRLF, "") + CRLF
 }
 
 // 原因短语由库给，程序管不着；表里没有的就写 Drop。
-fn reason(st) {
-  if(st == 200, "OK", if(st == 201, "Created", if(st == 204, "No Content",
-  if(st == 400, "Bad Request", if(st == 404, "Not Found",
-  if(st == 405, "Method Not Allowed", if(st == 500, "Internal Server Error", "Drop")))))))
-}
+// 「一句不许跨行」在这一条上代价最大：七档映射只能压成一行，或者拆成几个小函数。
+fn reason(st) { if(st == 200, "OK", if(st == 201, "Created", if(st == 204, "No Content", if(st == 400, "Bad Request", if(st == 404, "Not Found", if(st == 405, "Method Not Allowed", if(st == 500, "Internal Server Error", "Drop"))))))) }
 
 // ---------------------------------------------------------------- 程序的出口和工具
 // 程序交回一个响应就这一条路：没有多个返回值，所以一次请求也只可能有一个响应。

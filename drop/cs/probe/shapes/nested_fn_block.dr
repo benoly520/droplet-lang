@@ -1,0 +1,2 @@
+fn o() { fn i() { 7 } i() }
+print(str(o()))

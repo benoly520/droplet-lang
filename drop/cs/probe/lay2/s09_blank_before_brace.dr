@@ -1,0 +1,5 @@
+fn f(a) {
+  a
+
+}
+print(str(f(4)))

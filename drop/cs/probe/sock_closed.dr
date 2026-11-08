@@ -1,0 +1,5 @@
+// close 之后那个句柄发不出东西 = 宿主不肯做
+let h = host("bind", "")
+let c = host("accept", h)
+host("close", c)
+print(host("send", c + "\nAB"))

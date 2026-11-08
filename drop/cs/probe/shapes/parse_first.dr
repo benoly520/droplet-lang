@@ -1,0 +1,4 @@
+print("前面有输出")
+let y = 2
+print("还有")
+fn bad(x) { x +
