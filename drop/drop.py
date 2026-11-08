@@ -3,7 +3,7 @@
 """drop —— 一门极简语言的参考实现。
 
   python3 drop.py 程序.dr                     跑
-  python3 drop.py --serve <port> 程序.dr      把程序里的 serve(port) 绑到这个端口上跑
+  python3 drop.py --serve <port> 程序.dr      跑程序里的 serve()：端口只有命令行这一个来源
   python3 drop.py --self-check [--spec f]     定义里的错误码 = 这里会吐的错误码
   python3 drop.py --self-test                 每条错误码都有一个真能触发的样本
 
