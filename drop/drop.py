@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""drop —— 一门极简语言的参考实现。
+"""drop —— 一门极简语言的参考实现（不用编译，Python 直接跑）。
 
   python3 drop.py 程序.dr                     跑
-  python3 drop.py --serve <port> 程序.dr      跑程序里的 serve()：端口只有命令行这一个来源
+  python3 drop.py [--port <端口>] 库.dr 程序.dr  按这个顺序把几个文件并成一个程序再跑
+                                            （端口只有命令行这一个来源；语言本身不认识端口）
   python3 drop.py --self-check [--spec f]     定义里的错误码 = 这里会吐的错误码
   python3 drop.py --self-test                 每条错误码都有一个真能触发的样本
 
@@ -71,15 +72,14 @@ CONSTRUCTS = [
     ('不自动转', '它们之间不自动转；比较时不同种一律 false'),
     ('表可嵌套可混装', '表可嵌套可混装'),
     ('函数不是值', '函数不是值：不能绑给别的名字'),
-    ('函数不能进表', '不能放进表'),
+    ('函数不能进表', '不能进表'),
     ('只能按名字调用', '只能按名字调用'),
     ('函数当值用了 E3', '当值用了 = E3'),
     ('调用目标必须是名字', '只有具名函数和内置名能被调'),
     ('内置名只能调用', '内置名只能调用'),
     ('let f = len 是 E3', 'let f = len 是 E3'),
-    ('request peer 只读', '是两个只读名字，程序自己绑不出也改不了'),
     ('保留名占了是 E3', '都不能用保留名，占了是 E3'),
-    ('保留名的清单', '保留名 = 3 个关键字（let fn if）+ 9 个内置名 + request peer 两个只读名'),
+    ('保留名的清单', '保留名 = 3 个关键字（let fn if）+ 8 个内置名 + 11 个「这里没有那种东西」的名字'),
     ('没有的循环也在清单里', 'while for break continue return else'),
     ('替你循环的名字也在清单里', 'range map filter fold sort'),
     ('下标从 0 数', '从 0 数；越界 E6，负数下标也 E6'),
@@ -101,7 +101,7 @@ CONSTRUCTS = [
     ('比较只吃同类', '两边必须同为整数或同为字符串'),
     ('短路', '左边已经定了就不算右边'),
     ('优先级排列', '||   &&   == !=   < <= > >=   + -   * / %   一元 - !   后缀 () []'),
-    ('词法作用域', '它被写在那儿时能看到的'),
+    ('词法作用域', '写它的那一刻能看到的'),
     ('递归可以引用自己', '递归可以引用自己'),
     ('前向引用', '前向引用别的函数只在调用时才成立'),
     ('块里可定义局部函数', '块里也能定义局部函数'),
@@ -116,7 +116,7 @@ CONSTRUCTS = [
     ('str 转义两个字符', '串里的反斜杠和双引号会被转义'),
     ('print 只收字符串', 'print(s)   唯一的「写到屏幕」：只收字符串'),
     ('print 别的种类 E10', '别的种类 = E10'),
-    ('屏幕只有一套格式规则', '屏幕上只有一套格式规则，就是 str 那套'),
+    ('屏幕只有一套格式规则', '屏幕上只有 str 这一套格式规则'),
     ('num 是唯一的文本变整数', '唯一的「文本变整数」'),
     ('num 认负号', '只认「可选负号紧贴一串数字」'),
     ('num 不认空格', '前后空格算别的（" -42 " = E9）'),
@@ -142,43 +142,32 @@ CONSTRUCTS = [
     ('没有替你循环的名字', '没有 map / filter / fold / range / sort 这些「替你循环」的名字'),
     ('同一件事一种写法', '同一件事只许有一种写法'),
     ('值不会自己变种类', '值不会自己变种类'),
-    ('serve 不返回', '它不返回，'),
-    ('serve 只能是最后一句', '所以只能写在程序体的最后一句，写在别处就是 E3'),
-    ('端口只有一个来源', 'serve() 不收参数：端口只有命令行一个来源，地址不可配'),
-    ('每接一个请求先更新 request peer', '先把 request、peer 更新好'),
-    ('处理函数固定叫 handle', '名字固定叫 handle'),
-    ('keep-alive', '同一条连接读完一个请求按 keep-alive 接着读下一个'),
-    ('reply 只有四行头', '头只有四行：HTTP/1.1 状态行'),
-    ('Content-Length 按字节', 'Content-Length（按字节数，不是字符数）'),
-    ('正文走 bytes 那条路', '正文按 bytes(body) 那一条路发出去'),
-    ('HEAD 只回头', 'HEAD 只回头不回正文'),
-    ('Connection close', 'Connection: close（一模一样）就关这条连接'),
-    ('关的时候多回一行', '关的时候多回一行 Connection: close'),
-    ('原因短语由宿主给', '状态行的原因短语由宿主给，程序管不着'),
-    ('一次请求一个响应', '一次请求里调两次 = E14'),
-    ('request 一字节一字符', '一字节一字符'),
-    ('还没接见 E14', '还没接见过请求时读 request、peer 或调 reply = E14'),
-    ('命令行给端口', 'python3 drop.py --serve <端口> 程序.dr'),
-    ('没给端口 E14', '没给端口就调 serve = E14'),
-    ('行分隔只认 CRLF', '行分隔只认 CRLF'),
-    ('断连接不算错误', '直接断掉这条连接，这不是错误码'),
-    ('服务器不兜程序的错', '处理函数里报错 = 整个服务器一红就停'),
-    ('没有第二种跑法', '除 status、body、端口外没有可配的东西'),
-    ('绑在所有网卡', 'serve()     绑在 0.0.0.0 上命令行给的端口'),
-    ('一条一条地接', '一条一条地接（Ctrl-C 停）'),
+    ('host 是唯一的口子', '唯一的「问外面要东西」'),
+    ('host 只收字符串', '两个实参和返回值都是字符串（别的 = E10）'),
+    ('命令只有七个', '命令只有七个'),
+    ('认不出命令 E14', '认不出 = E14'),
+    ('端口只有命令行一个来源', 'bind("") 绑到宿主起来时给的那个端口（没给 = E14）'),
+    ('accept 阻塞等连接', 'accept(监听句柄) 阻塞等一条连接'),
+    ('recv 阻塞到一个字节', 'recv(连接句柄) 阻塞到至少一个字节'),
+    ('字节串一字节一字符', '「一字节一字符」的串'),
+    ('空串是断不是错误', '对端断了或 10 秒没动静回空串（那是断，不是错误）'),
+    ('send 在第一个换行切开', 'send(句柄 + 换行 + 字节) 在第一个换行切开'),
+    ('send 一字符一字节', '换行后面一个字符发一个字节'),
+    ('peer 回地址字符串', 'peer(连接句柄) 回 "IP:端口"'),
+    ('close 之后发不出', 'close(句柄) 之后那个句柄就发不出东西'),
+    ('date 回宿主时钟', 'date("") 回时钟'),
+    ('句柄是字符串', '句柄是字符串，语言不认识它指什么'),
+    ('阻塞超时断归宿主', '阻塞、超时、断归宿主，不占错误码'),
+    ('语言不认识请求', '语言不认识「请求」'),
+    ('库没有专门的语法', '库没有专门的语法'),
+    ('跑法只有一条', 'python3 drop.py [--port <端口>] 库.dr 程序.dr'),
+    ('宿主按顺序并文件', '宿主按这个顺序并起来'),
     ('一红就停', '打印一行「挂：第 N 行 Ex —— 中文说明」到 stderr，退出码 1'),
     ('不许吐堆栈', '不是 Python 的 Traceback'),
     ('错误行的两处例外', '函数体里的错报在调用那一行，表字面量里的错报在 [ 那一行'),
     ('14 条码', '错误一共 14 种，穷举如下'),
     ('输出只有一条规则', '只有 print 产生输出，一次一行，程序结束时不会自动打任何东西'),
 ]
-
-class _NoRequest(object):
-    """request / peer 在还没接见过任何请求时的值：读它就是 E14，不是空字符串。"""
-    def __repr__(self):
-        return "<没接见>"
-
-NO_REQUEST = _NoRequest()
 
 class DropError(Exception):
     def __init__(self, code, line, what=""):
@@ -288,10 +277,6 @@ def parse_program(src):
     items = []
     while p.peek()[0] != "eof":
         items.append(parse_item(p))
-    for i, it in enumerate(items[:-1]):
-        e = it[1] if it[0] == "expr" else None
-        if e is not None and e[0] == "call" and e[1][0] == "name" and e[1][1] == "serve":
-            raise DropError("E3", it[2], "serve 只能是程序体的最后一句 —— 它不返回，后面写什么都到不了")
     return items
 
 def parse_params(p):
@@ -572,80 +557,44 @@ def B_join(args, line):
         out.append(x)
     return sep.join(out)
 
-# ------------------------------------------------ 服务器：serve 一个，reply 一个
-HDR_END = "\x0D\x0A\x0D\x0A"        # CRLFCRLF，首部与正文之间那个空行
-HDR_MAX = 65536                        # 首部超过这么多字节就不当请求（不是错误码，直接断这条连接）
-BODY_MAX = 1 << 20                     # 正文上限 1 MiB，同上
-IDLE_SEC = 10                          # 一条连接干等 10 秒没动静就断它：一次只接一条，不能吊死
-SRV = {"port": None, "sock": None, "conn": None, "peer": "", "req": None, "done": False}
+# ------------------------------------------------ 宿主：语言与外面之间只有 host 这一个口子
+# 这里只知道端口、连接、字节、超时、时钟；「外面那些规矩」一概不认识——
+# 那是一个用 drop 写的库的事，库用的就是下面这七个命令。换掉它们，库就能换个协议。
+IDLE_SEC = 10                # 一条连接干等 10 秒没动静就算断：一次只接一条，不能吊死
+HOST = {"port": None, "next": 0, "bound": False, "h": {}}   # h: 句柄 -> ("监听"|"连接", 对象, 对端)
 
-def _drop_conn():
-    c = SRV["conn"]
-    SRV["conn"] = None
-    if c:
-        try:
-            c.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        try:
-            c.close()
-        except OSError:
-            pass
+def _open_handle(obj, kind, peer=""):
+    HOST["next"] += 1
+    h = kind + str(HOST["next"])
+    HOST["h"][h] = (kind, obj, peer)
+    return h
 
-def _recv_some(c):
+def _want_handle(why, h, kind, line):
+    """句柄是字符串：认不出、或者已经 close 掉了，都是宿主不肯做。"""
+    v = HOST["h"].get(h)
+    if v is None or v[0] != kind:
+        raise DropError("E14", line,
+                        "%s 的句柄 %r 不是一个还开着的%s" % (why, h, "监听" if kind == "监听" else "连接"))
+    return v
+
+def _drop_handle(h):
+    v = HOST["h"].pop(h, None)
+    if v is None:
+        return
     try:
-        return c.recv(4096)
-    except socket.timeout:
-        return b""           # 干等不是请求：当成「这条连接到此为止」
+        v[1].shutdown(socket.SHUT_RDWR)
     except OSError:
-        return b""
+        pass
+    try:
+        v[1].close()
+    except OSError:
+        pass
 
-def _read_request(conn):
-    """读到一个完整请求，返回「一字节一字符」的那一段。行分隔只认 CRLF：
-       对端断了、超时了、或超过 HDR_MAX / BODY_MAX —— 断这条连接，返回 None，不报错误码。"""
-    buf = b""
-    while True:
-        cut = buf.find(HDR_END.encode("latin-1"))
-        if cut >= 0:
-            break
-        if len(buf) >= HDR_MAX:
-            _drop_conn(); return None
-        ch = _recv_some(conn)
-        if not ch:
-            _drop_conn(); return None
-        buf += ch
-    head = buf[:cut].decode("latin-1")
-    body = buf[cut + len(HDR_END):]
-    want = _content_length(head)
-    if want < 0 or want > BODY_MAX:
-        _drop_conn(); return None
-    while len(body) < want:
-        ch = _recv_some(conn)
-        if not ch:
-            _drop_conn(); return None
-        body += ch
-    return head + HDR_END + body[:want].decode("latin-1")
-
-def _content_length(head):
-    """只认「Content-Length: 数字」这一种写法（大小写敏感，不认 content-length）。
-       数字畸形或超大返回 -1，由调用方按"断这条连接"处理，不报错码。"""
-    for ln in head.split("\r\n")[1:]:
-        if ln.startswith("Content-Length:"):
-            d = ln.split(":", 1)[1].strip()
-            return int(d) if d.isdigit() else -1
-    return 0
-
-def B_serve(args, line):
-    """serve() 不接参数：端口只有命令行那一个来源（--serve <port>），程序里没有第二个口子。
-       先挑程序自己的错（handle 在不在、接不接参数），再看端口 —— 和 reply 同一个次序。"""
-    handler = TOP_ENV.get("handle") if TOP_ENV else None
-    if not isinstance(handler, Fn):
-        raise DropError("E1", line, "serve 要程序里有一个 fn handle() { ... }，没绑过 handle")
-    if handler.params:
-        raise DropError("E2", line, "处理函数 handle 不接参数，这里声明了 %d 个" % len(handler.params))
-    port = SRV["port"]
+def _h_bind(arg, line):
+    """绑定的端口只有命令行这一个来源；地址不可配，一律 0.0.0.0。"""
+    port = HOST["port"]
     if port is None:
-        raise DropError("E14", line, "端口只能由命令行给：python3 drop.py --serve <port> 程序.dr")
+        raise DropError("E14", line, "端口只能由命令行给：python3 drop.py --port <端口> 库.dr 程序.dr")
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -653,63 +602,66 @@ def B_serve(args, line):
         sock.listen(16)
     except OSError as e:
         raise DropError("E14", line, "绑不上端口 %d：%s" % (port, e.strerror or e))
-    SRV["sock"] = sock
+    HOST["bound"] = True
     _arm_quit()
-    sys.stderr.write("drop 在听 :%d（Ctrl-C 停）\n" % port)
-    sys.stderr.flush()
-    while True:
-        try:
-            conn, addr = sock.accept()
-        except OSError as e:
-            _drop_conn()
-            raise DropError("E14", line, "接不上： %s" % (e.strerror or e))
-        SRV["conn"] = conn
-        conn.settimeout(IDLE_SEC)
-        SRV["peer"] = "%s:%d" % (addr[0], addr[1])
-        while True:                       # 同一条连接上一个个请求（keep-alive）
-            got = _read_request(conn)
-            if got is None:
-                break                     # 对端断了，或超过上限：这条连接收工
-            SRV["req"] = got
-            SRV["done"] = False
-            TOP_ENV.set("request", got)
-            TOP_ENV.set("peer", SRV["peer"])
-            call(handler, [], line)       # 返回值不参与协议：断不断只看对端的 Connection 头
-            if SRV["conn"] is not conn:
-                break
+    return _open_handle(sock, "监听")
 
-def B_reply(args, line):
-    status, body = args
-    conn = SRV["conn"]
-    # 先挑程序自己的错（该整数、该字符串），再看「现在有没有一个请求」—— 前者换个环境也一样错。
-    if not is_int(status):
-        raise DropError("E9", line, "reply 的状态码要整数，给的是 %s" % kind(status))
-    raw = _wire(body, "reply", line)     # 和 bytes(body) 同一条路：正文出去的就是那些字节
-    if SRV["req"] is None:
-        raise DropError("E14", line, "reply 只能在一次请求里调用：还没接见过任何请求")
-    if SRV["done"]:
-        raise DropError("E14", line, "这个请求已经回过了 —— 一次请求只有一个响应")
-    head_only = SRV["req"].split("\r\n", 1)[0].startswith("HEAD ")
-    head = SRV["req"].split(HDR_END, 1)[0]
-    reason = {200: "OK", 201: "Created", 204: "No Content", 400: "Bad Request",
-              404: "Not Found", 405: "Method Not Allowed", 500: "Internal Server Error"}
-    txt = "HTTP/1.1 %d %s\r\n" % (status, reason.get(status, "Drop"))
-    txt += "Date: %s\r\n" % time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime())
-    txt += "Content-Type: text/plain; charset=utf-8\r\n"
-    txt += "Content-Length: %d\r\n" % (0 if head_only else len(raw))
-    close = "Connection: close" in head.split("\r\n")[1:]
-    if close:
-        txt += "Connection: close\r\n"   # 只在这一种情况下多出第五行：告诉对端真的会关
+def _h_accept(arg, line):
+    sock = _want_handle("accept", arg, "监听", line)[1]
     try:
-        conn.sendall(txt.encode("latin-1") + b"\r\n" + (b"" if head_only else raw))
+        conn, addr = sock.accept()
     except OSError as e:
-        SRV["done"] = True
-        _drop_conn()
+        raise DropError("E14", line, "接不上：%s" % (e.strerror or e))
+    conn.settimeout(IDLE_SEC)
+    return _open_handle(conn, "连接", "%s:%d" % (addr[0], addr[1]))
+
+def _h_recv(arg, line):
+    """一个字节一个字符地回；对端断了或干等到点 = 空串，那是断，不是错误。"""
+    conn = _want_handle("recv", arg, "连接", line)[1]
+    try:
+        return conn.recv(4096).decode("latin-1")
+    except socket.timeout:
+        return ""
+    except OSError:
+        return ""
+
+def _h_send(arg, line):
+    cut = arg.find("\n")
+    if cut < 0:
+        raise DropError("E14", line, "send 要「句柄 + 换行 + 字节」拼成的串，这个串里没有一个换行")
+    conn = _want_handle("send", arg[:cut], "连接", line)[1]
+    try:
+        conn.sendall(_wire(arg[cut + 1:], "bytes", line))
+    except OSError as e:
         raise DropError("E14", line, "发不出去：%s" % (e.strerror or e))
-    SRV["done"] = True
-    if close:
-        _drop_conn()
-    return None
+    return ""
+
+def _h_peer(arg, line):
+    return _want_handle("peer", arg, "连接", line)[2]
+
+def _h_close(arg, line):
+    _drop_handle(arg)
+    return ""
+
+def _h_date(arg, line):
+    return time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime())
+
+HOST_CMDS = {"bind": _h_bind, "accept": _h_accept, "recv": _h_recv, "send": _h_send,
+             "peer": _h_peer, "close": _h_close, "date": _h_date}
+# 定义那一段教的是这七个名字。抄一份在这儿只为了对账（self_check 双向比）：
+# 「命令只有七个」这句话，探针只查定义里有没有，查不出实现这张表是不是真的七个。
+DEF_CMDS = ("bind", "accept", "recv", "send", "peer", "close", "date")
+
+def B_host(args, line):
+    """唯一的「问外面要东西」：命令和参数都是字符串，回的都是字符串。七个命令之外没有第八个。"""
+    cmd, arg = args
+    for v, nm in ((cmd, "命令"), (arg, "参数")):
+        if not isinstance(v, str):
+            raise DropError("E10", line, "host 的%s要字符串，给的是 %s" % (nm, kind(v)))
+    f = HOST_CMDS.get(cmd)
+    if f is None:
+        raise DropError("E14", line, "宿主只认七个命令，%r 不在里面" % cmd)
+    return f(arg, line)
 
 def _arm_quit():
     """Ctrl-C 就停，不给 Python 堆栈；被 kill 时也不要把宿主 OOM 分留给这个进程。"""
@@ -728,8 +680,8 @@ def _arm_quit():
 
 BUILTINS = {"print": (B_print, 1), "len": (B_len, 1), "str": (B_str, 1), "num": (B_num, 1),
             "bytes": (B_bytes, 1), "split": (B_split, 2), "join": (B_join, 2),
-            "serve": (B_serve, 0), "reply": (B_reply, 2)}
-RESERVED = set(BUILTINS) | {"let", "fn", "if", "request", "peer"} | set(NO_LOOP) | set(SUGAR)
+            "host": (B_host, 2)}
+RESERVED = set(BUILTINS) | {"let", "fn", "if"} | set(NO_LOOP) | set(SUGAR)
 
 _depth = [0]
 TOP_ENV = None
@@ -819,8 +771,6 @@ def ev(node, env):
             v = env.get(nm)
             if isinstance(v, Fn):
                 raise DropError("E3", line, "函数不是值：%s 只能按名字调用，不能当值用" % nm)
-            if v is NO_REQUEST:
-                raise DropError("E14", line, "%s 要等接到第一个请求才有值" % nm)
             return v
         if nm in BUILTINS:
             raise DropError("E3", line, "%s 是内置名，只能调用它，不能把它当值用" % nm)
@@ -957,27 +907,31 @@ def ev_item(it, env):
 def run_src(src):
     global TOP_ENV
     env = Env()
-    env.set("request", NO_REQUEST)
-    env.set("peer", NO_REQUEST)
     TOP_ENV = env
     for it in parse_program(src):
         ev_item(it, env)
     return env
 
-def run_file(path):
+def run_files(paths):
+    """几个文件并成一个程序：行号从头数到底 —— 定义说「宿主按这个顺序并起来」，
+       报的 N 就是这条长线上的第 N 行，所以库和程序里的错都指着同一个数。
+       拼的时候只许隔一个换行：文件末尾本来就带一个，再插一个就凭空多出一行 ——
+       库 173 行时程序的第一行会报成第 175 行，按这个数去找文件就找不到。"""
+    src = []
+    for path in paths:
+        try:
+            with open(path, encoding="utf-8") as f:
+                src.append(f.read())
+        except IOError as e:
+            sys.stderr.write("挂：读不到文件 %r —— %s\n" % (path, e.strerror or e))
+            return 1
     try:
-        with open(path, encoding="utf-8") as f:
-            text = f.read()
-    except IOError as e:
-        sys.stderr.write("挂：读不到文件 %r —— %s\n" % (path, e.strerror or e))
-        return 1
-    if SRV["port"] is not None and "serve(" not in text:
-        sys.stderr.write("挂：第 0 行 E14 —— 命令行给了 --serve，程序里没有 serve，这个端口没人接\n")
-        return 1
-    try:
-        run_src(text)
+        run_src("\n".join(t.rstrip("\n") for t in src) + "\n")
     except BrokenPipeError:
         return 0            # 下游把输出管道关了，不是程序错
+    if HOST["port"] is not None and not HOST["bound"]:
+        sys.stderr.write("挂：第 0 行 E14 —— 宿主不肯做：命令行给了 --port，这个程序一次都没绑\n")
+        return 1
     return 0
 
 # ---------------------------------------------------------------- 定义 <-> 实现对账
@@ -1035,12 +989,22 @@ def self_check(spec_path):
     for name, probe in CONSTRUCTS:
         if probe not in text:
             bad.append("实现里有「%s」，定义里没有这句话（探针 %r）" % (name, probe))
+    # 「命令只有七个」这一句光有探针不够：探针只看定义里有没有这句话，看不出实现这张表有几个。
+    # 所以这里双向比一次 —— 加宽口子（第八个命令）和留个空名（定义写了、实现没有）都算不拢。
+    cmds, def_cmds = sorted(HOST_CMDS), sorted(DEF_CMDS)
+    if cmds != def_cmds:
+        bad.append("宿主命令两边不是同一张表：实现 %s / 定义 %s" % (" ".join(cmds), " ".join(def_cmds)))
+    for c in cmds:
+        if c + "(" not in text:
+            bad.append("实现里有宿主命令 %r，定义里没有「%s(...)」这句用法" % (c, c))
     if bad:
         for b in bad:
             print("  " + b)
         return 1
     print("绿：定义里的 %d 条错误码 = 实现会吐的 %d 条，逐一对上。" % (len(spec), len(ERRORS)))
     print("绿：实现的 %d 条表面，定义里每句都对着；定义没有的构造，实现里也没有。" % len(CONSTRUCTS))
+    print("绿：宿主命令两边同一张表（%d 个：%s），每个名字在定义里都有「名字(」这句用法。"
+          % (len(cmds), " ".join(cmds)))
     return 0
 
 # ---------------------------------------------------------------- 每条码的活性样本
@@ -1049,7 +1013,7 @@ FIXTURES = [
     ('E1', 'fn f() { nope() }\nf()'),
     ('E2', 'fn f(a) { a }\nprint(str(f(1, 2)))'),
     ('E2', 'print(str(len("a", "b")))'),
-    ('E2', 'serve(1)'),
+    ('E2', 'host("date")'),
     ('E3', 'let x = )'),
     ('E3', 'fn f(a, b) { a + b }\nprint(str(f(1 2)))'),
     ('E3', 'let x = "a\\q"'),
@@ -1072,7 +1036,7 @@ FIXTURES = [
     ('E3', 'fn f(n) { if(n <= 0, 0, f(n - 1)) continue }'),
     ('E3', 'print(str(range(3)))'),
     ('E3', 'fn map(f, xs) { xs }\nprint(str(map(len, [1])))'),
-    ('E3', 'serve()\nprint("到不了")'),
+    ('E3', 'fn host(x) { x }'),
     ('E4', 'let x = 1\nx(2)'),
     ('E3', 'fn add(a, b) { a + b }\nlet f = add'),
     ('E5', 'let x = 1 + "a"'),
@@ -1091,7 +1055,6 @@ FIXTURES = [
     ('E8', 'print(str(1 % 0))'),
     ('E9', 'print(str(num("1a")))'),
     ('E9', 'print(str(num(" -42 ")))'),
-    ('E9', 'reply("200", "x")'),
     ('E10', 'print(str(num(1)))'),
     ('E10', 'print(1)'),
     ('E10', 'print(str(join("-", [1])))'),
@@ -1099,7 +1062,7 @@ FIXTURES = [
     ('E10', 'print(str(split(1, ",")))'),
     ('E10', 'print(str(split("a", "")))'),
     ('E10', 'print(str(bytes(1)))'),
-    ('E10', 'reply(200, 1)'),
+    ('E10', 'host(200, "x")'),
     ('E11', 'let x = "abc'),
     ('E11', 'print(str(1)'),
     ('E11', 'let x = "a\nb"'),
@@ -1107,12 +1070,10 @@ FIXTURES = [
     ('E11', 'let xs = [1, 2'),
     ('E12', 'fn f(a, a) { a }'),
     ('E13', 'fn deep(n) { if(n <= 0, 0, 1 + deep(n - 1)) }\nprint(str(deep(201)))'),
-    ('E1', 'serve()'),
-    ('E2', 'fn handle(x) { x }\nserve()'),
-    ('E14', 'fn handle() { reply(200, "ok") }\nserve()'),
-    ('E14', 'print(request)'),
-    ('E14', 'print(peer)'),
-    ('E14', 'reply(200, "x")'),
+    ('E14', 'host("bind", "")'),                    # 命令行没给 --port：端口没有第二个来源
+    ('E14', 'host("nope", "")'),                     # 七个命令之外没有第八个
+    ('E14', 'host("send", "这里没有一个换行")'),      # send 的串必须是「句柄 + 换行 + 字节」
+    ('E14', 'host("recv", "C1")'),                   # 句柄不是宿主给过的，或已经 close 掉了
 ]
 
 # 干净样本：证明「不红」这条路也通 —— 语言能做的事里挑一件最小的
@@ -1152,25 +1113,25 @@ def main(argv):
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a == "--serve":
+        if a == "--port":
             if i + 1 >= len(argv):
-                sys.stderr.write("挂：--serve 后面要跟一个端口号\n")
+                sys.stderr.write("挂：--port 后面要跟一个端口号\n")
                 return 2
             d = argv[i + 1]
             if not (d.isdigit() and 1 <= int(d) <= 65535):
-                sys.stderr.write("挂：--serve 的端口要是 1..65535 的整数，给的是 %r\n" % d)
+                sys.stderr.write("挂：--port 的端口要是 1..65535 的整数，给的是 %r\n" % d)
                 return 2
-            if SRV["port"] is not None:
-                sys.stderr.write("挂：--serve 只许给一次，端口只能有一个\n")
+            if HOST["port"] is not None:
+                sys.stderr.write("挂：--port 只许给一次，端口只能有一个\n")
                 return 2
-            SRV["port"] = int(d)
+            HOST["port"] = int(d)
             i += 2
             continue
         rest.append(a)
         i += 1
     argv = rest
     if not argv:
-        sys.stderr.write("用法: python3 drop.py [--serve <端口>] 程序.dr | --self-check | --self-test\n")
+        sys.stderr.write("用法: python3 drop.py [--port <端口>] 库.dr 程序.dr | --self-check | --self-test\n")
         return 2
     if argv[0] in ("-h", "--help"):
         print(__doc__.strip())
@@ -1181,7 +1142,7 @@ def main(argv):
         return self_check(sp)
     if argv[0] == "--self-test":
         return self_test()
-    return run_file(argv[0]) or 0
+    return run_files(argv) or 0
 
 if __name__ == "__main__":
     try:

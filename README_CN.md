@@ -8,7 +8,11 @@ v0.38 加了 `lang/`，一套**独立的**登记格式，用来登记“承诺 �
 v0.39 更正：`lang/*.dpt` 是**格式不是语言**（离开 `req/` 五表它什么都判不了），另起 `drop/` 才是那门
 极简语言 —— 定义只有 `drop/spec.txt`，不引用仓库任何其它文件（见 docs/DROP.md）。
 v0.40 把「同一件事的第二种写法」全删了（循环只剩尾递归一条，没有 `map`/`filter`/`fold`/`range`/`sort`，
-没有隐式转换），并当场用这门语言写了一个能跑的 HTTP 服务器来证明删完还表达得出来。
+没有隐式转换）。v0.41 改的是那台 HTTP 服务器**放在哪儿**：它当时长在语言里（`serve`、`reply`、`request`
+三个内置名 + 定义里 11 条协议规则），用户的说法是「HTTP 不应该是这门语言的本身，而是使用这门语言实现的
+一个 mini Web 服务器 —— 就好比 C# 和 Web API」。现在协议在 `drop/lib/http.dr` 里，**173 行全部是用这门
+语言写的**，外面只有一个内置口子 `host(命令, 参数)`、七个命令；定义里协议词汇 0 处（门第 3 段查、Z12 钉），
+v0.40 抬到 1,750 的那 250 token 预算本轮原样退回，读数是 1,498 / 1,500。
 它不碰 C、不进题面冻结、不替换 `req/`，状态是实验性，并且写了自杀条款。
 
 “AI”在这里指作者，不是设计对象：语法和工具链里没有任何一处是专为 AI 设计的。专为 AI 的是**工作流** ——
@@ -34,10 +38,13 @@ v0.40 把「同一件事的第二种写法」全删了（循环只剩尾递归�
 之间没有一条会失败的检查），而且它自己声明的 invariant 被自己的旗舰服务违反了。留下的形态保留了真正
 起作用的那部分，并且明确不再往**改 C** 的方向走。`code/` 下现在只有 C11 与 shell / Python；
 `lang/` 下是与 C 无关、只登记承诺与判据的实验性格式（v0.38，四段门 + 三道破坏守着，见 docs/LANG2.md）。
-`drop/` 下是一门从零重做的极简语言（v0.40）：`sh drop/check.sh` 一条命令，五段门 + 十一条破坏，
-定义 `spec.txt` 150 行 / 1,750 token = 预算的 100.0%；同一件事只许一种写法（迭代只剩尾递归，
-没有 `map`/`filter`/`fold`/`range`/`sort` 这些替你循环的名字，没有隐式转换），并且这份定义足够写出一个能跑的
-HTTP 服务器（`drop/examples/http.dr`，23 行，门里第五段拿真 socket 打它）。它不碰 C、不进题面冻结、也不读 `req/`。
+`drop/` 下是一门从零重做的极简语言（v0.41）：`sh drop/check.sh` 一条命令，五段门 + 十四条破坏，
+定义 `spec.txt` 135 行 / 1,498 token = 预算 1,500 的 99.9%（上一轮抬的那 250 token 本轮退回，这是本轮
+唯一一处收紧）；同一件事只许一种写法（迭代只剩尾递归，没有替你循环的名字，没有隐式转换），并且往外只有
+一个口子（`host`，七个命令）。HTTP 不在语言里：`drop/lib/http.dr` 173 行是这门语言写的库，
+`drop/examples/http.dr` 20 行是程序，门里第五段拿真 socket 打这两份文件（88 行对话台账逐字节钉住，
+其中线上字节与 v0.40 一字不差）。**没有编译这一步**：`python3 drop/drop.py [--port 端口] 库.dr 程序.dr`
+就是运行，命令行上文件的顺序就是唯一的"导入"机制。它不碰 C、不进题面冻结、也不读 `req/`。
 
 ## 五分钟上手
 
@@ -45,7 +52,9 @@ HTTP 服务器（`drop/examples/http.dr`，23 行，门里第五段拿真 socket
 
 ```sh
 sh code/sup/check.sh                           # 一条命令一个退出码（构建/样例/契约/登记/冻结/预算/登记格式）
-sh drop/check.sh                               # 极简语言 drop：例子 + 对账 + 预算 + 真 socket 打服务器 + 十一条破坏
+sh drop/check.sh                               # 极简语言 drop：例子 + 对账 + 预算与分界 + 真 socket 打库写的服务器 + 十四条破坏
+python3 drop/drop.py drop/examples/fact.dr       # 跑一个程序：1 / 3628800 / 大（不编译）
+python3 drop/drop.py --port 8087 drop/lib/http.dr drop/examples/http.dr   # 起那个库写的服务器
 sh code/sup/report.sh .build/check/blobd --accept 18881   # 人类验收页：条款 -> 断言/样例 -> 红绿
 ```
 
@@ -83,7 +92,7 @@ curl -s          -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blob
 | 登记格式（`lang-check.sh`，实验性） | 定义与检查器对不上（写了不会发生的错误码、或有条码从没被样本打中）；或 `lang/blobd.dpt` 与 `req/` 不再逐栏等价；或完整定义超过 1,500 token |
 | 题面冻结（`freeze.sh`） | 验收表、声明头、**5 份译稿**或契约与 `req/FROZEN` 不一致（题被改过） |
 | 变异覆盖分（`mutation-score.py`） | 改第 N 条断言的期望它不红；或实现变异红了没声明的断言；或覆盖低于 floor |
-| `drop` 语言（`drop/check.sh`，独立于本工程） | 目录里出现指到本工程别处的引用（独立性现在是门，不是文档里的一句 grep）；例子（含被改写成 v0.40 写法的 4 份读者程序）输出对不上 `.out`；定义的 14 条错误码与实现的 14 条不一致、有条码没有能触发它的样本、或实现某条行为在定义里找不到原话；定义超过 1,750 token；定义里 `> ` 那 24 行真代码抽出来跑不通；真 socket 打 `examples/http.dr` 的 89 行对话台账对不上；命令行吐出 Python 堆栈 |
+| `drop` 语言（`drop/check.sh`，独立于本工程） | 目录里出现指到本工程别处的引用（独立性现在是门，不是文档里的一句 grep）；例子（含被改写成"只有一种写法"的 4 份读者程序）输出对不上 `.out`；定义的 14 条错误码与实现的 14 条不一致、有条码没有能触发它的样本、实现某条行为在定义里找不到原话、或实现的宿主命令表不是定义教的那七个；定义超过 1,500 token；协议词汇（HTTP、Content-Length、状态行、GET…）出现在定义或实现里 —— 那就是 HTTP 又长回语言了；定义里 `> ` 那 24 行真代码抽出来跑不通；库里伸出第八个宿主命令；真 socket 打 `lib/http.dr` + `examples/http.dr` 的 88 行对话台账对不上；命令行吐出 Python 堆栈 |
 | 破坏测试（`sabotage-sup.sh`） | 23 条注入的缺陷里有一条**没有**被具名工具以具名诊断抓住（含 6 条改题/改译稿/改基线的、3 条改登记语言定义的） |
 
 最后一行最重要：它检查的是检查器本身。“被抓住”如果其实是注入代码写坏了导致的编译失败，那是假绿 ——
@@ -104,7 +113,7 @@ code/sup/lab/        实验题面包：两条本仓库里不存在的决定
 code/webapi/deploy/  30 条断言表、soak、systemd 单元、环境变量样例
 req/                 源句 SRC.md、19 条条款、译稿 TRANS/AMBIG/GAP、基线 BASELINE、冻结清单 FROZEN、README（五道门）
 lang/                实验性登记格式：droplet.dpt（定义，1,321 token）、blobd.dpt（由 req/ 机械转写，等价性有门）
-drop/                v0.40 的极简语言（干净房间）：spec.txt 唯一定义（1,750 token 顶满预算）、drop.py 实现（含 serve/reply 服务器）、check.sh 五段门 + 十一条破坏、examples/ + tests/
+drop/                v0.41 的极简语言（干净房间）：spec.txt 唯一定义（1,498/1,500 token，协议词汇 0 处）、drop.py 实现（尾递归跳转 + 七个命令的宿主口子）、lib/http.dr（用这门语言写的 HTTP 库，173 行）、check.sh 五段门 + 十四条破坏、examples/（含 20 行的 http.dr）+ tests/
 docs/                SPEC、VALIDATION（实测数字）、EXPERIMENT（三个实验）、LANG2（登记格式与三臂实测）、DROP（极简语言与三轮冷读）、NEXT（交接）
 ```
 

@@ -1,23 +1,20 @@
-// drop 的最小 HTTP 服务器：路由只有一层一层的 if，别的什么都没有。
-// 跑法：python3 drop.py --serve 8087 examples/http.dr
-// GET 与 HEAD 走同一条路（HEAD 的正文由宿主抹掉）；POST 原样回请求体。
+// 一个最小的 Web 程序：路由就是一层一层的 if，别的什么都没有。
+// 跑法：python3 drop.py --port 8087 lib/http.dr examples/http.dr
+// HTTP 的事全在 lib/http.dr 里（那也是用这门语言写的）；这里只回答「这条路径给什么」。
 
-fn req_word(n) { split(split(request, "\x0D\x0A")[0], " ")[n] }   // 请求行第 n 个词
-fn req_body() { split(request, "\x0D\x0A\x0D\x0A")[1] }            // 空行后面那一段
-
-fn route(p) {                                                       // GET / HEAD 的路径表
-  if(p == "/", reply(200, "pong"),
-  if(p == "/peer", reply(200, peer),
-  if(p == "/len", reply(200, str(len(bytes(request)))),
-  if(p == "/ver", reply(200, req_word(2)),
-     reply(404, "没有这条路")))))
+fn handle(req, peer) {
+  let m = http_word(req, 0)
+  if(m == "GET" || m == "HEAD", route(http_word(req, 1), req, peer),
+  if(m == "POST", http_reply(200, http_body(req)),
+     http_reply(405, "只认 GET、HEAD、POST")))
 }
 
-fn handle() {
-  let m = req_word(0)
-  if(m == "GET" || m == "HEAD", route(req_word(1)),
-  if(m == "POST", reply(200, req_body()),
-     reply(405, "只认 GET、HEAD、POST")))
+fn route(p, req, peer) {
+  if(p == "/", http_reply(200, "pong"),
+  if(p == "/peer", http_reply(200, peer),
+  if(p == "/len", http_reply(200, str(len(req))),
+  if(p == "/ver", http_reply(200, http_word(req, 2)),
+     http_reply(404, "没有这条路")))))
 }
 
-serve()
+http_serve()

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # 服务器这一段不用 curl，自己开 socket：只有这样才能把「只回头部不回正文」「同一条连接读第二个
 # 请求」「只认 CRLF」「超过上限直接断连接且不报错」这几条钉死。
-# 它打的是一份文字实录，check.sh 拿它和 tests/http.expected 逐字比。Date 那一行换成 *，
-# 否则每次都不同。用法：python3 tests/http_check.py <端口>
+# 打的是一份文字实录，check.sh 拿它和 tests/http.expected 逐字比。Date 那一行换成 *，
+# 否则每次都不同。被起的两份文件都在命令行上给：lib/http.dr（库）+ 程序。
+# 用法：python3 tests/http_check.py <端口>
 import os
 import shutil
 import socket
@@ -16,27 +17,29 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8123
 PY = sys.executable
-_PEER = re.compile(rb"127\.0\.0\.1:\d+")
+LIB = os.path.join(ROOT, "lib", "http.dr")
 POST_BODY = "你好 body".encode("utf-8")   # 11 个字节：两个汉字各 3 个
 CRLF = b"\r\n"
 END = CRLF * 2
+_PEER = re.compile(rb"127\.0\.0\.1:\d+")
 
 
-def boot(src, port, tmp):
-    """起服务器；等 stderr 上那句「在听」，最多 5 秒。等不到就抛，不许门自己卡住。"""
-    p = subprocess.Popen([PY, os.path.join(ROOT, "drop.py"), "--serve", str(port), src],
+def boot(app, port, tmp):
+    """起服务器：宿主除了报错什么都不往 stderr 写，所以只能自己试连，等端口肯接。
+       等不到就抛 —— 不许门自己卡住。"""
+    p = subprocess.Popen([PY, os.path.join(ROOT, "drop.py"), "--port", str(port), LIB, app],
                          cwd=tmp, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    deadline = time.time() + 5
+    deadline = time.time() + 8
     while time.time() < deadline:
-        line = p.stderr.readline()
-        if line:
-            if "在听" in line:
-                return p
-            if line.startswith("挂："):
-                raise RuntimeError("服务器起不来：" + line.strip())
-        elif p.poll() is not None:
-            raise RuntimeError("服务器没起来：rc=%s" % p.returncode)
-    raise RuntimeError("等不到监听那一行")
+        if p.poll() is not None:
+            raise RuntimeError("服务器起不来：rc=%s %s" % (p.returncode, p.stderr.read()[-200:]))
+        try:
+            s = socket.create_connection(("127.0.0.1", port), timeout=0.3)
+            s.close()
+            return p
+        except OSError:
+            time.sleep(0.05)
+    raise RuntimeError("等不到端口起来（8 秒）")
 
 
 def _recv(s):
@@ -44,11 +47,14 @@ def _recv(s):
         return s.recv(4096)
     except socket.timeout:
         return b""      # 超时不是响应的一部分：当成「对端不再发了」
+    except ConnectionResetError:
+        return b""      # 服务器断这条连接时客户端还有没读走的字节 = RST：和「断了」同一件事
+
 
 def ask(port, req, read_more=False, fin=False):
     """发一个请求，按 Content-Length 精确读完正文；read_more 时再看对端有没有接着发。"""
-    s = socket.create_connection(("127.0.0.1", port), timeout=5)
-    s.settimeout(5)
+    s = socket.create_connection(("127.0.0.1", port), timeout=12)
+    s.settimeout(12)
     s.sendall(req)
     if fin:
         s.shutdown(socket.SHUT_WR)       # 发完就半关：让服务器拿到 EOF，而不是干等
@@ -86,7 +92,7 @@ def show(label, data):
     print("— %s" % label)
     data = _PEER.sub(b"127.0.0.1:*", data)   # 对端的临时端口号每次都不同，折成 *
     try:
-        txt = data.decode("utf-8")        # 正文是 UTF-8 就读得懂；宿主改了字节就换一种读法
+        txt = data.decode("utf-8")        # 正文是 UTF-8 就读得懂；换了字节就换一种读法
     except UnicodeDecodeError:
         txt = data.decode("latin-1")
     lines = []
@@ -104,17 +110,17 @@ def main():
              ask(PORT, b"GET / HTTP/1.1" + CRLF + b"Host: x" + END))
         show("GET 一条没有的路 —— 404",
              ask(PORT, b"GET /nope HTTP/1.1" + CRLF + b"Host: x" + END))
-        show("HEAD / —— 只回头，Content-Length 写 0，正文由宿主抹掉",
+        show("HEAD / —— 只回头，Content-Length 写 0，正文一个字节都不发",
              ask(PORT, b"HEAD / HTTP/1.1" + CRLF + b"Host: x" + END))
         show("DELETE / —— 程序自己不认的方法：405",
              ask(PORT, b"DELETE / HTTP/1.1" + CRLF + b"Host: x" + END))
         post = ask(PORT, b"POST / HTTP/1.1" + CRLF + b"Host: x" + CRLF +
                    b"Content-Length: 11" + END + POST_BODY)
-        show("POST —— 正文按 bytes(body) 那条路发出去，回来的还是那些字节", post)
+        show("POST —— 正文走 bytes 那条路，回来的还是那些字节", post)
         print("  [回来的最后 %d 个字节和发出去的一模一样吗] %s"
               % (len(POST_BODY), post[-len(POST_BODY):] == POST_BODY))
-        s = socket.create_connection(("127.0.0.1", PORT), timeout=5)
-        s.settimeout(5)
+        s = socket.create_connection(("127.0.0.1", PORT), timeout=12)
+        s.settimeout(12)
         s.sendall(b"GET / HTTP/1.1" + CRLF + b"Host: x" + CRLF + b"Connection: keep-alive" + END)
         a = _recv(s)
         s.sendall(b"GET /ver HTTP/1.1" + CRLF + b"Host: x" + END)
@@ -136,25 +142,36 @@ def main():
         show("GET /peer —— 对端地址是个字符串",
              ask(PORT, b"GET /peer HTTP/1.1" + CRLF + b"Host: x" + END))
 
-        # 处理函数里报错 = 整个服务器一红就停；服务器不兜程序的错
+        # 处理函数里报错 = 整个服务器一红就停；库不兜程序的错，红的那一行落在程序里
         bad = os.path.join(tmp, "bad.dr")
         open(bad, "w", encoding="utf-8").write(
-            'fn handle() { reply(200, split(request, "\\x0D\\x0A")[9]) }\nserve()\n')
+            'fn handle(req, peer) { split(req, "\\x0D\\x0A")[9] }\nhttp_serve()\n')
         q = boot(bad, PORT + 1, tmp)
         show("处理函数里报错：整个服务器一红就停（第一个响应发不出去）",
              ask(PORT + 1, b"GET / HTTP/1.1" + CRLF + b"Host: x" + END))
         print("  [服务器的 stderr] %s" % q.stderr.read().strip())
-        print("  [退出码] %d" % q.wait(timeout=5))
+        print("  [退出码] %d" % q.wait(timeout=12))
 
-        # 一次请求里调两次 reply = E14
-        twice = os.path.join(tmp, "twice.dr")
-        open(twice, "w", encoding="utf-8").write(
-            'fn handle() { reply(200, "头一次") reply(200, "第二次") }\nserve()\n')
-        r = boot(twice, PORT + 2, tmp)
-        show("一次请求里调两次 reply = E14（头一次已经发出去了）",
+        # 程序绕过库自己去 host：句柄不是宿主给过的，红在 E14 上，库什么都没做
+        rogue = os.path.join(tmp, "rogue.dr")
+        open(rogue, "w", encoding="utf-8").write(
+            'fn handle(req, peer) { host("send", "这个句柄是我自己编的\\nx") http_reply(200, "ok") }\n'
+            'http_serve()\n')
+        r = boot(rogue, PORT + 2, tmp)
+        show("程序拿自己编的句柄去 send = E14（响应一个字节都没发出去）",
              ask(PORT + 2, b"GET / HTTP/1.1" + CRLF + b"Host: x" + END))
         print("  [服务器的 stderr] %s" % r.stderr.read().strip())
-        print("  [退出码] %d" % r.wait(timeout=5))
+        print("  [退出码] %d" % r.wait(timeout=12))
+
+        # 程序交回来的不是 [状态, 正文]：红的那一行落在库里 —— 分层分对了的证据
+        loose = os.path.join(tmp, "loose.dr")
+        open(loose, "w", encoding="utf-8").write(
+            'fn handle(req, peer) { 200 }\nhttp_serve()\n')
+        u = boot(loose, PORT + 3, tmp)
+        show("程序交回的不是 [状态, 正文]：红在库的那一句上（行号落在 lib/http.dr）",
+             ask(PORT + 3, b"GET / HTTP/1.1" + CRLF + b"Host: x" + END))
+        print("  [服务器的 stderr] %s" % u.stderr.read().strip())
+        print("  [退出码] %d" % u.wait(timeout=12))
     finally:
         if srv:
             srv.kill()

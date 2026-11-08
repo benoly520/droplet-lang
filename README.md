@@ -12,10 +12,15 @@ v0.39 corrected the label on it: `.dpt` is a **registration format, not a langua
 five `req/` tables it decides nothing. The minimal language is `drop/`, whose only definition is
 `drop/spec.txt` and which references no other file in this repository (see docs/DROP.md). v0.40 then
 removed every second way of doing a thing (iteration = tail recursion only; no `map`/`filter`/`fold`/
-`range`/`sort`, no implicit conversion), and proved the language is still expressive by writing a
-working HTTP server in it. Neither
-touches C, neither is part of the frozen question surface, neither replaces `req/`; both are marked
-experimental with kill criteria.
+`range`/`sort`, no implicit conversion). v0.41 corrected where the HTTP server had been put: it was
+inside the language (`serve`, `reply`, `request`, 11 protocol rules in the definition), and the user's
+objection was 「HTTP 不应该是这门语言的本身，而是使用这门语言实现的一个 mini Web 服务器 —— 就好比 C# 和
+Web API」. The protocol now lives in `drop/lib/http.dr`, **173 lines written in drop itself**, reached
+through one host builtin `host(cmd, arg)` with exactly seven commands; the definition contains zero
+protocol words (segment 3 of the gate checks that, sabotage probe Z12 enforces it) and the budget that
+v0.40 had raised from 1,500 to 1,750 tokens was handed back in full — the current reading is
+1,498 of 1,500. Neither touches C, neither is part of the frozen question surface, neither replaces
+`req/`; both are marked experimental with kill criteria.
 
 "AI" here means the author, not a design target: nothing in the syntax or the toolchain is specific
 to AI. What is specific is the workflow — declarations a machine can reconcile, checks that fail,
@@ -44,12 +49,15 @@ one comparison that mattered (turning a declared goal into something that fails 
 implementation violates it), and its own flagship service violated its own declared invariant.
 The superset form kept the part that did work. Everything under `code/` is C11 plus shell/Python.
 `lang/` is the experimental registration format (v0.38, four gate segments + three sabotage probes,
-docs/LANG2.md). `drop/` is a minimal language rebuilt from scratch (v0.40): one command
-(`sh drop/check.sh`), five gate segments + eleven sabotage probes, and a definition that fills its
-own budget exactly — `spec.txt`, 150 lines / 1,750 estimated tokens of 1,750. One way to do each
-thing (iteration = tail recursion only, no sugar names, no implicit conversion), and that definition
-is enough to write a working HTTP server (`drop/examples/http.dr`, 23 lines). It touches no C, is not
-in the frozen question surface, and does not read `req/`.
+docs/LANG2.md). `drop/` is a minimal language rebuilt from scratch (v0.41): one command
+(`sh drop/check.sh`), five gate segments + fourteen sabotage probes, and a definition that nearly fills
+its budget — `spec.txt`, 135 lines / 1,498 estimated tokens of 1,500. One way to do each thing
+(iteration = tail recursion only, no sugar names, no implicit conversion) and one seam to the outside
+(`host`, seven commands: bind/accept/recv/send/peer/close/date). HTTP is not in the language: it is
+`drop/lib/http.dr` (173 lines of drop) plus a 20-line program (`drop/examples/http.dr`). Nothing is
+compiled — `python3 drop/drop.py [--port N] lib.dr app.dr` is the run, and the file order on the
+command line is the only import mechanism. It touches no C, is not in the frozen question surface, and
+does not read `req/`.
 
 ## Quick start
 
@@ -57,7 +65,7 @@ Needs `cc` (C11), `sh`, `python3`, `git`, `flock`, `curl`. No Go, no code genera
 
 ```sh
 sh code/sup/check.sh                            # one command, one exit code (build/samples/contract/registry/freeze/budget/format)
-sh drop/check.sh                                # minimal language: examples + reconciliation + budget + real-socket HTTP + 11 sabotage probes
+sh drop/check.sh                                # minimal language: examples + reconciliation + budget/boundary + library-over-socket HTTP + 14 sabotage probes
 sh code/sup/report.sh .build/check/blobd --accept 18881   # human page: requirement -> assertions/samples -> red/green
 ```
 
@@ -74,6 +82,15 @@ mkdir -p /tmp/blobd-data && APP_ROOT=/tmp/blobd-data APP_TOKEN=secret \
 curl -s -X POST  -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/keys/demo -i
 curl -s -X PUT   -H 'Authorization: Bearer secret' --data-binary 'hello' http://127.0.0.1:8787/v1/blob/demo -i
 curl -s           -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blob/demo
+```
+
+And the other language, which is not part of the C workspace at all — nothing is compiled, `python3`
+*is* the runtime:
+
+```sh
+python3 drop/drop.py drop/examples/fact.dr       # 递归 + 条件 + 整数：打印 1 / 3628800 / 大
+python3 drop/drop.py --port 8087 drop/lib/http.dr drop/examples/http.dr
+curl -s http://127.0.0.1:8087/                    # pong —— 服务器在那 173 行库里，不在语言里
 ```
 
 ## What is actually checked
@@ -96,7 +113,7 @@ curl -s           -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blo
 | registration format (`lang-check.sh`, experimental) | the `.dpt` definition and its checker disagree (a documented error code that can never fire, or a code with no live sample), `lang/blobd.dpt` stops being field-for-field equivalent to `req/`, or the complete definition grows past 1,500 tokens |
 | question freeze (`freeze.sh`) | the acceptance table, declaration headers, the five translation files or the contract differ from `req/FROZEN` (the question was edited) |
 | mutation score (`mutation-score.py`) | changing assertion N's expectation does not turn it red, a mutant reddens an undeclared assertion, or coverage falls below the floor |
-| `drop` language (`drop/check.sh`, independent of this project) | anything in the directory points outside it (that independence is now a gate, not a grep quoted in docs); one of the examples disagrees with its `.out`; the 14 error codes in the definition and the 14 the implementation emits do not match one-for-one, a code has no live sample that triggers it, or a behaviour of the implementation has no matching sentence in the definition; the definition grows past 1,750 estimated tokens; the 24 `> ` lines of real code extracted verbatim from the definition do not run and reproduce their output; a raw socket session against `examples/http.dr` disagrees with the 89-line transcript in `tests/http.expected`; the command line leaks a Python traceback |
+| `drop` language (`drop/check.sh`, independent of this project) | anything in the directory points outside it (that independence is now a gate, not a grep quoted in docs); one of the examples disagrees with its `.out`; the 14 error codes in the definition and the 14 the implementation emits do not match one-for-one, a code has no live sample that triggers it, a behaviour of the implementation has no matching sentence in the definition, or the implementation's host-command table is not the same seven names the definition teaches; the definition grows past 1,500 estimated tokens; a protocol word (HTTP, Content-Length, status line, GET…) appears in the definition or the interpreter — that is HTTP growing back into the language; the 24 `> ` lines of real code extracted verbatim from the definition do not run and reproduce their output; the library reaches for an eighth host command; a raw socket session against `lib/http.dr` + `examples/http.dr` disagrees with the 88-line transcript in `tests/http.expected`; the command line leaks a Python traceback |
 | sabotage (`sabotage-sup.sh`) | one of 23 injected defects is *not* caught by a named tool with a named diagnostic (6 of them edit the question, the translation or the baseline instead of the code; 3 edit the registration format's own definition) |
 
 The last row is the important one: it checks the checkers. A "caught" that is really a compile error
@@ -117,7 +134,7 @@ code/sup/lab/        the experiment packet: two decisions that do not exist in t
 code/webapi/deploy/  30-assertion acceptance table, soak, systemd unit, env example
 req/                 16 source sentences, 19 clauses, translation ledgers (TRANS/AMBIG/GAP), baseline pin, frozen hashes, README
 lang/                experimental registration FORMAT: droplet.dpt (the whole definition, 1,321 tokens) + blobd.dpt (mechanical rewrite of req/, proven equivalent)
-drop/                the v0.40 minimal language (clean room): spec.txt (the only definition, exactly at budget) + drop.py (reference interpreter, tail-call loop, serve/reply) + check.sh (5 gate segments + 11 sabotage probes) + examples/ (incl. http.dr) + tests/
+drop/                the v0.41 minimal language (clean room): spec.txt (the only definition, 1,498/1,500 tokens, zero protocol words) + drop.py (reference interpreter: tail-call loop + the host seam, 7 commands) + lib/http.dr (HTTP written in drop, 173 lines) + check.sh (5 gate segments + 14 sabotage probes) + examples/ (incl. the 20-line http.dr) + tests/
 docs/                SPEC, VALIDATION (numbers), EXPERIMENT (three trials), LANG2 (the registration format and its three-arm measurement), DROP (the minimal language and the cold reads), NEXT (handoff)
 ```
 
