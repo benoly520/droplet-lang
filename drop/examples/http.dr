@@ -1,5 +1,5 @@
 // 一个最小的 Web 程序：路由就是一层一层的 if，别的什么都没有。
-// 跑法：python3 py/drop.py --port 8087 lib/http.dr examples/http.dr
+// 跑法：python3 hosts/python/interpreter.py --port 8087 lib/http.dr examples/http.dr
 // HTTP 的事全在 lib/http.dr 里（那也是用这门语言写的）；这里只回答「这条路径给什么」。
 // 「一句不许跨行」管着每一句，所以一层一层的 if 全写在一行里，深的就拆个小函数接着排。
 

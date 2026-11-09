@@ -1,7 +1,7 @@
 #!/bin/sh
 # 每条样本跑一遍：记下 stderr 实际报的码、行号、退出码、stdout 字节数。
 # 这是干净房间里那份自证清单，搬进仓库后路径改成从脚本自己所在的位置算：
-# 它跑的是 cs/bin 里那份构建产物，跟 conform.sh 用的是同一个 dll。
+# 它跑的是 hosts/csharp/bin 里那份构建产物，跟 conform.sh 用的是同一个 dll。
 HERE=$(cd "$(dirname "$0")" && pwd)
 DLL="$HERE/../bin/Release/net8.0/droplet.dll"
 P="$HERE"

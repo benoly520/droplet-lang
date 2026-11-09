@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 """drop —— 一门极简语言的参考实现（不用编译，Python 直接跑）。
 
-  python3 py/drop.py 程序.dr                 跑
-  python3 py/drop.py [--port <端口>] 库.dr 程序.dr  按这个顺序把几个文件并成一个程序再跑
+  python3 hosts/python/interpreter.py 程序.dr        跑
+  python3 hosts/python/interpreter.py [--port <端口>] 库.dr 程序.dr   把几个文件按这个顺序并成一个程序再跑
                                             （端口只有命令行这一个来源；语言本身不认识端口）
-  python3 py/drop.py --self-check [--spec f]   定义里的错误码 = 这里会吐的错误码
-  python3 py/drop.py --self-test             每条错误码都有一个真能触发的样本
+  python3 hosts/python/interpreter.py --self-check [--spec f]   定义里的错误码 = 这里会吐的错误码
+  python3 hosts/python/interpreter.py --self-test   每条错误码都有一个真能触发的样本
 
 这门语言的全部规则在 spec.txt 里；本文件不做任何额外的承诺，也不引用任何外部清单。
 """
@@ -623,7 +623,7 @@ def _h_bind(arg, line):
     """绑定的端口只有命令行这一个来源；地址不可配，一律 0.0.0.0。"""
     port = HOST["port"]
     if port is None:
-        raise DropError("E14", line, "端口只能由命令行给：python3 py/drop.py --port <端口> 库.dr 程序.dr")
+        raise DropError("E14", line, "端口只能由命令行给：python3 hosts/python/interpreter.py --port <端口> 库.dr 程序.dr")
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -1166,16 +1166,16 @@ def main(argv):
         i += 1
     argv = rest
     if not argv:
-        sys.stderr.write("用法: python3 py/drop.py [--port <端口>] 库.dr 程序.dr | --self-check | --self-test\n")
+        sys.stderr.write("用法: python3 hosts/python/interpreter.py [--port <端口>] 库.dr 程序.dr | --self-check | --self-test\n")
         return 2
     if argv[0] in ("-h", "--help"):
         print(__doc__.strip())
         return 0
     if argv[0] == "--self-check":
-        # 宿主住在 py/，定义住在上一级：这一句是它唯一一次找仓库里的别的东西，
-        # 而且找的是同目录树里的定义本身（不是文档、不是需求表）。
+        # 解释器住在 hosts/python/，定义在它上面两级：这一句是它唯一一次去仓库里找别的东西，
+        # 找的也只有同目录树里的那份定义本身（不是文档、不是需求表）。两行换两行，行数不许动。
         here = os.path.dirname(os.path.abspath(__file__))
-        sp = argv[argv.index("--spec") + 1] if "--spec" in argv else os.path.join(here, os.pardir, "spec.txt")
+        sp = argv[argv.index("--spec") + 1] if "--spec" in argv else os.path.join(here, os.pardir, os.pardir, "spec.txt")
         return self_check(sp)
     if argv[0] == "--self-test":
         return self_test()

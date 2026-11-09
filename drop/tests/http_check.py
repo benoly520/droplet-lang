@@ -20,7 +20,7 @@ PY = sys.executable
 # 起服务器用的那一句命令。默认是本仓库自带的 Python 宿主；DROP_HOST 可以换成别的宿主
 # （同一份定义可以有第二个宿主，实录这一项就是拿来比两个宿主说的是不是同一套字节）。
 # 换了宿主时这条路必须写绝对路径 —— 服务器是在临时目录里起的。
-HOST = os.environ.get("DROP_HOST", "").split() or [PY, os.path.join(ROOT, "py", "drop.py")]
+HOST = os.environ.get("DROP_HOST", "").split() or [PY, os.path.join(ROOT, "hosts", "python", "interpreter.py")]
 LIB = os.path.join(ROOT, "lib", "http.dr")
 POST_BODY = "你好 body".encode("utf-8")   # 11 个字节：两个汉字各 3 个
 CRLF = b"\r\n"

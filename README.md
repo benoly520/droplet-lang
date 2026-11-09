@@ -20,9 +20,9 @@ through one host builtin `host(cmd, arg)` with exactly seven commands; the defin
 protocol words (segment 3 of the gate checks that, sabotage probe Z12 enforces it) and the budget that
 v0.40 had raised from 1,500 to 1,750 tokens was handed back in full in v0.41.
 v0.42 tested something else: **whether one page of definition can grow a second host**. Another person
-read only `drop/spec.txt` (never `py/drop.py`, never the library, never the gate) and wrote a 1,692-line
-C# host from scratch, `drop/cs/Drop.cs`; the two implementations are then reconciled by
-`sh drop/cs/conform.sh`. The 8 disagreements that instrument first found (5 error samples, 3
+read only `drop/spec.txt` (never `hosts/python/interpreter.py`, never the library, never the gate) and wrote a 1,692-line
+C# host from scratch, `drop/hosts/csharp/interpreter.cs`; the two implementations are then reconciled by
+`sh drop/conform.sh`. The 8 disagreements that instrument first found (5 error samples, 3
 line-number rows in the live transcript) were all ruled to be the second host's and are now **fixed**:
 four sections green — 11 corpus programs, 73 error samples, and the 88-line transcript agree, with the
 register of known drifts still empty (nothing was registered to buy a green). It paid for itself on the spot: **the
@@ -75,7 +75,7 @@ its budget — `spec.txt`, 135 lines / 1,497 estimated tokens of 1,500. One way 
 `drop/lib/http.dr` (170 lines of drop) plus a 27-line program (`drop/examples/http.dr`). Nothing is
 compiled — the definition states the run line without naming a host (`the interpreter [--port N] lib.dr
 app.dr`), and the file order on the command line is the only import mechanism; the reference host is
-`python3 drop/py/drop.py`, and v0.42 added a second one, `dotnet drop/cs/bin/Release/net8.0/droplet.dll`,
+`python3 drop/hosts/python/interpreter.py`, and v0.42 added a second one, `dotnet drop/hosts/csharp/bin/Release/net8.0/droplet.dll`,
 written from the definition alone. It touches no C, is not in the frozen question surface, and
 does not read `req/`.
 
@@ -108,10 +108,10 @@ And the other language, which is not part of the C workspace at all — nothing 
 *is* the runtime:
 
 ```sh
-python3 drop/py/drop.py drop/examples/fact.dr       # 递归 + 条件 + 整数：打印 1 / 3628800 / 大
-python3 drop/py/drop.py --port 8087 drop/lib/http.dr drop/examples/http.dr
+python3 drop/hosts/python/interpreter.py drop/examples/fact.dr       # 递归 + 条件 + 整数：打印 1 / 3628800 / 大
+python3 drop/hosts/python/interpreter.py --port 8087 drop/lib/http.dr drop/examples/http.dr
 curl -s http://127.0.0.1:8087/                    # pong —— 服务器在那 170 行库里，不在语言里
-sh drop/cs/conform.sh                             # 同一份定义，两份宿主对账（没有 dotnet 就明说这段没跑）
+sh drop/conform.sh                             # 同一份定义，两份宿主对账（没有 dotnet 就明说这段没跑）
 ```
 
 ## What is actually checked
@@ -135,7 +135,7 @@ sh drop/cs/conform.sh                             # 同一份定义，两份宿�
 | question freeze (`freeze.sh`) | the acceptance table, declaration headers, the five translation files or the contract differ from `req/FROZEN` (the question was edited) |
 | mutation score (`mutation-score.py`) | changing assertion N's expectation does not turn it red, a mutant reddens an undeclared assertion, or coverage falls below the floor |
 | `drop` language (`drop/check.sh`, independent of this project) | anything in the directory points outside it (that independence is now a gate, not a grep quoted in docs); one of the examples disagrees with its `.out`; the 14 error codes in the definition and the 14 the implementation emits do not match one-for-one, a code has no live sample that triggers it, a behaviour of the implementation has no matching sentence in the definition, or the implementation's host-command table is not the same seven names the definition teaches; the definition grows past 1,500 estimated tokens; a protocol word (HTTP, Content-Length, status line, GET…) appears in the definition or in **either** host — that is HTTP or a runtime growing back into the language — and a concrete host name (python3, dotnet, C#…) appears in the definition, which would make "the same definition can grow a second host" a documentation claim rather than a rule; a statement that crosses a line is accepted (a crossing table of 8 shapes must stay red, Z16 catches a dropped check); the 24 `> ` lines of real code extracted verbatim from the definition do not run and reproduce their output; the library reaches for an eighth host command; a raw socket session against `lib/http.dr` + `examples/http.dr` disagrees with the 88-line transcript in `tests/http.expected`; the command line leaks a Python traceback |
-| two hosts, one definition (`drop/cs/conform.sh`, experimental) | the same program prints different bytes under the two hosts; the same broken program reddens on a different line or with a different code — including the 25 boundary shapes the second host was not shown; the live server transcript disagrees with `tests/http.expected` (wire bytes byte-exact; error rows may differ in wording, never in line or code). Drifts are either fixed or written on a register that says the definition did not decide the question; the register is empty and every disagreement found so far was actually fixed, so this check is green — and it runs in CI (`.github/workflows/ci.yml`, job `cs`) |
+| two hosts, one definition (`drop/conform.sh`, experimental) | the same program prints different bytes under the two hosts; the same broken program reddens on a different line or with a different code — including the 25 boundary shapes the second host was not shown; the live server transcript disagrees with `tests/http.expected` (wire bytes byte-exact; error rows may differ in wording, never in line or code). Drifts are either fixed or written on a register that says the definition did not decide the question; the register is empty and every disagreement found so far was actually fixed, so this check is green — and it runs in CI (`.github/workflows/ci.yml`, job `cs`) |
 | sabotage (`sabotage-sup.sh`) | one of 23 injected defects is *not* caught by a named tool with a named diagnostic (6 of them edit the question, the translation or the baseline instead of the code; 3 edit the registration format's own definition) |
 
 The last row is the important one: it checks the checkers. A "caught" that is really a compile error
@@ -156,12 +156,15 @@ code/sup/lab/        the experiment packet: two decisions that do not exist in t
 code/webapi/deploy/  30-assertion acceptance table, soak, systemd unit, env example
 req/                 16 source sentences, 19 clauses, translation ledgers (TRANS/AMBIG/GAP), baseline pin, frozen hashes, README
 lang/                experimental registration FORMAT: droplet.dpt (the whole definition, 1,321 tokens) + blobd.dpt (mechanical rewrite of req/, proven equivalent)
-drop/                the v0.42 minimal language (clean room).  One definition + two hosts that sit at the same level:
-                     spec.txt (the only definition, 1,497/1,500 tokens, zero protocol words, zero host names)
-                     lib/http.dr (HTTP written in drop, 170 lines) + examples/ (incl. the 27-line http.dr) + tests/
-                     py/drop.py  host #1, reference (tail-call loop + the host seam, 7 commands)
-                     cs/Drop.cs  host #2, 1,692 lines written from the definition alone, + cs/conform.sh (the two hosts reconciled)
-                     check.sh    5 gate segments + 16 sabotage probes
+drop/                the v0.42 minimal language (clean room): one definition + two interpreters at the same level
+                     naming rule: directories say the role, file names say what they are, build output says the product (all lowercase)
+                     spec.txt                     the only definition (1,497/1,500 tokens, zero protocol words, zero host names)
+                     lib/http.dr                  HTTP written in drop (170 lines)
+                     examples/ + tests/           programs and corpus (incl. the 27-line http.dr)
+                     hosts/python/interpreter.py  host #1, reference (1,192 lines: tail-call loop + the host seam, 7 commands)
+                     hosts/csharp/interpreter.cs  host #2 (1,692 lines written from the definition alone; the built product is droplet.dll)
+                     hosts/csharp/probe/          samples the second host's own author picked (both hosts run them when reconciled)
+                     check.sh + conform.sh        5 gate segments + 16 sabotage probes; the two-host reconciliation, 4 segments (green, in CI)
 docs/                SPEC, VALIDATION (numbers), EXPERIMENT (three trials), LANG2 (the registration format and its three-arm measurement), DROP (the minimal language and the cold reads), NEXT (handoff)
 ```
 

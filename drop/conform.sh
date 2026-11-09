@@ -1,33 +1,36 @@
 #!/bin/sh
 # 两个宿主，一份定义：这份脚本比的不是谁快，而是「同一句话两个宿主是不是说的一样」。
-# 第二个宿主（cs/Drop.cs）是按 spec.txt 从零写的，写它的人没看过 py/drop.py，也没看过 lib/ 和 check.sh
+# 第二个宿主（hosts/csharp/interpreter.cs）是按 spec.txt 从零写的，写它的人没看过
+# hosts/python/interpreter.py，也没看过 lib/ 和 check.sh —— 这份脚本自己不住在任何一间宿主里：
+# 它比的是两间，所以它和 check.sh 同级，是第二道门。
 # —— 所以这里每一条相等都不是「抄得像」，而是「定义真把那件事说清了」；每一条不等都是一张借条。
 #
 #   [1/4] 语料     examples/*.dr + tests/*.dr（服务器那份除外）：stdout 逐字节、退出码
-#   [2/4] 报错     跨行表（tests/layout/x_*.dr）+ 第二宿主自己写的样本（cs/probe/*.dr，拿不到
+#   [2/4] 报错     跨行表（tests/layout/x_*.dr）+ 第二宿主自己写的样本（hosts/csharp/probe/*.dr，拿不到
 #                  真 socket 的那几个除外）：比退出码、比 stdout、比「第 N 行 Ex」；
 #                  两边的中文说明本来就不必相同，比的是码和红在哪一行
 #   [3/4] 实录     同一份 lib/http.dr + examples/http.dr，两个宿主各起一次服务器，
 #                  对话都必须逐字节等于 tests/http.expected
 #   [4/4] 耗时     同一批程序各跑三遍取最快 —— 只报数，不作判据
 #
-# 用法：sh drop/cs/conform.sh          没有 dotnet 就明说「这段没跑」，不装绿
+# 用法：sh drop/conform.sh             没有 dotnet 就明说「这段没跑」，不装绿
 # 四段都跑完再算账：第 2 段红的时候第 3 段的证据照样要看 —— 少一段不是宽松，是少一段证据。
 FAILS=""
 fail() { FAILS="$FAILS $1"; echo "  （第 $1 段红）"; }
-HERE=$(cd "$(dirname "$0")" && pwd)
-cd "$HERE/.."
+HERE=$(cd "$(dirname "$0")" && pwd)          # = drop/
+cd "$HERE"
+CS="$HERE/hosts/csharp"                 # 第二宿主那一间
 PY=${PYTHON:-python3}
-DLL="$HERE/bin/Release/net8.0/droplet.dll"
+DLL="$CS/bin/Release/net8.0/droplet.dll"
 
 if ! command -v dotnet >/dev/null 2>&1; then
-  echo "cs: 这段没有跑 —— 本机没有 dotnet，第二个宿主起不来（这不是绿，是没测）"
+  echo "hosts: 这段没有跑 —— 本机没有 dotnet，第二宿主起不来（这不是绿，是没测）"
   exit 0
 fi
 if [ ! -f "$DLL" ]; then
-  (cd "$HERE" && DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 TMPDIR="${TMPDIR:-/tmp}" \
-      dotnet build -c Release --nologo >"$HERE/build.log" 2>&1) || {
-    echo "红：第二个宿主构建不起来（看 cs/build.log 最后几行）"; tail -5 "$HERE/build.log"; exit 1; }
+  (cd "$CS" && DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 TMPDIR="${TMPDIR:-/tmp}" \
+      dotnet build -c Release --nologo >"$CS/build.log" 2>&1) || {
+    echo "红：第二宿主构建不起来（看 hosts/csharp/build.log 最后几行）"; tail -5 "$CS/build.log"; exit 1; }
 fi
 
 T=$(mktemp -d)
@@ -43,7 +46,7 @@ files = [f for f in sorted(glob.glob("examples/*.dr")) + sorted(glob.glob("tests
          if f != "examples/http.dr"]
 bad = 0
 for f in files:
-    a = subprocess.run([sys.executable, "py/drop.py", f], capture_output=True, text=True)
+    a = subprocess.run([sys.executable, "hosts/python/interpreter.py", f], capture_output=True, text=True)
     b = subprocess.run(cs + [f], capture_output=True, text=True)
     if (a.returncode, a.stdout) != (b.returncode, b.stdout):
         bad += 1
@@ -73,19 +76,19 @@ def shot(cmd, f):
 # 一行一条：文件名 py=<rc/行/码/输出> cs=<...> 为什么。新漂移一律红；
 # 登记过但已经不漂了也红 —— 那张借条得由人划掉，不许悄悄过期。
 known = {}
-if os.path.exists("cs/conform.known"):
-    for ln in open("cs/conform.known", encoding="utf-8"):
+if os.path.exists("conform.known"):
+    for ln in open("conform.known", encoding="utf-8"):
         ln = ln.strip()
         if ln and not ln.startswith("//"):
             known[ln.split()[0]] = ln
 
 cases = sorted(glob.glob("tests/layout/x_*.dr"))
-cases += [f for f in sorted(glob.glob("cs/probe/*.dr")) if not os.path.basename(f).startswith("sock_")]
-cases += sorted(glob.glob("cs/probe/lay2/s*.dr"))
+cases += [f for f in sorted(glob.glob("hosts/csharp/probe/*.dr")) if not os.path.basename(f).startswith("sock_")]
+cases += sorted(glob.glob("hosts/csharp/probe/lay2/s*.dr"))
 bad = 0
 coded = 0
 for f in cases:
-    a = shot([sys.executable, "py/drop.py"], f)
+    a = shot([sys.executable, "hosts/python/interpreter.py"], f)
     b = shot(cs, f)
     if a != b:
         bad += 1
@@ -98,7 +101,7 @@ for f in cases:
     else:
         if f in known:
             bad += 1
-            print("  借条过期 %s —— 两边已经一样了，把 cs/conform.known 里那条划掉" % f)
+            print("  借条过期 %s —— 两边已经一样了，把 conform.known 里那条划掉" % f)
         if a[2] != "-":
             coded += 1
 print("  报错样本：%d 个（两边都在同一行报同一个码的 %d 个），%d 处漂，登记在册 %d 条"
@@ -161,20 +164,21 @@ def best3(cmd, args):
     return min(xs)
 
 spec = [os.path.join("examples", "spec.dr")]
-p_all, c_all = best3([sys.executable, "py/drop.py"], files), best3(cs, files)
-p_one, c_one = best3([sys.executable, "py/drop.py"], spec), best3(cs, spec)
+py = [sys.executable, "hosts/python/interpreter.py"]
+p_all, c_all = best3(py, files), best3(cs, files)
+p_one, c_one = best3(py, spec), best3(cs, spec)
 print("  %d 个程序连跑一遍取最快：python3 %.0f ms / dotnet %.0f ms（每个进程启动摊 %.1f / %.1f ms）"
       % (len(files), p_all, c_all, p_all / len(files), c_all / len(files)))
 print("  单跑 spec.dr（定义里那 24 行，最重的是 count(50000)）：python3 %.0f ms / dotnet %.0f ms"
       % (p_one, c_one))
-# 这里不跑 cs/probe/e13tail.dr（100000 层尾调用）：那一份两边都要一两分钟，是 O(n^2) 的
+# 这里不跑 hosts/csharp/probe/e13tail.dr（100000 层尾调用）：那一份两边都要一两分钟，是 O(n^2) 的
 # 表拼接（acc + [n] 与 xs[1:]），不是这一段的判据。量过一次记在下面，别让它当这段的标签。
-print("  没跑的那份：cs/probe/e13tail.dr（100000 层尾调用 + 100000 长的表切片）——"
+print("  没跑的那份：hosts/csharp/probe/e13tail.dr（100000 层尾调用 + 100000 长的表切片）——"
       "量过一次：python3 84 s / dotnet 124 s，两边都慢在同一件事上，只记数不判")
 PY
 
 if [ -n "$FAILS" ]; then
-  echo "cs: 红（红在第$FAILS 段）—— 上面每条漂移都要么修掉，要么写明定义没说了算；登记在册的借条不算绿"
+  echo "hosts: 红（红在第$FAILS 段）—— 上面每条漂移都要么修掉，要么写明定义没说了算；登记在册的借条不算绿"
   exit 1
 fi
-echo "cs: 绿（两份宿主在语料、报错、实录这三份东西上说的是同一套话）"
+echo "hosts: 绿（两份宿主在语料、报错、实录这三份东西上说的是同一套话）"

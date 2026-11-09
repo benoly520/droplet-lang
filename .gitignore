@@ -16,12 +16,12 @@ a.out
 # Python 检查器的字节码（ab-score.py 用 importlib 载入 dpt-check.py 时生成）
 __pycache__/
 
-# C# 宿主的构建产物（源码进仓库，产物不进）
-drop/cs/bin/
-drop/cs/obj/
-drop/cs/build.log
+# 第二宿主的构建产物（源码进仓库，产物不进）
+drop/hosts/csharp/bin/
+drop/hosts/csharp/obj/
+drop/hosts/csharp/build.log
 
 # 干净房间那三份自证脚本每次跑都会留下捕获文件（stdout/stderr/服务端输出）。
 # 它们是运行痕迹不是题面 —— 题面只有那些 .dr；期望值由 conform.sh 现算，不留档，免得变成第二套台账。
-drop/cs/probe/.*
-drop/cs/probe/shapes/.*
+drop/hosts/csharp/probe/.*
+drop/hosts/csharp/probe/shapes/.*
