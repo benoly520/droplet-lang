@@ -1,6 +1,6 @@
 #!/bin/sh
 # 两个宿主，一份定义：这份脚本比的不是谁快，而是「同一句话两个宿主是不是说的一样」。
-# 第二个宿主（cs/Drop.cs）是按 spec.txt 从零写的，写它的人没看过 drop.py，也没看过 lib/ 和 check.sh
+# 第二个宿主（cs/Drop.cs）是按 spec.txt 从零写的，写它的人没看过 py/drop.py，也没看过 lib/ 和 check.sh
 # —— 所以这里每一条相等都不是「抄得像」，而是「定义真把那件事说清了」；每一条不等都是一张借条。
 #
 #   [1/4] 语料     examples/*.dr + tests/*.dr（服务器那份除外）：stdout 逐字节、退出码
@@ -43,7 +43,7 @@ files = [f for f in sorted(glob.glob("examples/*.dr")) + sorted(glob.glob("tests
          if f != "examples/http.dr"]
 bad = 0
 for f in files:
-    a = subprocess.run([sys.executable, "drop.py", f], capture_output=True, text=True)
+    a = subprocess.run([sys.executable, "py/drop.py", f], capture_output=True, text=True)
     b = subprocess.run(cs + [f], capture_output=True, text=True)
     if (a.returncode, a.stdout) != (b.returncode, b.stdout):
         bad += 1
@@ -85,7 +85,7 @@ cases += sorted(glob.glob("cs/probe/lay2/s*.dr"))
 bad = 0
 coded = 0
 for f in cases:
-    a = shot([sys.executable, "drop.py"], f)
+    a = shot([sys.executable, "py/drop.py"], f)
     b = shot(cs, f)
     if a != b:
         bad += 1
@@ -161,8 +161,8 @@ def best3(cmd, args):
     return min(xs)
 
 spec = [os.path.join("examples", "spec.dr")]
-p_all, c_all = best3([sys.executable, "drop.py"], files), best3(cs, files)
-p_one, c_one = best3([sys.executable, "drop.py"], spec), best3(cs, spec)
+p_all, c_all = best3([sys.executable, "py/drop.py"], files), best3(cs, files)
+p_one, c_one = best3([sys.executable, "py/drop.py"], spec), best3(cs, spec)
 print("  %d 个程序连跑一遍取最快：python3 %.0f ms / dotnet %.0f ms（每个进程启动摊 %.1f / %.1f ms）"
       % (len(files), p_all, c_all, p_all / len(files), c_all / len(files)))
 print("  单跑 spec.dr（定义里那 24 行，最重的是 count(50000)）：python3 %.0f ms / dotnet %.0f ms"

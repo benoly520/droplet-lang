@@ -13,7 +13,7 @@ v0.40 把「同一件事的第二种写法」全删了（循环只剩尾递归�
 一个 mini Web 服务器 —— 就好比 C# 和 Web API」。现在协议在 `drop/lib/http.dr` 里，**170 行全部是用这门
 语言写的**，外面只有一个内置口子 `host(命令, 参数)`、七个命令；定义里协议词汇 0 处（门第 3 段查、Z12 钉），
 v0.40 抬到 1,750 的那 250 token 预算原样退回。
-v0.42 试的是另一件事：**同一页定义能不能长出第二个宿主**。另一个人只读 `drop/spec.txt`（没看过 `drop.py`、
+v0.42 试的是另一件事：**同一页定义能不能长出第二个宿主**。另一个人只读 `drop/spec.txt`（没看过 `py/drop.py`、
 没看过库、没看过门）从零写了一份 1,692 行的 C# 宿主 `drop/cs/Drop.cs`，然后两份实现对账
 （`sh drop/cs/conform.sh`）。这台秤第一次跑出来红 8 条（报错样本 5 处 + 实录里 3 行行号），八条都判在
 第二个宿主那侧 —— 现在**八条全部真修完，四段全绿**：11 份语料、73 个报错样本、88 行实录逐字对上，
@@ -58,7 +58,7 @@ v0.42 试的是另一件事：**同一页定义能不能长出第二个宿主**�
 一个口子（`host`，七个命令）。HTTP 不在语言里：`drop/lib/http.dr` 170 行是这门语言写的库，
 `drop/examples/http.dr` 27 行是程序，门里第五段拿真 socket 打这两份文件（88 行对话台账逐字节钉住，
 其中线上字节与 v0.40 一字不差）。**没有编译这一步**：跑法只有一条，`宿主的解释器 [--port 端口] 库.dr 程序.dr`
-（参考宿主是 `python3 drop/drop.py`），命令行上文件的顺序就是唯一的"导入"机制。这一轮多了一行：**第二个宿主**
+（参考宿主是 `python3 drop/py/drop.py`），命令行上文件的顺序就是唯一的"导入"机制。这一轮多了一行：**第二个宿主**
 `drop/cs/Drop.cs`（1,692 行 C#，只读定义从零写的），对账命令 `sh drop/cs/conform.sh`（CI 里 `cs` 档真跑）。它不碰 C、不进题面冻结、
 也不读 `req/`。
 
@@ -70,8 +70,8 @@ v0.42 试的是另一件事：**同一页定义能不能长出第二个宿主**�
 sh code/sup/check.sh                           # 一条命令一个退出码（构建/样例/契约/登记/冻结/预算/登记格式）
 sh drop/check.sh                               # 极简语言 drop：例子 + 对账 + 预算与分界 + 真 socket 打库写的服务器 + 十六条破坏
 sh drop/cs/conform.sh                          # 两份宿主对账：语料逐字节 / 报错样本 / 服务器实录（没装 dotnet 就明说这段没跑）
-python3 drop/drop.py drop/examples/fact.dr       # 跑一个程序：1 / 3628800 / 大（不编译）
-python3 drop/drop.py --port 8087 drop/lib/http.dr drop/examples/http.dr   # 起那个库写的服务器
+python3 drop/py/drop.py drop/examples/fact.dr       # 跑一个程序：1 / 3628800 / 大（不编译）
+python3 drop/py/drop.py --port 8087 drop/lib/http.dr drop/examples/http.dr   # 起那个库写的服务器
 sh code/sup/report.sh .build/check/blobd --accept 18881   # 人类验收页：条款 -> 断言/样例 -> 红绿
 ```
 
@@ -130,7 +130,12 @@ code/sup/lab/        实验题面包：两条本仓库里不存在的决定
 code/webapi/deploy/  30 条断言表、soak、systemd 单元、环境变量样例
 req/                 源句 SRC.md、19 条条款、译稿 TRANS/AMBIG/GAP、基线 BASELINE、冻结清单 FROZEN、README（五道门）
 lang/                实验性登记格式：droplet.dpt（定义，1,321 token）、blobd.dpt（由 req/ 机械转写，等价性有门）
-drop/                v0.42 的极简语言（干净房间）：spec.txt 唯一定义（1,497/1,500 token，协议词汇 0 处、宿主名 0 处）、drop.py 参考宿主（尾递归跳转 + 七个命令的宿主口子）、lib/http.dr（用这门语言写的 HTTP 库，170 行）、check.sh 五段门 + 十六条破坏、examples/（含 27 行的 http.dr）+ tests/、cs/Drop.cs 第二个宿主（1,692 行 C#，只读定义从零写的）+ cs/conform.sh 两份宿主对账（四段全绿，CI 有档）
+drop/                v0.42 的极简语言（干净房间）：一页定义 + 两份同级宿主
+                     spec.txt 唯一定义（1,497/1,500 token，协议词汇 0 处、宿主名 0 处）
+                     lib/http.dr 用这门语言写的 HTTP 库（170 行）+ examples/（含 27 行的 http.dr）+ tests/
+                     py/drop.py  第一宿主·参考实现（尾递归跳转 + 七个命令的宿主口子）
+                     cs/Drop.cs  第二宿主（1,692 行 C#，只读定义从零写的）+ cs/conform.sh 两份宿主对账（四段全绿，CI 有档）
+                     check.sh    五段门 + 十六条破坏
 docs/                SPEC、VALIDATION（实测数字）、EXPERIMENT（三个实验）、LANG2（登记格式与三臂实测）、DROP（极简语言与三轮冷读）、NEXT（交接）
 ```
 

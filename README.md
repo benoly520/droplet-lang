@@ -20,7 +20,7 @@ through one host builtin `host(cmd, arg)` with exactly seven commands; the defin
 protocol words (segment 3 of the gate checks that, sabotage probe Z12 enforces it) and the budget that
 v0.40 had raised from 1,500 to 1,750 tokens was handed back in full in v0.41.
 v0.42 tested something else: **whether one page of definition can grow a second host**. Another person
-read only `drop/spec.txt` (never `drop.py`, never the library, never the gate) and wrote a 1,692-line
+read only `drop/spec.txt` (never `py/drop.py`, never the library, never the gate) and wrote a 1,692-line
 C# host from scratch, `drop/cs/Drop.cs`; the two implementations are then reconciled by
 `sh drop/cs/conform.sh`. The 8 disagreements that instrument first found (5 error samples, 3
 line-number rows in the live transcript) were all ruled to be the second host's and are now **fixed**:
@@ -75,7 +75,7 @@ its budget — `spec.txt`, 135 lines / 1,497 estimated tokens of 1,500. One way 
 `drop/lib/http.dr` (170 lines of drop) plus a 27-line program (`drop/examples/http.dr`). Nothing is
 compiled — the definition states the run line without naming a host (`the interpreter [--port N] lib.dr
 app.dr`), and the file order on the command line is the only import mechanism; the reference host is
-`python3 drop/drop.py`, and v0.42 added a second one, `dotnet drop/cs/bin/Release/net8.0/droplet.dll`,
+`python3 drop/py/drop.py`, and v0.42 added a second one, `dotnet drop/cs/bin/Release/net8.0/droplet.dll`,
 written from the definition alone. It touches no C, is not in the frozen question surface, and
 does not read `req/`.
 
@@ -108,8 +108,8 @@ And the other language, which is not part of the C workspace at all — nothing 
 *is* the runtime:
 
 ```sh
-python3 drop/drop.py drop/examples/fact.dr       # 递归 + 条件 + 整数：打印 1 / 3628800 / 大
-python3 drop/drop.py --port 8087 drop/lib/http.dr drop/examples/http.dr
+python3 drop/py/drop.py drop/examples/fact.dr       # 递归 + 条件 + 整数：打印 1 / 3628800 / 大
+python3 drop/py/drop.py --port 8087 drop/lib/http.dr drop/examples/http.dr
 curl -s http://127.0.0.1:8087/                    # pong —— 服务器在那 170 行库里，不在语言里
 sh drop/cs/conform.sh                             # 同一份定义，两份宿主对账（没有 dotnet 就明说这段没跑）
 ```
@@ -156,7 +156,12 @@ code/sup/lab/        the experiment packet: two decisions that do not exist in t
 code/webapi/deploy/  30-assertion acceptance table, soak, systemd unit, env example
 req/                 16 source sentences, 19 clauses, translation ledgers (TRANS/AMBIG/GAP), baseline pin, frozen hashes, README
 lang/                experimental registration FORMAT: droplet.dpt (the whole definition, 1,321 tokens) + blobd.dpt (mechanical rewrite of req/, proven equivalent)
-drop/                the v0.42 minimal language (clean room): spec.txt (the only definition, 1,497/1,500 tokens, zero protocol words, zero host names) + drop.py (reference host: tail-call loop + the host seam, 7 commands) + lib/http.dr (HTTP written in drop, 170 lines) + check.sh (5 gate segments + 16 sabotage probes) + examples/ (incl. the 27-line http.dr) + tests/ + cs/ (second host: Drop.cs, 1,692 lines written from the definition alone, + conform.sh reconciling the two)
+drop/                the v0.42 minimal language (clean room).  One definition + two hosts that sit at the same level:
+                     spec.txt (the only definition, 1,497/1,500 tokens, zero protocol words, zero host names)
+                     lib/http.dr (HTTP written in drop, 170 lines) + examples/ (incl. the 27-line http.dr) + tests/
+                     py/drop.py  host #1, reference (tail-call loop + the host seam, 7 commands)
+                     cs/Drop.cs  host #2, 1,692 lines written from the definition alone, + cs/conform.sh (the two hosts reconciled)
+                     check.sh    5 gate segments + 16 sabotage probes
 docs/                SPEC, VALIDATION (numbers), EXPERIMENT (three trials), LANG2 (the registration format and its three-arm measurement), DROP (the minimal language and the cold reads), NEXT (handoff)
 ```
 
