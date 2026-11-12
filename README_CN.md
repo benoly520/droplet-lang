@@ -62,6 +62,14 @@ v0.42 试的是另一件事：**同一页定义能不能长出第二个宿主**�
 `drop/hosts/csharp/interpreter.cs`（1,692 行 C#，只读定义从零写的），对账命令 `sh drop/conform.sh`（CI 里 `hosts` 档真跑）。它不碰 C、不进题面冻结、
 也不读 `req/`。
 
+2026-11-12 起，目标说清楚了：**要学的是「一门语言从 0 建起来」这件事本身**，四条需求是 API 极简、
+AI 读完文档和源码就会用、编译成什么必须想清、运行时 CPU/GPU/内存越小越好。这条路线写在
+[docs/BUILD.md](docs/BUILD.md)：十个阶段，每段一条**能跑的判据**加一处**最容易自欺的地方**，
+外加 `tools/footprint.py` 这把量尺（峰值 RSS / 启动耗时 / 磁盘）。
+**今天有尺、没有预算**：不给 `--budget-mb` / `--budget-ms` 它就只报数不判，因为没量过的数字不配当判据。
+那一页还用仓库自己的公式量了「把字节码写进定义」要多少钱：声明部分 ≈33 token，含 24 行指令表 ≈201，
+而现页余量只有 3 —— 这是**要用户裁决的事**，不是文档可以偷偷买的。
+
 ## 五分钟上手
 
 需要 `cc`（C11）、`sh`、`python3`、`git`、`flock`、`curl`。不需要 Go，也不需要代码生成器。
@@ -73,6 +81,8 @@ sh drop/conform.sh                          # 两份宿主对账：语料逐字�
 python3 drop/hosts/python/interpreter.py drop/examples/fact.dr       # 跑一个程序：1 / 3628800 / 大（不编译）
 python3 drop/hosts/python/interpreter.py --port 8087 drop/lib/http.dr drop/examples/http.dr   # 起那个库写的服务器
 sh code/sup/report.sh .build/check/blobd --accept 18881   # 人类验收页：条款 -> 断言/样例 -> 红绿
+python3 tools/footprint.py --name py-host --reps 5 --python-floor -- python3 drop/hosts/python/interpreter.py drop/examples/fact.dr
+                                                 # 量尺：峰值 RSS / 启动耗时 / 磁盘。不给预算只报数（docs/BUILD.md §3）
 ```
 
 作者回路是三段：`brief.sh` 出题面包（声明 + 契约 + 命令，不含实现）、`check.sh` 给第一个失败项、
@@ -139,7 +149,8 @@ drop/                v0.42 的极简语言（干净房间）：一页定义 + �
                      hosts/csharp/interpreter.cs  第二宿主（1,692 行，只读定义从零写的；产物叫 droplet.dll）
                      hosts/csharp/probe/          第二宿主的作者自己写的样本（对账时两份宿主都跑它们）
                      check.sh + conform.sh        五段门 + 十六条破坏；两份宿主对账四段（全绿，CI 有档）
-docs/                SPEC、VALIDATION（实测数字）、EXPERIMENT（三个实验）、LANG2（登记格式与三臂实测）、DROP（极简语言与三轮冷读）、NEXT（交接）
+docs/                SPEC、VALIDATION（实测数字）、EXPERIMENT（三个实验）、LANG2（登记格式与三臂实测）、DROP（极简语言与三轮冷读）、BUILD（从 0 建一门语言的路线：十阶段判据、编译目标值多少 token、footprint 量尺、AI 可读性的三道验收）、NEXT（交接）
+tools/               footprint.py —— 量尺：峰值 RSS / 启动耗时 / 磁盘。不给预算只报数
 ```
 
 ## 已知边界

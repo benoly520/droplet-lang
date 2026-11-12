@@ -79,13 +79,24 @@ app.dr`), and the file order on the command line is the only import mechanism; t
 written from the definition alone. It touches no C, is not in the frozen question surface, and
 does not read `req/`.
 
+Since 2026-11-12 the stated goal is the process itself — learning how a language gets built from
+zero — under four requirements: a minimal API, legible enough that an AI can use it after reading the
+docs and the source, a decided compilation target, and the smallest possible runtime (CPU / GPU /
+memory). That route lives in [docs/BUILD.md](docs/BUILD.md): ten stages, each with a runnable gate and
+a named way to fool yourself, plus `tools/footprint.py`, a ruler for peak RSS, start-to-exit time and
+disk. **Today the ruler exists and the budget does not** — the tool reports numbers and refuses to
+judge until you pass `--budget-mb` / `--budget-ms`, because an unmeasured number is not a gate. The
+page also prices what a bytecode target would cost the one-page definition, measured with the
+repository's own token formula: ~33 tokens to declare it, ~201 with a 24-instruction table, against 3
+tokens of headroom — which is a decision for the user, not something the docs may buy quietly.
+
 ## Quick start
 
 Needs `cc` (C11), `sh`, `python3`, `git`, `flock`, `curl`. No Go, no code generator.
 
 ```sh
 sh code/sup/check.sh                            # one command, one exit code (build/samples/contract/registry/freeze/budget/format)
-sh drop/check.sh                                # minimal language: examples + reconciliation + budget/boundary + library-over-socket HTTP + 14 sabotage probes
+sh drop/check.sh                                # minimal language: examples + reconciliation + budget/boundary + library-over-socket HTTP + 16 sabotage probes
 sh code/sup/report.sh .build/check/blobd --accept 18881   # human page: requirement -> assertions/samples -> red/green
 ```
 
@@ -112,6 +123,8 @@ python3 drop/hosts/python/interpreter.py drop/examples/fact.dr       # 递归 + 
 python3 drop/hosts/python/interpreter.py --port 8087 drop/lib/http.dr drop/examples/http.dr
 curl -s http://127.0.0.1:8087/                    # pong —— 服务器在那 170 行库里，不在语言里
 sh drop/conform.sh                             # 同一份定义，两份宿主对账（没有 dotnet 就明说这段没跑）
+python3 tools/footprint.py --name py-host --reps 5 --python-floor -- python3 drop/hosts/python/interpreter.py drop/examples/fact.dr
+                                                 # 量尺：峰值 RSS / 启动耗时 / 磁盘。不给预算只报数（docs/BUILD.md §3）
 ```
 
 ## What is actually checked
@@ -165,7 +178,8 @@ drop/                the v0.42 minimal language (clean room): one definition + t
                      hosts/csharp/interpreter.cs  host #2 (1,692 lines written from the definition alone; the built product is droplet.dll)
                      hosts/csharp/probe/          samples the second host's own author picked (both hosts run them when reconciled)
                      check.sh + conform.sh        5 gate segments + 16 sabotage probes; the two-host reconciliation, 4 segments (green, in CI)
-docs/                SPEC, VALIDATION (numbers), EXPERIMENT (three trials), LANG2 (the registration format and its three-arm measurement), DROP (the minimal language and the cold reads), NEXT (handoff)
+docs/                SPEC, VALIDATION (numbers), EXPERIMENT (three trials), LANG2 (the registration format and its three-arm measurement), DROP (the minimal language and the cold reads), BUILD (the from-zero route: 10 stages with runnable gates, what a compilation target costs in definition tokens, the footprint ruler, three AI-legibility acceptances), NEXT (handoff)
+tools/               footprint.py — the ruler: peak RSS, start-to-exit time, disk; reports only, judges only when a budget is given
 ```
 
 ## Known limits
