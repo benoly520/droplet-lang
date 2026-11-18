@@ -29,7 +29,11 @@ CASES = [
     os.path.join(ROOT, "drop", "codegen", "cases", "ifs.dr"),
     os.path.join(ROOT, "drop", "examples", "fact.dr"),
 ]
-REFUSE = os.path.join(ROOT, "drop", "codegen", "cases", "refuse_list.dr")
+REFUSES = [
+    (os.path.join(ROOT, "drop", "codegen", "cases", "refuse_list.dr"), "第 2 行", "子集之外"),
+    (os.path.join(ROOT, "drop", "codegen", "cases", "refuse_bool.dr"), "第 2 行", "布尔"),
+    (os.path.join(ROOT, "drop", "codegen", "cases", "refuse_cond.dr"), "第 2 行", "条件"),
+]
 PY = sys.executable
 REPS = 30
 if "--reps" in sys.argv:
@@ -98,15 +102,16 @@ def main():
         print("  对上 %-24s %5d B  %d 行输出逐字相同"
               % (os.path.basename(src), os.path.getsize(out), got.stdout.count("\n")))
 
-    # ---- 3 子集之外：拒绝，而且说第几行
-    r = run([PY, DROPC, REFUSE, "-o", os.path.join(tmp, "no.bin")])
-    if r.returncode != 2 or "第 2 行" not in r.stderr or "子集之外" not in r.stderr:
-        red("子集之外的输入没有被正确拒绝：rc=%d err=%r" % (r.returncode, r.stderr.strip()[:120]))
-    else:
-        import re
-        m = re.search(r"第 \d+ 行", r.stderr)
-        where = m.group(0) if m else r.stderr.strip()[:20]
-        print("  对上 %-24s 拒绝在 %s（退出码 2）" % (os.path.basename(REFUSE), where))
+    # ---- 3 子集之外：拒绝，而且说第几行、说对是哪一类
+    for path, line, why in REFUSES:
+        r = run([PY, DROPC, path, "-o", os.path.join(tmp, "no.bin")])
+        if r.returncode != 2 or line not in r.stderr or "子集之外" not in r.stderr:
+            red("%s 没有被正确拒绝：rc=%d err=%r" % (os.path.basename(path), r.returncode, r.stderr.strip()[:140]))
+        elif why not in r.stderr:
+            red("%s 拒绝了，但理由不是「%s」：%r" % (os.path.basename(path), why, r.stderr.strip()[:140]))
+        else:
+            print("  对上 %-24s 拒绝在 %s，理由含「%s」（退出码 2）"
+                  % (os.path.basename(path), line, why))
 
     # ---- 4 量尺：编译产物 vs 参考实现（同一个用例）
     if bins:

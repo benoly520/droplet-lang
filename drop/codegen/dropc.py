@@ -9,6 +9,9 @@
   let 名 = 表达式
   print(str(整数表达式))    print(字符串字面量)    print(str(if(c, "甲", "乙")))
   整数、+ - * / %、比较、&& || !、一元 -、if(c, a, b)、函数调用
+  类型只做一件事：**拒绝把布尔当整数打**（定义里 str(false) 是 "false"，不是 0），
+  也拒绝拿整数当条件（定义要 true/false）。说不准的地方（形参、未定的返回类型）放过 ——
+  宁可漏，也不拿猜出来的类型去改语义。
 不在子集里的东西（表、字符串运算、嵌套块、闭包、宿主）会当场拒绝，并说出是第几行 ——
 编译器不许猜；猜出来的东西，第二个平台就会给出另一个答案。
 
@@ -149,7 +152,7 @@ class P:
                     self.take()
                     args.append(self.expr())
             self.take(")")
-            e = ("call", e[1], args)
+            e = ("call", e[1], args, e[2] if e[0] == "name" else 0)
         return e
 
     def atom(self):
@@ -162,7 +165,7 @@ class P:
             return ("str", unesc(v))
         if v in ("true", "false"):
             self.take()
-            return ("int", 1 if v == "true" else 0)
+            return ("bool", 1 if v == "true" else 0)
         if v == "if":
             self.take()
             self.take("(")
@@ -172,7 +175,7 @@ class P:
             self.take(",")
             b = self.expr()
             self.take(")")
-            return ("if", c, a, b)
+            return ("if", c, a, b, ln)
         if v == "(":
             self.take()
             e = self.expr()
@@ -209,6 +212,8 @@ class Gen:
         self.fn = None          # 当前函数名
         self.nparams = 0
         self.slots = {}         # 名字 -> 帧内偏移
+        self.types = {}         # 名字 -> int / bool / str / any（静态，只用来拒绝「拿布尔当整数打」）
+        self.fnret = {}         # 函数名 -> 返回类型（any = 说不准）
         self.nslots = 0
 
     def label(self, p):
@@ -240,6 +245,7 @@ class Gen:
     def function(self, name, params, body):
         self.fn, self.nparams = name, len(params)
         self.slots = {p: 16 + 8 * (len(params) - 1 - i) for i, p in enumerate(params)}
+        self.types = {p: "any" for p in params}
         self.nslots = 0
         saved, self.text = self.text, []
         term = self.stmts(body, tail=True)
@@ -255,7 +261,7 @@ class Gen:
             self.emit("subq $%d, %%rsp" % (8 * self.nslots))
         self.text.append(".Lbody_%s:" % name)
         self.text.extend(inner)
-        self.slots, self.nslots, self.fn = {}, 0, None
+        self.slots, self.types, self.nslots, self.fn = {}, {}, 0, None
 
     def stmts(self, body, tail):
         """生成一串语句；最后一句在 tail 位。返回「这条路已经 jmp 走了」= True。"""
@@ -265,6 +271,7 @@ class Gen:
                 term = self.expr(st[2])
                 self.nslots += 1
                 self.slots[st[1]] = -8 * self.nslots
+                self.types[st[1]] = self.type_of(st[2])
                 self.emit("movq %%rax, %d(%%rbp)" % self.slots[st[1]])
             elif st[1][0] == "call" and st[1][1] == "print":
                 if len(st[1][2]) != 1:
@@ -280,6 +287,9 @@ class Gen:
     # ---- 表达式：值一律放在 %rax
     def expr(self, e, tail=False):
         k = e[0]
+        if k == "bool":
+            self.emit("movq $%d, %%rax" % e[1])
+            return False
         if k == "int":
             self.emit("%s $%d, %%rax" % ("movabsq" if abs(e[1]) > 2 ** 31 - 1 else "movq", e[1]))
             return False
@@ -349,7 +359,10 @@ class Gen:
         return False
 
     def ife(self, e, tail):
-        _, c, a, b = e
+        _, c, a, b, ln = e
+        ct = self.type_of(c)
+        if ct in ("int", "str"):
+            die(ln, "子集之外：if 的条件是 %s —— 定义要 true/false（比值和 && || ! 给的是布尔）" % ct)
         l_else, l_end = self.label("if"), self.label("if")
         self.expr(c)
         self.emit("testq %rax, %rax")
@@ -384,12 +397,44 @@ class Gen:
             self.emit("addq $%d, %%rsp" % (8 * len(args)))
         return False
 
+    def type_of(self, e):
+        """子集里的静态类型：只用来拒绝「拿布尔当整数打 / 拿整数当条件」。
+        any = 说不准（形参、还没算出来的函数），说不准就放过 —— 但绝不用猜出来的类型去改语义。"""
+        if e is None:
+            return "any"
+        k = e[0]
+        if k in ("int", "bool", "str"):
+            return k
+        if k == "name":
+            return self.types.get(e[1], "any")
+        if k == "neg":
+            return "int"
+        if k == "not":
+            return "bool"
+        if k == "bin":
+            return "bool" if e[1] in ("==", "!=", "<", "<=", ">", ">=", "&&", "||") else "int"
+        if k == "if":
+            a, b = self.type_of(e[2]), self.type_of(e[3])
+            if a == b:
+                return a
+            return b if a == "any" else (a if b == "any" else "any")
+        if k == "call":
+            if e[1] == "str":
+                return "str"
+            if e[1] == "print":
+                return "none"
+            return self.fnret.get(e[1], "any")
+        return "any"
+
     def print_(self, arg):
         if arg[0] == "str":
             self.write_lit(arg[1])
             return
         if arg[0] == "call" and arg[1] == "str" and len(arg[2]) == 1:
             inner = arg[2][0]
+            it = self.type_of(inner)
+            if it == "bool":
+                die(arg[3] if len(arg) > 3 else 0, "子集之外：str(布尔) 在定义里是 \"true\"/\"false\"，子集还没实现布尔转文本 —— 拒绝，不许印成 1/0")
             if inner[0] == "if" and inner[2][0] == "str" and inner[3][0] == "str":
                 l_else, l_end = self.label("pf"), self.label("pf")
                 self.expr(inner[1])
@@ -446,6 +491,18 @@ RUNTIME = r"""
 
 def build(fns, main):
     g = Gen()
+    # 先算一遍每个函数返回什么类型：两遍足够让互相调用的一圈也定下来（定不下来就留 any）
+    for name, _, _ in fns:
+        g.fnret[name] = "any"
+    for _ in range(2):
+        for name, params, body in fns:
+            g.types = {p: "any" for p in params}
+            for st in body:
+                if st[0] == "let":
+                    g.types[st[1]] = g.type_of(st[2])
+            tail = body[-1][1] if body and body[-1][0] == "expr" else None
+            g.fnret[name] = g.type_of(tail)
+    g.types = {}
     for name, params, body in fns:
         g.function(name, params, body)
     g.function("main", [], main)

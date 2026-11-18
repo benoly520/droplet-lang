@@ -1,0 +1,2 @@
+// 布尔不能当整数打：定义里 str(false) 是 "false"，不是 "0"。
+print(str(1 < 2))
