@@ -82,9 +82,12 @@ does not read `req/`.
 2026-11-18 moved the from-zero route forward (docs/BUILD.md): stage ⑤ is closed — `drop/api.json`
 is the machine-readable table (14 codes / 8 builtins with arity / 7 host commands / 22 reserved
 names / exit 0-1-2), reconciled both ways against the definition and the implementation and then
-exercised with real programs; stage ⑦ has its first artifact — `drop/codegen/dropc.py`, a subset
-compiler that emits a bare x86-64 ELF with no libc, no dynamic linking and only `write`/`exit`
-(4,952 B, 332 KB, 2.15 ms for 250k tail calls; the reference host needs 14.2 MB and 995 ms).
+exercised with real programs; stage ⑦ has its first artifact — `drop/codegen/dropc.c`, a subset
+compiler written in C (741 lines) that lays out the bytes and writes the ELF header itself, so the
+product is a bare x86-64 ELF with no libc, no dynamic linking and only `write`/`exit` — no `as`, no
+`ld`, no python anywhere in the path (545 B, 332 KB, 2.30 ms for 250k tail calls; the reference host
+needs 14.2 MB and 1.03 s). The earlier Python prototype that shelled out to `as`+`ld` was deleted the
+same day: a host-free product cannot sit on a python build-time host.
 It is another road, not a replacement: the run line in the definition did not change by a byte.
 
 Since 2026-11-12 the stated goal is the process itself — learning how a language gets built from
@@ -133,8 +136,9 @@ curl -s http://127.0.0.1:8087/                    # pong —— 服务器在那 
 sh drop/conform.sh                             # 同一份定义，两份宿主对账（没有 dotnet 就明说这段没跑）
 python3 tools/footprint.py --name py-host --reps 5 --python-floor -- python3 drop/hosts/python/interpreter.py drop/examples/fact.dr
                                                  # 量尺：峰值 RSS / 启动耗时 / 磁盘。不给预算只报数（docs/BUILD.md §3）
-python3 drop/codegen/dropc.py drop/examples/fact.dr -o fact && ./fact   # the other road: a bare ELF (write/exit only), same 1 / 3628800 / 大
-python3 tools/codegen_check.py                                          # compiler check: byte-identical output + bare ELF + the ruler (4,952 B / 332 KB / 2.15 ms here)
+cc -O2 -o dropc drop/codegen/dropc.c && ./dropc drop/examples/fact.dr -o fact && ./fact
+                                                                        # the other road: build the compiler, then a bare ELF (write/exit only), same 1 / 3628800 / 大
+python3 tools/codegen_check.py                                          # compiler check: byte-identical output + bare ELF + the ruler (545 B / 332 KB / 2.30 ms here)
 ```
 
 ## What is actually checked
@@ -189,7 +193,7 @@ drop/                the v0.42 minimal language (clean room): one definition + t
                      hosts/csharp/probe/          samples the second host's own author picked (both hosts run them when reconciled)
                      api.json + api_check.py      the machine-readable API table (14 codes / 8 builtins with arity / 7 host commands / 22 reserved names / exit 0-1-2),
                                                   reconciled both ways against the definition and the implementation, then exercised with real programs (Z17, Z18)
-                     codegen/dropc.py             the first compiler (PoC subset): emits a bare x86-64 ELF, `_start` only, write/exit only, no libc
+                     codegen/dropc.c              the first compiler (PoC subset, 741 lines of C): lays out the bytes and writes the ELF header itself — bare x86-64, `_start` only, write/exit only, no libc
                      codegen/cases/               the corpus it is judged on (its output must equal the reference host, byte for byte)
                      check.sh + conform.sh        5 gate segments + 18 sabotage probes; the two-host reconciliation, 4 segments (green, in CI)
 docs/                SPEC, VALIDATION (numbers), EXPERIMENT (three trials), LANG2 (the registration format and its three-arm measurement), DROP (the minimal language and the cold reads), BUILD (the from-zero route: 10 stages with runnable gates, what a compilation target costs in definition tokens, the footprint ruler, three AI-legibility acceptances), NEXT (handoff)

@@ -4,6 +4,9 @@
 
   python3 tools/codegen_check.py [--reps N]
 
+编译器本身是 C（drop/codegen/dropc.c），这里只用 cc 把它编成可执行文件，
+再拿它编 .dr —— 全程不经过 python、as、ld。python 只充当对账的人。
+
 查四件事：
   1  写出的产物是裸 ELF：没有 INTERP 段、ldd 说「not a dynamic executable」
   2  输出与参考实现逐字相同（这是唯一可信的判据 —— 编译器自己说的不算）
@@ -21,7 +24,7 @@ import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DROPC = os.path.join(ROOT, "drop", "codegen", "dropc.py")
+DROPC_SRC = os.path.join(ROOT, "drop", "codegen", "dropc.c")
 INTERP = os.path.join(ROOT, "drop", "hosts", "python", "interpreter.py")
 CASES = [
     os.path.join(ROOT, "drop", "codegen", "cases", "tail.dr"),
@@ -75,13 +78,21 @@ def measure(cmd, reps, shim):
 
 def main():
     tmp = tempfile.mkdtemp()
-    print("编译器：%s" % os.path.relpath(DROPC, ROOT))
+    dropc = os.path.join(tmp, "dropc")
+    cc = run(["cc", "-O2", "-Wall", "-Wextra", "-o", dropc, DROPC_SRC])
+    if cc.returncode != 0:
+        red("编译器编不出来：%s" % cc.stderr.strip()[:300])
+        print("codegen: 红")
+        return 1
+    print("编译器：%s（cc -O2 → %s；%d 行）"
+          % (os.path.relpath(DROPC_SRC, ROOT), os.path.basename(dropc),
+             sum(1 for _ in open(DROPC_SRC, encoding="utf-8"))))
 
     # ---- 1+2 每个用例：编、跑、比对
     bins = []
     for src in CASES:
         out = os.path.join(tmp, os.path.basename(src) + ".bin")
-        r = run([PY, DROPC, src, "-o", out])
+        r = run([dropc, src, "-o", out])
         if r.returncode != 0:
             red("%s 编译失败 rc=%d %s" % (src, r.returncode, r.stderr.strip()[:120]))
             continue
@@ -104,7 +115,7 @@ def main():
 
     # ---- 3 子集之外：拒绝，而且说第几行、说对是哪一类
     for path, line, why in REFUSES:
-        r = run([PY, DROPC, path, "-o", os.path.join(tmp, "no.bin")])
+        r = run([dropc, path, "-o", os.path.join(tmp, "no.bin")])
         if r.returncode != 2 or line not in r.stderr or "子集之外" not in r.stderr:
             red("%s 没有被正确拒绝：rc=%d err=%r" % (os.path.basename(path), r.returncode, r.stderr.strip()[:140]))
         elif why not in r.stderr:

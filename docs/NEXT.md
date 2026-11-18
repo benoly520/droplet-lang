@@ -88,10 +88,14 @@
   由 `drop/api_check.py` 双向对账：跟定义逐字比、跟实现逐字比，**再拿真程序打**（少一个实参必须是 E2），
   接进 `check.sh` 第 [3/5] 段。破坏测试 16 → **18**（Z17 表里少一条码、Z18 把 `len` 的 arity 说成 2），
   两条都是先断言补丁落到表上、再断言红在它声称的那一条上。门 **15.5 秒**（14.47 → 15.52，涨的是表本身与它起的那 26 个真程序（8 内置 × 正例与少参各一 + 7 个宿主命令 + 3 个退出码））。
-  ⑦ 的产物是 `drop/codegen/dropc.py`：把子集编成**裸 ELF**（`_start` 入口、只 `write`/`exit`、无 libc、`readelf` 里 0 个 INTERP 段），
-  `as + ld` 只做「汇编文本 → 字节」。判据 `python3 tools/codegen_check.py`：4 份语料（含 `examples/fact.dr` 原样）
-  与参考实现逐字同输出，子集外样本必须拒绝在第 2 行（退出码 2）。实测 25 万次尾递归：**4,952 B / 332 KB / 2.15 ms**，
-  同程序参考实现 **14,216 KB / 995 ms**。量 RSS 换了尺：`tools/rssshim.c`（fork + execvp + wait4，地板 1,324 KB）——
+  ⑦ 的产物是 `drop/codegen/dropc.c`（741 行 C）：把子集编成**裸 ELF**（`_start` 入口、只 `write`/`exit`、无 libc、`readelf` 里 0 个 INTERP 段）。
+  **换实现这件事本身是一次账**：上一版是 Python 原型（吐汇编、借 `as` + `ld`），2026-11-18 删掉 ——
+  「产物没有宿主」而「编译器要 python」是自相矛盾；现在 `cc -O2 -o dropc drop/codegen/dropc.c` 得到编译器本体，
+  它自己排字节、自己写 ELF 头，不经过 `as`、`ld`、python。判据 `python3 tools/codegen_check.py` 里 python 只当对账的人：
+  4 份语料（含 `examples/fact.dr` 原样）与参考实现逐字同输出，子集外样本必须拒绝在第 2 行（退出码 2）。
+  重测（同一把秤）：25 万次尾递归 **545 B / 332 KB / 2.30 ms**，同程序参考实现 **14,248 KB / 1,035 ms**；
+  `fact.dr` **643 B / 332 KB / 0.46 ms** 对 **14,184 KB / 25.9 ms**。尺寸 4,952 → 545 B 记成**产物不同**，不是调优；
+  时间 2.15 → 2.30 ms 在噪声内，不算改善。量 RSS 的尺是 `tools/rssshim.c`（fork + execvp + wait4，地板 1,324 KB）——
   `footprint.py` 那个「fork 出来的孩子继承父进程 RSS」的偏差还挂着，BUILD.md §3 已记，没拿它当成绩。
   **这一轮没动的**：`spec.txt` 一个字节没改（仍 1,497 / 1,500），两份宿主一行没动，`conform.sh` 本机没有 dotnet 仍是**明说没跑**。
 

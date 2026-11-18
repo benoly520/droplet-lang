@@ -71,11 +71,15 @@ AI 读完文档和源码就会用、编译成什么必须想清、运行时 CPU/
 而现页余量只有 3 —— 这是**要用户裁决的事**，不是文档可以偷偷买的。
 
 2026-11-18 这一轮按那页开工：**阶段⑤ 关掉了**（`drop/api.json` 机器可读表 + `drop/api_check.py` 双向对账，
-接进门的第 [3/5] 段，破坏测试 16 → 18），**阶段⑦ 有了第一个产物** —— `drop/codegen/dropc.py`（PoC 子集编译器）
-把 `fn` / `let` / 整数算术 / `if` / 尾递归 / `print(str(...))` 编成**裸 ELF**：没有 libc、没有动态链接，
-`readelf` 里 0 个 INTERP 段，运行时只发生 `write` 与 `exit`。判据不是它自己说好，而是
-`python3 tools/codegen_check.py`：4 份语料（含 `examples/fact.dr` 原样）与参考实现**逐字同输出**，
-子集外输入必须拒绝在第 2 行。25 万次尾递归实测 **4,952 B / 332 KB / 2.15 ms**，参考实现 **14.2 MB / 995 ms**。
+接进门的第 [3/5] 段，破坏测试 16 → 18），**阶段⑦ 有了第一个产物** —— `drop/codegen/dropc.c`（PoC 子集编译器，741 行 C）
+把 `fn` / `let` / 整数算术 / `if` / 尾递归 / `print(str(...))` 编成**裸 ELF**：它自己排字节、自己写 ELF 头，
+没有 libc、没有动态链接，`readelf` 里 0 个 INTERP 段，运行时只发生 `write` 与 `exit`。
+**编译器这一层也不借宿主**：`cc -O2 -o dropc drop/codegen/dropc.c` 得到编译器本体，之后不经过 `as`、不经过 `ld`、
+也不经过 python。上一版是 Python 原型（吐汇编、借 `as` + `ld`），同日删掉 —— 「产物没有宿主」而「编译器要 python」自相矛盾；
+换实现让产物也变了（`tail.dr` **4,952 B → 545 B**），这是**产物不同**，不记成优化。判据不是它自己说好，而是
+`python3 tools/codegen_check.py`（python 只当对账的人）：4 份语料（含 `examples/fact.dr` 原样）与参考实现**逐字同输出**，
+子集外输入必须拒绝在第 2 行。重测：25 万次尾递归 **545 B / 332 KB / 2.30 ms**，参考实现 **14,248 KB / 1,035 ms**；
+`fact.dr` 643 B / 332 KB / **0.46 ms** 对 14,184 KB / 25.9 ms。
 定义里那句跑法**一个字节没改** —— 编译器是另一条路，不是把解释器换掉。
 
 ## 五分钟上手
@@ -87,8 +91,9 @@ sh code/sup/check.sh                           # 一条命令一个退出码（�
 sh drop/check.sh                               # 极简语言 drop：例子 + 对账 + 预算与分界 + 真 socket 打库写的服务器 + 十八条破坏
 sh drop/conform.sh                          # 两份宿主对账：语料逐字节 / 报错样本 / 服务器实录（没装 dotnet 就明说这段没跑）
 python3 drop/hosts/python/interpreter.py drop/examples/fact.dr       # 跑一个程序：1 / 3628800 / 大（不编译）
-python3 drop/codegen/dropc.py drop/examples/fact.dr -o fact && ./fact  # 另一条路：编成裸 ELF（只 write/exit），同样的 1 / 3628800 / 大
-python3 tools/codegen_check.py                                          # 编译器对账：逐字同输出 + 裸 ELF + 量尺（本机实测 4,952 B / 332 KB / 2.15 ms）
+cc -O2 -o dropc drop/codegen/dropc.c && ./dropc drop/examples/fact.dr -o fact && ./fact
+                                                                        # 另一条路：先编出编译器本体，再编成裸 ELF（只 write/exit），同样的 1 / 3628800 / 大
+python3 tools/codegen_check.py                                          # 编译器对账：逐字同输出 + 裸 ELF + 量尺（本机实测 545 B / 332 KB / 2.30 ms）
 python3 drop/hosts/python/interpreter.py --port 8087 drop/lib/http.dr drop/examples/http.dr   # 起那个库写的服务器
 sh code/sup/report.sh .build/check/blobd --accept 18881   # 人类验收页：条款 -> 断言/样例 -> 红绿
 python3 tools/footprint.py --name py-host --reps 5 --python-floor -- python3 drop/hosts/python/interpreter.py drop/examples/fact.dr
@@ -161,7 +166,7 @@ drop/                v0.42 的极简语言（干净房间）：一页定义 + �
                      check.sh + conform.sh        五段门 + 十八条破坏；两份宿主对账四段（全绿，CI 有档）
                      api.json + api_check.py      机器可读的 API 表（14 码 / 8 内置带 arity / 7 宿主命令 / 22 保留名 / 退出码 0·1·2）：
                                                   跟定义逐字比、跟实现逐字比，再拿真程序打（少一个实参必须是 E2；Z17/Z18 证明它会红）
-                     codegen/dropc.py             第一个编译器（PoC 子集）：吐裸 x86-64 ELF，入口 _start，运行时只有 write / exit
+                     codegen/dropc.c              第一个编译器（PoC 子集，741 行 C）：自己排字节、自己写 ELF 头 —— 裸 x86-64，入口 _start，运行时只有 write / exit
                      codegen/cases/               它被判的语料（输出必须与参考实现逐字相同）
 docs/                SPEC、VALIDATION（实测数字）、EXPERIMENT（三个实验）、LANG2（登记格式与三臂实测）、DROP（极简语言与三轮冷读）、BUILD（从 0 建一门语言的路线：十阶段判据、编译目标值多少 token、footprint 量尺、AI 可读性的三道验收）、NEXT（交接）
 tools/               footprint.py —— 量尺：峰值 RSS / 启动耗时 / 磁盘。不给预算只报数
