@@ -13,7 +13,7 @@ a.out
 !drop/examples/*.out
 !drop/tests/*.out
 
-# Python 检查器的字节码（ab-score.py 用 importlib 载入 dpt-check.py 时生成）
+# Python 检查器的字节码
 __pycache__/
 
 # 第二宿主的构建产物（源码进仓库，产物不进）

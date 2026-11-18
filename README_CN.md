@@ -1,186 +1,66 @@
-# Droplet
+# droplet-lang
 
-**给 AI 写的服务用的可验收 C 工程：源码是合法 C11，声明是几张表，实现一旦偏离声明，检查就会红。**
+**语言就是 `drop/`。它的全部定义是 `drop/spec.txt` —— 135 行、1,497 token。**
+仓库里别的东西，要么是这一页的门，要么是量它产物的尺。
 
-这里的“超集”只有一条含义：合法的 C 不会被这一层拒绝。自造语言已删除，也**不再对 C 做任何语言扩展**
-（见 docs/SPEC.md §2.1）—— 不加语法、不加编译器分支、不做注解检查器。但有一件事要说清，不藏：
-v0.38 加了 `lang/`，一套**独立的**登记格式，用来登记“承诺 ↔ 判据”的关系（见 docs/LANG2.md）。
-v0.39 更正：`lang/*.dpt` 是**格式不是语言**（离开 `req/` 五表它什么都判不了），另起 `drop/` 才是那门
-极简语言 —— 定义只有 `drop/spec.txt`，不引用仓库任何其它文件（见 docs/DROP.md）。
-v0.40 把「同一件事的第二种写法」全删了（循环只剩尾递归一条，没有 `map`/`filter`/`fold`/`range`/`sort`，
-没有隐式转换）。v0.41 改的是那台 HTTP 服务器**放在哪儿**：它当时长在语言里（`serve`、`reply`、`request`
-三个内置名 + 定义里 11 条协议规则），用户的说法是「HTTP 不应该是这门语言的本身，而是使用这门语言实现的
-一个 mini Web 服务器 —— 就好比 C# 和 Web API」。现在协议在 `drop/lib/http.dr` 里，**170 行全部是用这门
-语言写的**，外面只有一个内置口子 `host(命令, 参数)`、七个命令；定义里协议词汇 0 处（门第 3 段查、Z12 钉），
-v0.40 抬到 1,750 的那 250 token 预算原样退回。
-v0.42 试的是另一件事：**同一页定义能不能长出第二个宿主**。另一个人只读 `drop/spec.txt`（没看过 `hosts/python/interpreter.py`、
-没看过库、没看过门）从零写了一份 1,692 行的 C# 宿主 `drop/hosts/csharp/interpreter.cs`，然后两份实现对账
-（`sh drop/conform.sh`）。这台秤第一次跑出来红 8 条（报错样本 5 处 + 实录里 3 行行号），八条都判在
-第二个宿主那侧 —— 现在**八条全部真修完，四段全绿**：11 份语料、73 个报错样本、88 行实录逐字对上，
-而「定义没说了算」那张借条登记册从始至终 0 条：**没有拿登记换过一次绿**。
-它当场值回票价：**参考实现在「重名绑定会不会追改已写好的函数」这条上做错了，而定义的原话一直贴在实现里
-（探针绿了三轮）** —— 这种错只有"另一个实现"能抓出来。同时定义侧收紧三处：跑法不许写死宿主名（Z15）、
-**一句不许跨行**（跨行表 + Z16）、协议词分界同时扫两份宿主（第二宿主撞了两次，都在注释里 ——
-改的是注释，不是规则）。但绿秤有一种红秤没有的骗法：秤绿了之后又认出 **5 处"两边猜的一样、
-可定义没说"**（`
-` 算不算行尾、顶层同行两句、跨行错报落在哪一行、`host` 少给参数先查个数还是先查表、
-注释占不占行号），其中把两句写进定义要 10 个 token，能腾的只有 3 个 —— **预算现在挡的是"写清楚"这件事**，
-三条路（抬预算 / 删一句真的换 / 就这么记着）该由用户挑，见 docs/DROP.md §10.6 与 docs/NEXT.md P0c。
-现在读数是 1,497 / 1,500。
-它不碰 C、不进题面冻结、不替换 `req/`，状态是实验性，并且写了自杀条款。
+项目目标是过程本身：学一门语言怎么从 0 被造出来。四条需求 —— API 极简、AI 读完文档和源码就会用、
+编译成什么必须想清、运行时 CPU·GPU·内存越小越好。
 
-“AI”在这里指作者，不是设计对象：语法和工具链里没有任何一处是专为 AI 设计的。专为 AI 的是**工作流** ——
-声明能被机器对账、检查会失败、人不必读实现就能验收。这个工作流是否真的让 AI 写出更可靠的 C：
-现有**一项小规模测量** —— 决定层 3 次独立生成，首次提交全部通过（pass@1 = 3/3）；
-外加一次维护实验（405 -> 501，5 文件 / 18 个 +/- 行，全套检查绿）。
-完整服务与真实人类维护者仍未测量，见 [docs/EXPERIMENT.md](docs/EXPERIMENT.md)。
+## 东西都在哪
 
-它围绕这个分工设计：
+```
+drop/spec.txt                  定义 —— 只有这一页是规范
+drop/hosts/python/             第一宿主，参考实现（1,192 行）
+drop/hosts/csharp/             第二宿主，另一个人只读那一页从零写的（1,692 行）
+drop/lib/http.dr               用 drop 自己写的 170 行 HTTP 服务器（语言本身不认识 HTTP）
+drop/examples/  drop/tests/    程序与语料（期望输出是逐字节的）
+drop/check.sh                  门：五段 + 十八条破坏，一个退出码
+drop/conform.sh                两份宿主对账：语料、报错样本、真 socket 实录
+drop/api.json  drop/api_check.py   机器可读的 API 表（14 码 / 8 内置带 arity / 7 宿主命令 /
+                               22 保留名 / 退出码 0·1·2），三向对账
+drop/codegen/dropc.c           编译器（741 行 C）：吐裸 x86-64 ELF，没有 libc
+docs/DROP.md                   这门语言的历史与它挨过的判据
+docs/BUILD.md                  从 0 建一门语言的路线：十阶段，每段都有能跑的判据
+docs/NEXT.md                   交接：现在在哪、下一步做什么
+tools/                         footprint.py（尺）、rssshim.c（诚实的 RSS 尺）、codegen_check.py
+```
 
-| 角色 | 做什么 | 不做什么 |
-| --- | --- | --- |
-| AI | 写实现与声明、自己跑检查 | 不解释过程，不自证正确 |
-| 编译器 / 构建脚本 / 检查器 | 该错的时候让构建或验收失败 | 不判断业务对不对 |
-| 人 | 验收结果：能跑吗、断言全绿吗、改坏会红吗 | 不逐行读实现 |
-
-所以交付物不是语法，而是**一条从声明走到运行二进制的、会失败的检查链**。红不了，就等于没检查。
-
-## 现状
-
-仓库里只剩一种介质。原来那门自造语言（自己的词法、语法、类型检查、代码生成，4727 行 `.dlt` 前端）
-**已删除** —— 拿同一个服务用纯 C 写一遍做对照，它唯一在乎的那条没有赢（“声明的目标”到“跑着的实现”
-之间没有一条会失败的检查），而且它自己声明的 invariant 被自己的旗舰服务违反了。留下的形态保留了真正
-起作用的那部分，并且明确不再往**改 C** 的方向走。`code/` 下现在只有 C11 与 shell / Python；
-`lang/` 下是与 C 无关、只登记承诺与判据的实验性格式（v0.38，四段门 + 三道破坏守着，见 docs/LANG2.md）。
-`drop/` 下是一门从零重做的极简语言（v0.42）：`sh drop/check.sh` 一条命令，五段门 + 十八条破坏，
-定义 `spec.txt` 135 行 / 1,497 token = 预算 1,500 的 99.8%（上一轮抬的那 250 token 在 v0.41 退回，本轮
-又收紧三处而不许涨）；同一件事只许一种写法（迭代只剩尾递归，没有替你循环的名字，没有隐式转换），并且往外只有
-一个口子（`host`，七个命令）。HTTP 不在语言里：`drop/lib/http.dr` 170 行是这门语言写的库，
-`drop/examples/http.dr` 27 行是程序，门里第五段拿真 socket 打这两份文件（88 行对话台账逐字节钉住，
-其中线上字节与 v0.40 一字不差）。**没有编译这一步**：跑法只有一条，`宿主的解释器 [--port 端口] 库.dr 程序.dr`
-（参考宿主是 `python3 drop/hosts/python/interpreter.py`），命令行上文件的顺序就是唯一的"导入"机制。这一轮多了一行：**第二个宿主**
-`drop/hosts/csharp/interpreter.cs`（1,692 行 C#，只读定义从零写的），对账命令 `sh drop/conform.sh`（CI 里 `hosts` 档真跑）。它不碰 C、不进题面冻结、
-也不读 `req/`。
-
-2026-11-12 起，目标说清楚了：**要学的是「一门语言从 0 建起来」这件事本身**，四条需求是 API 极简、
-AI 读完文档和源码就会用、编译成什么必须想清、运行时 CPU/GPU/内存越小越好。这条路线写在
-[docs/BUILD.md](docs/BUILD.md)：十个阶段，每段一条**能跑的判据**加一处**最容易自欺的地方**，
-外加 `tools/footprint.py` 这把量尺（峰值 RSS / 启动耗时 / 磁盘）。
-**今天有尺、没有预算**：不给 `--budget-mb` / `--budget-ms` 它就只报数不判，因为没量过的数字不配当判据。
-那一页还用仓库自己的公式量了「把字节码写进定义」要多少钱：声明部分 ≈33 token，含 24 行指令表 ≈201，
-而现页余量只有 3 —— 这是**要用户裁决的事**，不是文档可以偷偷买的。
-
-2026-11-18 这一轮按那页开工：**阶段⑤ 关掉了**（`drop/api.json` 机器可读表 + `drop/api_check.py` 双向对账，
-接进门的第 [3/5] 段，破坏测试 16 → 18），**阶段⑦ 有了第一个产物** —— `drop/codegen/dropc.c`（PoC 子集编译器，741 行 C）
-把 `fn` / `let` / 整数算术 / `if` / 尾递归 / `print(str(...))` 编成**裸 ELF**：它自己排字节、自己写 ELF 头，
-没有 libc、没有动态链接，`readelf` 里 0 个 INTERP 段，运行时只发生 `write` 与 `exit`。
-**编译器这一层也不借宿主**：`cc -O2 -o dropc drop/codegen/dropc.c` 得到编译器本体，之后不经过 `as`、不经过 `ld`、
-也不经过 python。上一版是 Python 原型（吐汇编、借 `as` + `ld`），同日删掉 —— 「产物没有宿主」而「编译器要 python」自相矛盾；
-换实现让产物也变了（`tail.dr` **4,952 B → 545 B**），这是**产物不同**，不记成优化。判据不是它自己说好，而是
-`python3 tools/codegen_check.py`（python 只当对账的人）：4 份语料（含 `examples/fact.dr` 原样）与参考实现**逐字同输出**，
-子集外输入必须拒绝在第 2 行。重测：25 万次尾递归 **545 B / 332 KB / 2.30 ms**，参考实现 **14,248 KB / 1,035 ms**；
-`fact.dr` 643 B / 332 KB / **0.46 ms** 对 14,184 KB / 25.9 ms。
-定义里那句跑法**一个字节没改** —— 编译器是另一条路，不是把解释器换掉。
+`drop/` 不读外面的任何文件。这不是文里的一句承诺：第一段门就是那条 grep，破坏 Z11 证明它真的会红。
 
 ## 五分钟上手
 
-需要 `cc`（C11）、`sh`、`python3`、`git`、`flock`、`curl`。不需要 Go，也不需要代码生成器。
-
 ```sh
-sh code/sup/check.sh                           # 一条命令一个退出码（构建/样例/契约/登记/冻结/预算/登记格式）
-sh drop/check.sh                               # 极简语言 drop：例子 + 对账 + 预算与分界 + 真 socket 打库写的服务器 + 十八条破坏
-sh drop/conform.sh                          # 两份宿主对账：语料逐字节 / 报错样本 / 服务器实录（没装 dotnet 就明说这段没跑）
-python3 drop/hosts/python/interpreter.py drop/examples/fact.dr       # 跑一个程序：1 / 3628800 / 大（不编译）
-cc -O2 -o dropc drop/codegen/dropc.c && ./dropc drop/examples/fact.dr -o fact && ./fact
-                                                                        # 另一条路：先编出编译器本体，再编成裸 ELF（只 write/exit），同样的 1 / 3628800 / 大
-python3 tools/codegen_check.py                                          # 编译器对账：逐字同输出 + 裸 ELF + 量尺（本机实测 545 B / 332 KB / 2.30 ms）
-python3 drop/hosts/python/interpreter.py --port 8087 drop/lib/http.dr drop/examples/http.dr   # 起那个库写的服务器
-sh code/sup/report.sh .build/check/blobd --accept 18881   # 人类验收页：条款 -> 断言/样例 -> 红绿
-python3 tools/footprint.py --name py-host --reps 5 --python-floor -- python3 drop/hosts/python/interpreter.py drop/examples/fact.dr
-                                                 # 量尺：峰值 RSS / 启动耗时 / 磁盘。不给预算只报数（docs/BUILD.md §3）
+sh drop/check.sh                                                  # 一条命令，一个退出码
+python3 drop/hosts/python/interpreter.py drop/examples/fact.dr    # 1 / 3628800 / 大 —— 没有编译这一步
+sh drop/conform.sh                                                # 两份宿主一份定义（要 dotnet）
+
+cc -O2 -o dropc drop/codegen/dropc.c                              # 另一条路：先编出编译器本体，
+./dropc drop/examples/fact.dr -o fact && ./fact                   # 再编成裸 ELF，同样的输出
+python3 tools/codegen_check.py                                    # 编译器对账 + 量尺
 ```
 
-作者回路是三段：`brief.sh` 出题面包（声明 + 契约 + 命令，不含实现）、`check.sh` 给第一个失败项、
-`submit-sup.sh 候选.c` 在临时树里跑整条面并接受/拒绝（含题面冻结）。维护者用 `check.sh --full`
-追加验收、变异、破坏与变异覆盖分。
+需要 `cc`、`sh`、`python3`、`git`、`curl`。不需要 Go，也不需要 `as`、`ld`、任何字节码 VM。
 
-或者直接打它：
+## 真正被查的是什么
 
-```sh
-mkdir -p /tmp/blobd-data && APP_ROOT=/tmp/blobd-data APP_TOKEN=secret \
-  APP_BIND=127.0.0.1 APP_PORT=8787 .build/sup/blobd &
-curl -s -X POST -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/keys/demo -i
-curl -s -X PUT  -H 'Authorization: Bearer secret' --data-binary 'hello' http://127.0.0.1:8787/v1/blob/demo -i
-curl -s          -H 'Authorization: Bearer secret' http://127.0.0.1:8787/v1/blob/demo
-```
+判据不是编译器自己说好。`tools/codegen_check.py` 编 4 份程序（含 `examples/fact.dr` 原样），
+要求机器码的输出与参考实现**逐字节相同**；3 份子集外程序必须各自拒绝在第 2 行、退出码 2、理由对得上。
+`readelf -lW` 里必须没有 INTERP 段，`ldd` 必须说 not a dynamic executable。
 
-## 到底检查了什么
+用 `tools/rssshim.c` 量（fork + execvp + wait4，它自己的地板是 1,324 KB）：
 
-| 检查 | 什么时候红 |
-| --- | --- |
-| 表 ↔ 实现双向对账 | 表里列了不存在的实现（`used but never defined`），或实现没被表引用（`-Wunused-function` + `-Werror`） |
-| 符号审计（`audit-sup.sh`） | **用户** TU 引用了 `getenv` / `environ` / `socket` / `open` … 却没声明 |
-| 接线检查（`build.sh`，`nm -u`） | 服务不再引用被 `DP_EXAMPLES` 覆盖的决定 —— 那说明样例验的是复制品 |
-| 样例 oracle（`oracle-sup.sh`） | `DP_EXAMPLES` 任一行挂；零条可执行样例算失败；崩溃单列，绝不记成通过 |
-| 机械变异（`mutate-dec.sh`） | 13 个变异体里有一个存活且不是人工判定的等价变异（实测 10 抓 / 2 等价 / 1 编译期响） |
-| wire 断言（`accept-table.sh`） | 30 条对外承诺任何一条破了（状态码、头、body、快照、提交、鉴权、清单外壳、Content-Type、启动期拒绝） |
-| 契约对账（`contract-sup.py`） | `--contract` 四节缺失，或目标引用了不存在的断言编号，或目标留成未证（写 `""` 是显式承认） |
-| 必读面预算（`surface-budget.sh`） | 必读的表、类型与参考实现超过 9,000 token / 32 KB（实测约 8,197 token，估算） |
-| 候选比较（`compare-sup.sh`） | 0 份或 >1 份候选通过样例（无解 / 歧义） |
-| 首次成功率量尺（`firstpass.sh`） | 给定候选序列时算 first-pass 与 pass@k；**没有模型，就没有数字** |
-| 维护成本（`maint-cost.sh`） | 脚本化改动的文件数或 +/- 行数超过预算 |
-| 翻译层（`req/SRC.md` + `req/REQ.tsv` + `req/TRANS.tsv` + `req/AMBIG.tsv` + `req/GAP.tsv` + `req/BASELINE`） | 条款没有译法记录、反例栏空着、反例认领的 `S<n>`/`E<n>` 不存在或实测没弄红本条款的断言、歧义“未定”、缺口“未闭”；或“新增”条款在基线（旧实现 + 当前题面）上就是绿的（把现状抄成了需求）—— 基线核对 v0.37 起自动跑 |
-| 需求登记（`req-check.py`） | 条款没有断言/样例撑着；或源句/断言/样例/目标没人认领；或条款与目标声明的证明不一致 |
-| 登记格式（`lang-check.sh`，实验性） | 定义与检查器对不上（写了不会发生的错误码、或有条码从没被样本打中）；或 `lang/blobd.dpt` 与 `req/` 不再逐栏等价；或完整定义超过 1,500 token |
-| 题面冻结（`freeze.sh`） | 验收表、声明头、**5 份译稿**或契约与 `req/FROZEN` 不一致（题被改过） |
-| 变异覆盖分（`mutation-score.py`） | 改第 N 条断言的期望它不红；或实现变异红了没声明的断言；或覆盖低于 floor |
-| `drop` 语言（`drop/check.sh`，独立于本工程） | 目录里出现指到本工程别处的引用（独立性现在是门，不是文档里的一句 grep）；例子（含被改写成"只有一种写法"的 4 份读者程序）输出对不上 `.out`；定义的 14 条错误码与实现的 14 条不一致、有条码没有能触发它的样本、实现某条行为在定义里找不到原话、或实现的宿主命令表不是定义教的那七个；定义超过 1,500 token；协议词汇（HTTP、Content-Length、状态行、GET…）出现在定义或实现里 —— 那就是 HTTP 又长回语言了；定义里 `> ` 那 24 行真代码抽出来跑不通；库里伸出第八个宿主命令；真 socket 打 `lib/http.dr` + `examples/http.dr` 的 88 行对话台账对不上；命令行吐出 Python 堆栈 |
-| 破坏测试（`sabotage-sup.sh`） | 23 条注入的缺陷里有一条**没有**被具名工具以具名诊断抓住（含 6 条改题/改译稿/改基线的、3 条改登记语言定义的） |
+| | 磁盘 | 常驻 | 启动→退出 |
+|---|---|---|---|
+| `fact.dr` 编译产物 | 643 B | 332–336 KB | 0.46 ms |
+| `fact.dr` 参考实现 | — | 14,184 KB | 25.9 ms |
+| 25 万次尾递归 编译产物 | 545 B | 332–336 KB | 2.30 ms |
+| 25 万次尾递归 参考实现 | — | 14,248 KB | 1,035 ms |
 
-最后一行最重要：它检查的是检查器本身。“被抓住”如果其实是注入代码写坏了导致的编译失败，那是假绿 ——
-这套东西存在，就是因为这件事真的发生过一次。
+编译器自己排字节、自己写 ELF 头：入口 `_start`，之后只有 `write`(1) 和 `exit`(60)，没有别的。
+这两个系统调用号从 Linux 3.x 到 7.0 没变过，所以产物只依赖那张冻住的表 —— 不依赖 glibc，也不依赖宿主语言。
 
-## 目录
+## 历史
 
-```
-code/sup/            受检层：四张声明表、旗舰服务、全部检查
-  blobd.c            DP_ROUTES + DP_GOALS —— 229 行，用户所有
-  dp_env.h           DP_ENVS —— 18 行，用户所有
-  dp_decide.h/.c     五个纯决定 + 19 条 DP_EXAMPLES —— 114 行，用户所有，服务链接的就是这份
-  check.sh report.sh brief.sh submit-sup.sh   三条回路：作者、人类验收、提交口
-  req-check.py freeze.sh mutation-score.py   登记链+翻译层 / 题面冻结 / 断言灵敏度
-  dp_sup.h dp_cfg.c dp_conf.h dp_oracle.c   机制，344 行
-code/runtime/        服务运行时，1468 行 C（rt_core / rt_http / rt_blob / rt_ver，含 rt.h）
-code/sup/lab/        实验题面包：两条本仓库里不存在的决定
-code/webapi/deploy/  30 条断言表、soak、systemd 单元、环境变量样例
-req/                 源句 SRC.md、19 条条款、译稿 TRANS/AMBIG/GAP、基线 BASELINE、冻结清单 FROZEN、README（五道门）
-lang/                实验性登记格式：droplet.dpt（定义，1,321 token）、blobd.dpt（由 req/ 机械转写，等价性有门）
-drop/                v0.42 的极简语言（干净房间）：一页定义 + 两份同级解释器
-                     命名判据：目录说角色，文件名说身份，构建产物说产品，全部小写
-                     spec.txt                     唯一定义（1,497/1,500 token，协议词汇 0 处、宿主名 0 处）
-                     lib/http.dr                  用这门语言写的 HTTP 库（170 行）
-                     examples/ + tests/           程序与语料（含那份 27 行的 http.dr）
-                     hosts/python/interpreter.py  第一宿主·参考实现（1,192 行：尾递归跳转 + 七个命令的口子）
-                     hosts/csharp/interpreter.cs  第二宿主（1,692 行，只读定义从零写的；产物叫 droplet.dll）
-                     hosts/csharp/probe/          第二宿主的作者自己写的样本（对账时两份宿主都跑它们）
-                     check.sh + conform.sh        五段门 + 十八条破坏；两份宿主对账四段（全绿，CI 有档）
-                     api.json + api_check.py      机器可读的 API 表（14 码 / 8 内置带 arity / 7 宿主命令 / 22 保留名 / 退出码 0·1·2）：
-                                                  跟定义逐字比、跟实现逐字比，再拿真程序打（少一个实参必须是 E2；Z17/Z18 证明它会红）
-                     codegen/dropc.c              第一个编译器（PoC 子集，741 行 C）：自己排字节、自己写 ELF 头 —— 裸 x86-64，入口 _start，运行时只有 write / exit
-                     codegen/cases/               它被判的语料（输出必须与参考实现逐字相同）
-docs/                SPEC、VALIDATION（实测数字）、EXPERIMENT（三个实验）、LANG2（登记格式与三臂实测）、DROP（极简语言与三轮冷读）、BUILD（从 0 建一门语言的路线：十阶段判据、编译目标值多少 token、footprint 量尺、AI 可读性的三道验收）、NEXT（交接）
-tools/               footprint.py —— 量尺：峰值 RSS / 启动耗时 / 磁盘。不给预算只报数
-                     rssshim.c —— 诚实的 RSS 尺（1.3 MB 的壳里 fork+execvp+wait4；在 Python 里 wait4 量小目标会量成父进程的数）
-                     codegen_check.py —— 拿 dropc 编语料、跑、要求逐字同输出 + 裸 ELF，再上量尺
-```
-
-## 已知边界
-
-这是检查面，不是沙箱。绕开 `build.sh` 就绕开审计（E7）；`dlopen` + `dlsym` 在运行时解析，
-`nm -u` 看不见（E8）；oracle 只够得到**纯决定**（条件请求、鉴权、body 上限现在都在里面），
-所以运行时里的读旧版本、读 header、算 ETag、快照轮转只有 wire 断言兜着。首次成功率有量尺
-（`firstpass.sh`），但仓库里没有模型在环，**没有测出来的数字**。
-这些都写在 [docs/SPEC.md](docs/SPEC.md) §5 与 [docs/VALIDATION.md](docs/VALIDATION.md) §4 里 ——
-连同“这些绿色数字**不能**证明什么”。
-
-英文版见 [README.md](README.md)。
+更早还有一条不相干的线（一套 C 服务 + 一门需求登记格式），**2026-11-18 整条删除**：
+它不是这门语言，两份东西摆在一起，让人分不清哪个目录才是源码。它还留在 `git log` 里（删除那次提交之前）。
+`docs/DROP.md` 与 `docs/BUILD.md` 保留了带日期的记录，提到它时会说明已经删掉。

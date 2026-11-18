@@ -1,32 +1,11 @@
 name: CI
 
-# 一档：这个仓库现在只有一个介质 —— 合法 C11 加声明表，纯 cc，不依赖任何自定义前端。
-# 这条流水线跑的就是"结果能不能被验收"：
-#   compat   合法 C 在无本层/有本层两种口径下都要编得过且输出一致（超集的字面判据）
-#   build    编用户 TU → 符号审计 → 接线检查 → 链接（任何一步红就停）
-#   oracle   DP_EXAMPLES 的封闭样例，一条一个进程
-#   mutate   对纯决定做机械变异，逐条断言预期结局与归因
-#   accept   30 条 wire 断言（服务对外的承诺）
-#   contract DP_GOALS 与断言编号对账（目标是否都被证明、断言是否都有归属）
-#   req      需求条款 ↔ 目标 ↔ 断言/样例 的登记链（孤儿断言/样例/目标 = 红）
-#   freeze   题面（验收表/声明头/契约）与 req/FROZEN 一致，改题必须显式 --update
-#   score    变异覆盖分：30 条断言每条都至少被一条实现变异弄红（floor = 断言总数）
-#   surface  必读面的字节/token 预算（面有没有悄悄膨胀）
-#   lang     登记语言四段：定义↔检查器码表、码的活性样本、与 req/ 逐栏等价、定义预算
-#   compare  候选比较：样例能不能把唯一正确的一份挑出来（含自检）
-#   firstpass 首次成功率量尺（含自检；没有模型数据，数字不在这里产生）
-#   maint    三种典型改动的文件/行数预算
-#   loop     作者回路：check.sh 一条命令一个退出码；brief 题面包不含实现；submit 能收也能拒
-#   report   人类验收页：目标 -> 断言 -> 红绿，一屏
-#   sabotage 23 条破坏测试，每条必须由具体工具以具体诊断抓住
-#
-# 另一个 job：
-#   hosts  同一页定义长出的两份解释器（hosts/python 与 hosts/csharp）对账 —— 语料逐字节、
-#          报错样本的（行，码）、真客户端打出来的 88 行实录。它跟 C 那档没有依赖关系，所以单开
-#          一个 job：C 的构建一分钟都不该等 dotnet。没有 dotnet 的机器上 drop/conform.sh 自己
-#          明说"这段没跑"（红都不算）。
-#
-# soak.sh 不在这里：它要一台长时间常开的机器。
+# 这个仓库只有一条线：语言 = drop/，定义 = drop/spec.txt。
+# 两个 job：
+#   drop    一页定义自己的门（五段 + 十八条破坏）+ 编译器对账（产物必须与参考实现逐字同输出）
+#   hosts   同一页定义长出的两份解释器对账 —— 语料逐字节、报错样本的（行，码）、真 socket 的 88 行实录。
+#           它跟 drop 档没有依赖，所以单开一个 job：drop 的绿色一分钟都不该等 dotnet。
+#           没有 dotnet 的机器上 conform.sh 自己明说"这段没跑"（红都不算）。
 
 on:
   push:
@@ -38,69 +17,23 @@ permissions:
   contents: read
 
 jobs:
-  sup:
-    name: 超集（纯 cc）
+  drop:
+    name: 一页定义 + 裸 ELF 编译器
     runs-on: ubuntu-latest
     steps:
-      # fetch-depth: 0 —— 基线门要 `git archive <req/BASELINE 里的 commit>` 导旧实现。
-      # 默认浅 clone 只有 1 层，导不出来就会把这一层判成红（不是假绿，是假红），所以这里取全历史。
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: 兼容性实测（合法 C 两种口径）
-        run: sh code/sup/compat-sup.sh ci-compat
-      - name: 构建 = 编用户 TU + 符号审计 + 接线检查
-        run: sh code/sup/build.sh ci-sup
-      - name: 样例 oracle（DP_EXAMPLES，一条一个进程）
-        run: sh code/sup/oracle-sup.sh ci-oracle
-      - name: 决定层变异测试
-        run: sh code/sup/mutate-dec.sh ci-mutate
-      - name: 30 条断言验收表
-        run: sh code/sup/accept-sup.sh "$GITHUB_WORKSPACE/.build/ci-sup/blobd" 18951 ci
-      - name: 契约对账（目标 ↔ 断言编号）
-        run: python3 code/sup/contract-sup.py "$GITHUB_WORKSPACE/.build/ci-sup/blobd"
-      - name: 需求登记（条款 ↔ 目标 ↔ 断言/样例）
-        run: python3 code/sup/req-check.py "$GITHUB_WORKSPACE/.build/ci-sup/blobd"
-      - name: 题面冻结（验收表/声明头/契约没被改过）
-        run: sh code/sup/freeze.sh --check "$GITHUB_WORKSPACE/.build/ci-sup/blobd"
-      - name: 变异覆盖分（每条断言都能被弄红）
-        run: python3 code/sup/mutation-score.py --binary "$GITHUB_WORKSPACE/.build/ci-sup/blobd" --l-port 18340 --s-port 18440
-      - name: 必读面预算
-        run: sh code/sup/surface-budget.sh
-      - name: 登记语言（定义↔检查器对账 + 与 req/ 等价 + 定义预算）
-        run: sh code/sup/lang-check.sh "$GITHUB_WORKSPACE/.build/ci-sup/blobd"
-      - name: 候选比较自检（唯一/无解/歧义）
-        run: sh code/sup/compare-sup.sh --self-test
-      - name: 首次成功率量尺自检
-        run: sh code/sup/firstpass.sh --self-test
-      - name: 维护成本（改动局部性）
-        run: sh code/sup/maint-cost.sh
-      - name: 作者回路（一条命令一个退出码）
-        run: sh code/sup/check.sh
-      - name: 题面包（不含实现文件，且在预算内）
-        run: sh code/sup/brief.sh "$GITHUB_WORKSPACE/.build/briefpack"
-      - name: 实验题面包（可从零交给任意模型）
-        run: sh code/sup/lab/make-packet.sh "$GITHUB_WORKSPACE/.build/labpacket"
-      - name: 提交口（参考实现必须被接受）
-        run: sh code/sup/submit-sup.sh code/sup/dp_decide.c 18953
-      - name: 人类验收页（目标 -> 断言 -> 红绿）
-        run: sh code/sup/report.sh "$GITHUB_WORKSPACE/.build/ci-sup/blobd" --accept 18952
-      - name: 破坏测试（每条断言归因到具体工具）
-        run: sh code/sup/sabotage-sup.sh 18960
-      - name: drop 语言（独立：干净房间 + 例子 + 定义<->实现对账 + 预算与分界 + 真 socket 打库写的 HTTP 服务器 + 十六条破坏）
+      - name: 门（例子 / 定义↔实现对账 / 预算与分界 / 真 socket / 十八条破坏）
         run: sh drop/check.sh
+      - name: 编译器对账（逐字同输出 + 无 INTERP 段 + 量尺）
+        run: python3 tools/codegen_check.py
 
-  # 第二个宿主：这一档不测 C，测的是「同一页定义能不能长出两份实现」。
-  # 它跑的不是"能不能编过"，而是两份宿主对同一句话是否说得分毫不差 ——
-  # 所以它必须和 sup 档分开：没有 dotnet 的机器上 conform.sh 会明说"这段没跑"，
-  # 而这里装了 dotnet，它就真跑，红就是漂。
   hosts:
-    name: 两份宿主一份定义（宿主层对账）
+    name: 两份宿主一份定义
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: 两份宿主对账（语料逐字节 / 报错样本 / 服务器实录 / 耗时只报数）
+      - name: 对账（语料逐字节 / 报错样本 / 服务器实录 / 耗时只报数）
         run: sh drop/conform.sh
