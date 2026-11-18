@@ -1,0 +1,50 @@
+{
+  "lang": "drop",
+  "version": "v0.41",
+  "note": "定义在 spec.txt；这张表是同一件事的机器可读形。api_check.py 双向对账：表与定义、表与行为，任一边漂了就红。表里不许出现定义里没有的东西。",
+  "exit": {
+    "0": "跑完（没有问题）",
+    "1": "程序红了：stderr 一行「挂：第 N 行 Ex —— …」，后面的语句不再执行",
+    "2": "命令行用错：没有参数、--port 缺失或越界、--port 给了两次"
+  },
+  "errors": {
+    "E1": "没绑过的名字",
+    "E2": "参数个数不符",
+    "E3": "语法错",
+    "E4": "不是函数不能调用",
+    "E5": "值种类不对",
+    "E6": "下标越界",
+    "E7": "条件不是 true/false",
+    "E8": "除数为 0",
+    "E9": "该是整数的地方不是",
+    "E10": "该是字符串的地方不是",
+    "E11": "话说到一半",
+    "E12": "形参重名",
+    "E13": "调用叠到第 201 层",
+    "E14": "宿主不肯做"
+  },
+  "builtins": {
+    "print": {"arity": 1, "args": ["str"], "ret": "none", "oracle": "print(\"\")"},
+    "str":   {"arity": 1, "args": ["any"], "ret": "str",  "oracle": "print(str(1))"},
+    "num":   {"arity": 1, "args": ["str"], "ret": "int",  "oracle": "print(str(num(\"1\")))"},
+    "bytes": {"arity": 1, "args": ["str"], "ret": "str",  "oracle": "print(str(len(bytes(\"a\"))))"},
+    "len":   {"arity": 1, "args": ["str", "list"], "ret": "int", "oracle": "print(str(len(\"a\")))"},
+    "split": {"arity": 2, "args": ["str", "str"], "ret": "list", "oracle": "print(str(split(\"a\", \",\")))"},
+    "join":  {"arity": 2, "args": ["str", "list"], "ret": "str", "oracle": "print(join(\",\", []))"},
+    "host":  {"arity": 2, "args": ["str", "str"], "ret": "str", "oracle": "print(host(\"date\", \"\"))"}
+  },
+  "host_commands": {
+    "bind":   {"arity": 1, "arg": "str", "ret": "str", "ok": "bind(\"\") 在宿主给了 --port 时成立", "bad": "E14"},
+    "accept": {"arity": 1, "arg": "str", "ret": "str"},
+    "recv":   {"arity": 1, "arg": "str", "ret": "str"},
+    "send":   {"arity": 1, "arg": "str", "ret": "str"},
+    "peer":   {"arity": 1, "arg": "str", "ret": "str"},
+    "close":  {"arity": 1, "arg": "str", "ret": "str"},
+    "date":   {"arity": 1, "arg": "str", "ret": "str"}
+  },
+  "reserved": {
+    "keywords": ["let", "fn", "if"],
+    "builtins": ["print", "str", "num", "bytes", "len", "split", "join", "host"],
+    "no_things": ["while", "for", "break", "continue", "return", "else", "range", "map", "filter", "fold", "sort"]
+  }
+}

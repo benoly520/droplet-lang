@@ -2,6 +2,7 @@
 # drop 的门。这个目录不引用外面任何东西 —— 语言的全部就是这几样，按层各住一处，
 # 命名只认一条判据：目录说角色，文件名说身份，构建产物说产品（判据本身见 DROP.md §10.8）。
 #   spec.txt 定义（唯一） / lib/ 用这门语言写的库 / examples/ + tests/ 程序与语料 /
+#   api.json 定义里那张“程序读得懂”的表 + api_check.py 它的对账（表跟定义、跟实现、跟真程序三边比）
 #   hosts/ 宿主层，一间一份解释器：hosts/python/interpreter.py（第一宿主，参考实现）
 #                                       hosts/csharp/interpreter.cs（第二宿主，干净房间写的）
 #   check.sh 这道门 + 同级 conform.sh（两份宿主对账那道门，它不属于任何一间）
@@ -13,6 +14,7 @@
 #   [3/5] 预算     spec.txt 是全部定义：超预算 = 定义在膨胀，不是能力在增长
 #                 顺带两条分界：定义和语言实现里都不许出现协议词汇 —— HTTP 是库的事；
 #                 定义里也不许出现任何具体宿主的名字 —— 跑法那两句必须对第二个宿主同样成立
+#                 再加一条：api.json（机器可读的表）必须与定义、与实现、与真程序三方对上（Z17/Z18）
 #   [4/5] 定义即可执行  从 spec.txt 重新抽出 > 行，必须与 examples/spec.dr 逐字相同，且跑出 *.out
 #   [5/5] 服务器  起真进程 + 裸 socket 打 lib/http.dr + examples/http.dr，对话必须逐字等于
 #                 tests/http.expected；顺带查库只碰那七个宿主命令（它不许偷别的外面）
@@ -40,7 +42,7 @@ trap 'rm -rf "$T"' EXIT
 # 第三段用不着，跟着拷每条破坏多拷 1 MB，门的时间白花。这两层必须原样建出来：
 # 解释器按 __file__ 往上两级找定义，压平或漏一层，破坏测试的红就会是因为"找不到定义"，
 # 而不是因为那条破坏 —— 归因错了的绿比红更贵。
-tree() { mkdir -p "$1/hosts/csharp" "$1/hosts/python"; cp -R examples tests lib spec.txt check.sh "$1/"; cp hosts/python/interpreter.py "$1/hosts/python/"; cp hosts/csharp/interpreter.cs "$1/hosts/csharp/"; }
+tree() { mkdir -p "$1/hosts/csharp" "$1/hosts/python"; cp -R examples tests lib spec.txt check.sh api.json api_check.py "$1/"; cp hosts/python/interpreter.py "$1/hosts/python/"; cp hosts/csharp/interpreter.cs "$1/hosts/csharp/"; }
 
 
 # sh drop/check.sh --update  改完 spec.txt 后重抽 examples/spec.{dr,out}
@@ -194,6 +196,9 @@ if in_cs:
 print("  绿：定义 %d / %d token 之内；协议词汇 0 处（定义里 %d、两份宿主里 %d/%d），全在库里那 %d 处；"
       "宿主名 0 处" % (tok, lim_t, len(in_spec), len(in_py), len(in_cs), n_lib))
 PY
+# 定义是散文，给它配一张机器可读的表：api.json。表不是文档 —— 它跟定义比、跟实现比、
+# 还拿真程序打（少给一个实参必须是 E2）。表漂了，门就红，这样编译器和文档吃的是同一份东西。
+$PY api_check.py
 
 echo "[4/5] 定义即可执行（> 行 = 抽得出、跑得起、对得上）"
 $PY - <<'PY'
@@ -624,4 +629,46 @@ fi
 rm -rf "$T16"
 echo "  抓住 Z16：删掉一处「不许跨行」-> 第一段当场红，且红在跨行表的那一行上"
 
-echo "drop: 绿（五段 + 十六条破坏）"
+# Z17 从 api.json 里抹掉一条错误码 -> 表与定义的对账必须红（表是给人读的借口，不是给程序读的）
+cp api.json api_check.py "$T/"
+$PY - "$T/api.json" <<'ZPY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p, encoding="utf-8"))
+d["errors"].pop("E8")
+json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+ZPY
+if [ $? -ne 0 ]; then echo "  红：这条破坏的补丁没打上（原因就在上面那行），破坏测试没跑成"; exit 1; fi
+if $PY "$T/api_check.py" >"$T/z17.log" 2>&1; then
+  echo "  假绿 Z17：表里少了一条码，对账却没红"; exit 1
+fi
+if grep -q "Traceback" "$T/z17.log"; then
+  echo "  假绿 Z17：红了，但吐的是 Python 堆栈"; exit 1
+fi
+if ! grep -q "错误码与定义对不上" "$T/z17.log"; then
+  echo "  假绿 Z17：门红了，但没说红在错误码上（红的是别的东西，这条没测到）"; exit 1
+fi
+cp api.json "$T/api.json"
+echo "  抓住 Z17：表里少一条码 -> 对账红，且报的是错误码"
+
+# Z18 把表里 len 的 arity 从 1 改成 2 -> 拿真程序打的那一步必须红
+#     （只跟定义比字面是不够的：定义那行写的是 len(x)，改 arity 改不出字面差异；
+#       所以这条查的是「表说的 arity 与真行为一致」，不是「表说得好看」）
+$PY - "$T/api.json" <<'ZPY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p, encoding="utf-8"))
+d["builtins"]["len"]["arity"] = 2
+json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+ZPY
+if [ $? -ne 0 ]; then echo "  红：这条破坏的补丁没打上（原因就在上面那行），破坏测试没跑成"; exit 1; fi
+if $PY "$T/api_check.py" >"$T/z18.log" 2>&1; then
+  echo "  假绿 Z18：表把 len 说成吃两个实参，却没红"; exit 1
+fi
+if ! grep -q "len 的 arity=2" "$T/z18.log"; then
+  echo "  假绿 Z18：门红了，但没说红在 len 的 arity 上（红的是别的东西，这条没测到）"; exit 1
+fi
+cp api.json "$T/api.json"
+echo "  抓住 Z18：表把 len 的 arity 说错 -> 拿真程序打的那一步红，且报的是 len"
+
+echo "drop: 绿（五段 + 十八条破坏）"

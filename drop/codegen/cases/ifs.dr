@@ -1,0 +1,10 @@
+// if 是表达式；只算选中的那一支；函数调用非尾（会涨栈）。
+fn sign(n) { if(n < 0, -1, if(n > 0, 1, 0)) }
+print(str(sign(-5)))
+print(str(sign(0)))
+print(str(sign(9)))
+print(str(if(sign(3) > 0, "正", "非正")))
+print(str(if(true && false, 1, 0)))
+print(str(if(true || false, 1, 0)))
+fn twice(x) { x * 2 }
+print(str(twice(sign(2)) + twice(twice(1))))

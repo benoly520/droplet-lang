@@ -1,0 +1,10 @@
+// 优先级、向零取整、负数、取余的符号跟着被除数。
+print(str(1 + 2 * 3))
+print(str((1 + 2) * 3))
+print(str(7 / 2))
+print(str(-7 / 2))
+print(str(-7 % 2))
+print(str(7 % 2))
+print(str(1 - -1))
+print(str((2 + 3) * (4 - 1) % 5))
+print(str(100000 * 100000))

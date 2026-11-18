@@ -83,6 +83,18 @@
   价格也从两个样本补成三个（6 / 4 / 新量 8），五处按均价 **≈30**、上界 **≈40**，跟字节码那 ≈201 合起来算。
   `drop/` 整条线在新路线里的位置是**参照 + 量尺**（阶段①–④的证据、A2 验收那把秤），不再往定义里加东西。
 
+- **2026-11-18：⑤ 关掉，⑦ 有了第一个产物**（按 BUILD.md 开工的第一轮）。
+  ⑤ 的表落在 `drop/api.json`（14 码 / 8 内置带 arity / 7 宿主命令 / 22 保留名 / 退出码 0·1·2），
+  由 `drop/api_check.py` 双向对账：跟定义逐字比、跟实现逐字比，**再拿真程序打**（少一个实参必须是 E2），
+  接进 `check.sh` 第 [3/5] 段。破坏测试 16 → **18**（Z17 表里少一条码、Z18 把 `len` 的 arity 说成 2），
+  两条都是先断言补丁落到表上、再断言红在它声称的那一条上。门 **15.5 秒**（14.47 → 15.52，涨的是表本身与它起的那 26 个真程序（8 内置 × 正例与少参各一 + 7 个宿主命令 + 3 个退出码））。
+  ⑦ 的产物是 `drop/codegen/dropc.py`：把子集编成**裸 ELF**（`_start` 入口、只 `write`/`exit`、无 libc、`readelf` 里 0 个 INTERP 段），
+  `as + ld` 只做「汇编文本 → 字节」。判据 `python3 tools/codegen_check.py`：4 份语料（含 `examples/fact.dr` 原样）
+  与参考实现逐字同输出，子集外样本必须拒绝在第 2 行（退出码 2）。实测 25 万次尾递归：**4,952 B / 332 KB / 2.15 ms**，
+  同程序参考实现 **14,216 KB / 995 ms**。量 RSS 换了尺：`tools/rssshim.c`（fork + execvp + wait4，地板 1,324 KB）——
+  `footprint.py` 那个「fork 出来的孩子继承父进程 RSS」的偏差还挂着，BUILD.md §3 已记，没拿它当成绩。
+  **这一轮没动的**：`spec.txt` 一个字节没改（仍 1,497 / 1,500），两份宿主一行没动，`conform.sh` 本机没有 dotnet 仍是**明说没跑**。
+
 - 同一轮另起一个**干净房间**重做了极简语言 `drop/`（不引用仓库任何其它文件，`grep` 可验，且这条是门）。
   **v0.41 把它分层了**，当时读的是：`spec.txt` 135 行 / 9,816 B / **1,498 token ≤ 预算 1,500（99.9%）**
   —— 上一轮抬到 1,750 的那 250 token **本轮原样退回**，这是本轮唯一一处收紧，账在 DROP.md §4 / VALIDATION §10。
@@ -114,7 +126,7 @@ sh code/sup/report.sh .build/check/blobd --accept 18881   # 人类：条款 -> �
 sh code/sup/submit-sup.sh 你的.c               # 整条面接受或拒绝（含题面冻结）
 python3 code/sup/req-check.py .build/check/blobd          # 登记链：孤儿 = 红
 python3 code/sup/mutation-score.py --binary .build/check/blobd  # 每条断言都会红吗
-sh drop/check.sh                                  # 那门极简语言自己：五段 + 十六条破坏（约 14.3 秒）；两份宿主对不对账是 `sh drop/conform.sh`（没 dotnet 会明说没跑）
+sh drop/check.sh                                  # 那门极简语言自己：五段 + 十八条破坏（约 15.5 秒）；两份宿主对不对账是 `sh drop/conform.sh`（没 dotnet 会明说没跑）
 python3 drop/hosts/python/interpreter.py drop/examples/fact.dr         # 跑一个程序（1 / 3628800 / 大），没有编译这一步
 python3 drop/hosts/python/interpreter.py --port 8087 drop/lib/http.dr drop/examples/http.dr   # 起那个库写的服务器
 ```
